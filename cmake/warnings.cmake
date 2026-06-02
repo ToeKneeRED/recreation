@@ -1,0 +1,15 @@
+function(recreation_set_warnings target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wshadow -Wno-unused-parameter)
+  endif()
+endfunction()
+
+function(recreation_add_module name)
+  add_library(recreation_${name} STATIC ${ARGN})
+  add_library(recreation::${name} ALIAS recreation_${name})
+  target_include_directories(recreation_${name} PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  recreation_set_warnings(recreation_${name})
+endfunction()
