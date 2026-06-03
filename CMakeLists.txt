@@ -21,6 +21,7 @@ endif()
 
 set(RECREATION_MODULES
   core
+  ecs
 )
 
 foreach(module ${RECREATION_MODULES})
