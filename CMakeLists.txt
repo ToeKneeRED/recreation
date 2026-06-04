@@ -22,6 +22,7 @@ endif()
 set(RECREATION_MODULES
   core
   ecs
+  asset
 )
 
 foreach(module ${RECREATION_MODULES})
