@@ -4,6 +4,8 @@ recreation_add_module(bethesda
   src/load_order.cc
   src/bsa.cc
   src/ba2.cc
+  src/nif.cc
+  src/converters.cc
   src/strings.cc
 )
 
