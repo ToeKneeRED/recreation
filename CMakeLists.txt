@@ -33,3 +33,5 @@ set(RECREATION_MODULES
 foreach(module ${RECREATION_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
+
+add_subdirectory(runtime)
