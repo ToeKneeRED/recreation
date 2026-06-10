@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(RECREATION_BUILD_TOOLS "Build offline tools" ON)
 option(RECREATION_ENABLE_VALIDATION "Enable vulkan validation layers in debug" ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -35,3 +36,7 @@ foreach(module ${RECREATION_MODULES})
 endforeach()
 
 add_subdirectory(runtime)
+
+if(RECREATION_BUILD_TOOLS)
+  add_subdirectory(tools/esminfo)
+endif()
