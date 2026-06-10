@@ -3,11 +3,13 @@
 
 #include <volk.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 
 #include "core/types.h"
 #include "core/window.h"
+#include "render/rhi/resources.h"
 
 namespace rec::render {
 
@@ -49,11 +51,27 @@ class Device {
   VkSurfaceKHR surface() const { return surface_; }
   VkQueue graphics_queue() const { return graphics_queue_; }
   u32 graphics_family() const { return graphics_family_; }
+  VmaAllocator allocator() const { return allocator_; }
 
   void WaitIdle();
 
+  // Records into a transient command buffer and blocks until execution
+  // finished. For uploads and one-off transitions, not the frame path.
+  void ImmediateSubmit(const std::function<void(VkCommandBuffer)>& record);
+
+  GpuBuffer CreateBuffer(u64 size, VkBufferUsageFlags usage, bool host_visible = false);
+  GpuBuffer CreateBufferWithData(ByteSpan data, VkBufferUsageFlags usage);
+  void DestroyBuffer(GpuBuffer& buffer);
+
+  GpuImage CreateImage2D(VkFormat format, VkExtent2D extent, VkImageUsageFlags usage,
+                         VkImageAspectFlags aspect);
+  void DestroyImage(GpuImage& image);
+
  private:
   Device() = default;
+
+  bool InitResources();
+  void ShutdownResources();
 
   DeviceCaps caps_;
   VkInstance instance_ = VK_NULL_HANDLE;
@@ -63,6 +81,9 @@ class Device {
   VkDevice device_ = VK_NULL_HANDLE;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
   u32 graphics_family_ = 0;
+  VmaAllocator allocator_ = nullptr;
+  VkCommandPool immediate_pool_ = VK_NULL_HANDLE;
+  VkFence immediate_fence_ = VK_NULL_HANDLE;
 };
 
 }  // namespace rec::render

@@ -262,6 +262,12 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   volkLoadDevice(device->device_);
   vkGetDeviceQueue(device->device_, device->graphics_family_, 0, &device->graphics_queue_);
 
+  if (!device->InitResources()) {
+    vkDestroyDevice(device->device_, nullptr);
+    device->device_ = VK_NULL_HANDLE;
+    return device;
+  }
+
   REC_INFO("gpu: {} (vk {}.{}, rt={} rayquery={} mesh={} vrs={})", device->caps_.adapter_name,
            VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
            device->caps_.raytracing, device->caps_.ray_query, device->caps_.mesh_shaders,
@@ -270,6 +276,7 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
 }
 
 Device::~Device() {
+  if (device_ != VK_NULL_HANDLE) ShutdownResources();
   if (device_ != VK_NULL_HANDLE) vkDestroyDevice(device_, nullptr);
   if (surface_ != VK_NULL_HANDLE) vkDestroySurfaceKHR(instance_, surface_, nullptr);
   if (debug_messenger_ != VK_NULL_HANDLE)

@@ -26,8 +26,13 @@ FetchContent_Declare(volk
   GIT_REPOSITORY https://github.com/zeux/volk.git
   GIT_TAG 1.4.304
   GIT_SHALLOW ON)
-FetchContent_MakeAvailable(VulkanHeaders volk)
+FetchContent_Declare(VulkanMemoryAllocator
+  GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+  GIT_TAG v3.1.0
+  GIT_SHALLOW ON)
+FetchContent_MakeAvailable(VulkanHeaders volk VulkanMemoryAllocator)
 target_link_libraries(volk PUBLIC Vulkan::Headers)
+
 
 find_package(SDL3 QUIET)
 if(NOT SDL3_FOUND AND RECREATION_FETCH_SDL3)
