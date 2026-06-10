@@ -26,6 +26,12 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   swapchain_ = Swapchain::Create(*device_, output_width_, output_height_);
   if (!swapchain_ || !CreateFrameResources()) return false;
 
+  depth_target_ = device_->CreateImage2D(kDepthFormat, swapchain_->extent(),
+                                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                         VK_IMAGE_ASPECT_DEPTH_BIT);
+  mesh_pipeline_ = MeshPipeline::Create(*device_, swapchain_->format(), kDepthFormat);
+  if (!mesh_pipeline_) return false;
+
   if (desc.upscaler != UpscalerKind::kNone) {
     // Quality preset, 1.5x per axis. Presets become configurable later.
     render_width_ = output_width_ * 2 / 3;
@@ -54,7 +60,25 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   return true;
 }
 
-void Renderer::RenderFrame(ecs::World& world, f32 interpolation_alpha) {
+bool Renderer::UploadMesh(const asset::Mesh& mesh) {
+  if (!device_ || device_->is_stub()) return false;
+  if (mesh.lods.empty() || mesh.lods[0].vertices.empty()) return false;
+
+  const asset::MeshLod& lod = mesh.lods[0];
+  GpuMesh gpu;
+  gpu.vertices = device_->CreateBufferWithData(
+      ByteSpan(reinterpret_cast<const u8*>(lod.vertices.data()),
+               lod.vertices.size() * sizeof(asset::Vertex)),
+      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+  gpu.indices = device_->CreateBufferWithData(
+      ByteSpan(reinterpret_cast<const u8*>(lod.indices.data()), lod.indices.size() * sizeof(u32)),
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+  gpu.index_count = static_cast<u32>(lod.indices.size());
+  meshes_[mesh.id.hash] = gpu;
+  return true;
+}
+
+void Renderer::RenderFrame(const FrameView& view) {
   if (!device_ || device_->is_stub() || !swapchain_) return;
 
   FrameResources& frame = frames_[frame_index_ % kFramesInFlight];
@@ -79,7 +103,7 @@ void Renderer::RenderFrame(ecs::World& world, f32 interpolation_alpha) {
   VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.cmd, &begin);
-  RecordFrame(frame.cmd, image_index);
+  RecordFrame(frame.cmd, image_index, view);
   vkEndCommandBuffer(frame.cmd);
 
   VkSemaphoreSubmitInfo wait{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
@@ -107,8 +131,10 @@ void Renderer::RenderFrame(ecs::World& world, f32 interpolation_alpha) {
   ++frame_index_;
 }
 
-void Renderer::RecordFrame(VkCommandBuffer cmd, u32 image_index) {
-  VkImageMemoryBarrier2 to_color{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+void Renderer::RecordFrame(VkCommandBuffer cmd, u32 image_index, const FrameView& view) {
+  VkImageMemoryBarrier2 barriers[2];
+  VkImageMemoryBarrier2& to_color = barriers[0];
+  to_color = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
   to_color.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
   to_color.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
   to_color.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
@@ -117,9 +143,20 @@ void Renderer::RecordFrame(VkCommandBuffer cmd, u32 image_index) {
   to_color.image = swapchain_->image(image_index);
   to_color.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
+  VkImageMemoryBarrier2& to_depth = barriers[1];
+  to_depth = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+  to_depth.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+  to_depth.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+  to_depth.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  to_depth.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  to_depth.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+  to_depth.image = depth_target_.image;
+  to_depth.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+
   VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &to_color;
+  dep.imageMemoryBarrierCount = 2;
+  dep.pImageMemoryBarriers = barriers;
   vkCmdPipelineBarrier2(cmd, &dep);
 
   VkRenderingAttachmentInfo color{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -129,15 +166,42 @@ void Renderer::RecordFrame(VkCommandBuffer cmd, u32 image_index) {
   color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   color.clearValue.color = {{0.02f, 0.02f, 0.05f, 1.0f}};
 
+  VkRenderingAttachmentInfo depth{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  depth.imageView = depth_target_.view;
+  depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+  depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  depth.clearValue.depthStencil = {0.0f, 0};  // reversed z clears to far = 0
+
   VkRenderingInfo rendering{.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
   rendering.renderArea = {{0, 0}, swapchain_->extent()};
   rendering.layerCount = 1;
   rendering.colorAttachmentCount = 1;
   rendering.pColorAttachments = &color;
+  rendering.pDepthAttachment = &depth;
 
   vkCmdBeginRendering(cmd, &rendering);
-  // TODO: graph passes record here once the rhi grows pipelines and the
-  // graph compiles to barriers instead of executing callbacks directly.
+
+  VkViewport viewport{0, 0, static_cast<f32>(swapchain_->extent().width),
+                      static_cast<f32>(swapchain_->extent().height), 0.0f, 1.0f};
+  VkRect2D scissor{{0, 0}, swapchain_->extent()};
+  vkCmdSetViewport(cmd, 0, 1, &viewport);
+  vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+  f32 aspect = static_cast<f32>(swapchain_->extent().width) /
+               static_cast<f32>(swapchain_->extent().height);
+  Mat4 proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f);
+  Mat4 view_matrix = LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
+  Mat4 view_proj = proj * view_matrix;
+
+  mesh_pipeline_->Bind(cmd);
+  for (const DrawItem& item : view.draws) {
+    auto it = meshes_.find(item.mesh);
+    if (it == meshes_.end()) continue;
+    mesh_pipeline_->Draw(cmd, it->second,
+                         {.mvp = view_proj * item.transform, .model = item.transform});
+  }
+
   vkCmdEndRendering(cmd);
 
   VkImageMemoryBarrier2 to_present = to_color;
@@ -196,6 +260,12 @@ void Renderer::RecreateSwapchain() {
   device_->WaitIdle();
   swapchain_.reset();
   swapchain_ = Swapchain::Create(*device_, width, height);
+  if (swapchain_) {
+    device_->DestroyImage(depth_target_);
+    depth_target_ = device_->CreateImage2D(kDepthFormat, swapchain_->extent(),
+                                           VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                           VK_IMAGE_ASPECT_DEPTH_BIT);
+  }
   output_width_ = width;
   output_height_ = height;
   taa_.Reset();
@@ -205,7 +275,14 @@ void Renderer::Shutdown() {
   if (device_ && !device_->is_stub()) {
     device_->WaitIdle();
     DestroyFrameResources();
+    for (auto& [key, mesh] : meshes_) {
+      device_->DestroyBuffer(mesh.vertices);
+      device_->DestroyBuffer(mesh.indices);
+    }
+    meshes_.clear();
+    device_->DestroyImage(depth_target_);
   }
+  mesh_pipeline_.reset();
   swapchain_.reset();
   upscaler_.reset();
   raytracing_.reset();

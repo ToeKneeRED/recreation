@@ -33,6 +33,26 @@ FetchContent_Declare(VulkanMemoryAllocator
 FetchContent_MakeAvailable(VulkanHeaders volk VulkanMemoryAllocator)
 target_link_libraries(volk PUBLIC Vulkan::Headers)
 
+# Shaders compile to spirv at build time and get embedded. Prefer a host
+# glslang (required when cross compiling, e.g. android), build one otherwise.
+find_program(RECREATION_GLSLANG NAMES glslang glslangValidator)
+if(NOT RECREATION_GLSLANG)
+  if(CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR "cross compiling needs a host glslang in PATH")
+  endif()
+  set(ENABLE_OPT OFF)
+  set(ENABLE_HLSL OFF)
+  set(ENABLE_SPVREMAPPER OFF)
+  set(GLSLANG_TESTS OFF)
+  set(GLSLANG_ENABLE_INSTALL OFF)
+  FetchContent_Declare(glslang
+    GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+    GIT_TAG 15.1.0
+    GIT_SHALLOW ON)
+  FetchContent_MakeAvailable(glslang)
+  message(STATUS "glslang not found, building it")
+endif()
+include(shaders)
 
 find_package(SDL3 QUIET)
 if(NOT SDL3_FOUND AND RECREATION_FETCH_SDL3)

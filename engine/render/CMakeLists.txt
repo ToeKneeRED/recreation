@@ -1,6 +1,7 @@
 recreation_add_module(render
   renderer.cc
   render_graph.cc
+  mesh_pipeline.cc
   taa.cc
   raytracing.cc
   upscaler.cc
@@ -16,3 +17,8 @@ target_link_libraries(recreation_render
 if(NOT MSVC)
   set_source_files_properties(vulkan/vma_impl.cc PROPERTIES COMPILE_OPTIONS -w)
 endif()
+
+recreation_embed_shaders(recreation_render
+  shaders/mesh.vert
+  shaders/mesh.frag
+)
