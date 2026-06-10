@@ -7,7 +7,7 @@ namespace rec::ecs {
 Archetype::Archetype(Signature signature) : signature_(std::move(signature)) {
   columns_.reserve(signature_.size());
   for (ComponentId id : signature_) {
-    columns_.push_back(Column{.id = id, .stride = GetComponentInfo(id).size});
+    columns_.push_back(Column{.id = id, .stride = GetComponentInfo(id).size, .data = {}});
   }
 }
 
