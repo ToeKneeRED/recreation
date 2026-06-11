@@ -15,6 +15,7 @@ void PrintUsage() {
   REC_INFO("  --server              host a server");
   REC_INFO("  --connect <address>   join a server");
   REC_INFO("  --port <port>         server port (default: 29700)");
+  REC_INFO("  --name <name>         player name sent to the server");
   REC_INFO("  --no-taa              disable temporal antialiasing");
   REC_INFO("  --upscaler <id>       fsr3 | dlss | xess");
   REC_INFO("  --no-rt               disable raytracing");
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
     else if (arg == "--server") config.host_server = true;
     else if (arg == "--connect") config.connect_address = next();
     else if (arg == "--port") config.port = static_cast<rec::u16>(std::stoi(next()));
+    else if (arg == "--name") config.player_name = next();
     else if (arg == "--no-taa") config.renderer.aa_mode = rec::render::AntiAliasingMode::kNone;
     else if (arg == "--upscaler") config.renderer.upscaler = ParseUpscaler(next());
     else if (arg == "--no-rt") config.renderer.enable_raytracing = false;

@@ -1,11 +1,14 @@
 #ifndef RECREATION_NET_REPLICATION_H_
 #define RECREATION_NET_REPLICATION_H_
 
-#include <functional>
-#include <vector>
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
+
+#include "protocol.nb.h"
 
 #include "core/types.h"
 #include "ecs/world.h"
+#include "world/components.h"
 
 namespace rec::net {
 
@@ -15,35 +18,76 @@ struct NetworkId {
   u64 value = 0;
 };
 
-// Components opt into replication with a serializer pair. The registry walks
-// replicated entities each tick and writes dirty component data into the
-// outgoing snapshot.
-class ReplicationRegistry {
+// Server-side id source. Ids are never reused within a session; 0 means
+// "not replicated".
+NetworkId AllocateNetworkId();
+
+// Client-side smoothing for remotely simulated transforms. Snapshots arrive
+// at a fraction of the render rate, so the visible transform blends from the
+// state at the previous snapshot to the newest one over the snapshot
+// interval.
+struct InterpolatedTransform {
+  world::Transform from;
+  world::Transform to;
+  f32 elapsed = 0;
+  f32 duration = 0;  // 0 snaps
+};
+
+// Advances every InterpolatedTransform and writes the blended result into
+// the entity's Transform. Runs on clients in the pre-render stage.
+void TickInterpolation(ecs::World& world, f32 dt);
+
+// Server side: walks entities carrying NetworkId straight out of the
+// archetype storage and emits nanobuf EntityState records. Delta snapshots
+// carry only entities whose state changed since the previous build; full
+// snapshots (keyframes) carry everything and let clients reconcile despawns
+// they may have missed on the unreliable channel.
+class SnapshotBuilder {
  public:
-  struct Entry {
-    ecs::ComponentId component;
-    std::function<void(const void* component_ptr, std::vector<u8>* out)> write;
-    std::function<void(void* component_ptr, ByteSpan in)> read;
-  };
-
-  template <typename T>
-  void Register(std::function<void(const T&, std::vector<u8>*)> write,
-                std::function<void(T&, ByteSpan)> read) {
-    entries_.push_back(Entry{
-        .component = ecs::GetComponentId<T>(),
-        .write = [w = std::move(write)](const void* ptr, std::vector<u8>* out) {
-          w(*static_cast<const T*>(ptr), out);
-        },
-        .read = [r = std::move(read)](void* ptr, ByteSpan in) { r(*static_cast<T*>(ptr), in); },
-    });
-  }
-
-  // Serializes all replicated components of entities that carry NetworkId.
-  void WriteSnapshot(ecs::World& world, std::vector<u8>* out) const;
-  void ApplySnapshot(ecs::World& world, ByteSpan snapshot) const;
+  // Fills `out` for the given tick. Returns the number of entity records
+  // written. `out` is reused by the caller across ticks so the vectors keep
+  // their capacity.
+  u32 Build(ecs::World& world, u64 server_tick, bool full, Snapshot* out);
 
  private:
-  std::vector<Entry> entries_;
+  struct Cached {
+    EntityState state;
+    u64 seen_tick = 0;
+  };
+
+  base::UnorderedMap<u64, Cached> sent_;
+  // Despawns accumulate until the next full snapshot covers them, since any
+  // single delta carrying them can be lost.
+  base::Vector<u64> pending_despawns_;
+  base::Vector<u64> scratch_removed_;
+};
+
+// Client side: maps net ids onto local entities, spawning and despawning as
+// snapshots dictate, and feeds InterpolatedTransform instead of writing
+// transforms directly.
+class SnapshotApplier {
+ public:
+  // Applies a parsed snapshot. `lerp_duration` is the expected gap between
+  // snapshots. Returns false when the snapshot is stale (out-of-order
+  // delivery) or malformed.
+  bool Apply(ecs::World& world, const SnapshotView& snapshot, f32 lerp_duration);
+
+  // Destroys every entity this applier spawned. Used on disconnect.
+  void Reset(ecs::World& world);
+
+  u64 latest_tick() const { return latest_tick_; }
+  ecs::Entity Find(u64 net_id) const;
+  u32 entity_count() const { return static_cast<u32>(entities_.size()); }
+
+ private:
+  struct Replica {
+    ecs::Entity entity;
+    u64 seen_tick = 0;
+  };
+
+  base::UnorderedMap<u64, Replica> entities_;
+  base::Vector<u64> scratch_removed_;
+  u64 latest_tick_ = 0;
 };
 
 }  // namespace rec::net

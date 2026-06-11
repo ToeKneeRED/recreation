@@ -1,7 +1,9 @@
 #include "engine.h"
 
+#include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <thread>
 
 #include "asset/primitives.h"
 #include "bethesda/archive.h"
@@ -42,16 +44,8 @@ bool Engine::Initialize(const EngineConfig& config) {
     CreateDemoScene();
   }
 
-  if (config_.host_server) {
-    session_ = std::make_unique<net::ServerSession>(config_.port, replication_);
-  } else if (!config_.connect_address.empty()) {
-    session_ = std::make_unique<net::ClientSession>(
-        net::Endpoint{config_.connect_address, config_.port}, replication_);
-  }
+  if (!StartNetworking()) return false;
 
-  scheduler_.AddSystem(ecs::Stage::kSim, "net", [this](ecs::World& world, f32 dt) {
-    if (session_) session_->Tick(world, dt);
-  });
   scheduler_.AddSystem(ecs::Stage::kPostSim, "cell_streaming", [this](ecs::World& world, f32) {
     if (!streamer_) return;
     f32 player_position[3] = {0, 0, 0};  // TODO: from the player entity
@@ -61,9 +55,68 @@ bool Engine::Initialize(const EngineConfig& config) {
   return true;
 }
 
+bool Engine::StartNetworking() {
+  net::SessionConfig net_config;
+  net_config.port = config_.port;
+  net_config.player_name = base::NameString(config_.player_name.c_str());
+  net_config.max_clients = config_.max_clients;
+  // Joining players replicate as cubes until there are real actor assets.
+  net_config.player_mesh = asset::MakeAssetId("builtin/cube").hash;
+
+  if (config_.host_server) {
+    auto server = std::make_unique<net::ServerSession>(std::move(net_config));
+    if (!server->Start()) return false;
+    server_session_ = server.get();
+    session_ = std::move(server);
+  } else if (!config_.connect_address.empty()) {
+    net_config.address = base::String(config_.connect_address.c_str());
+    auto client = std::make_unique<net::ClientSession>(std::move(net_config));
+    if (!client->Start()) return false;
+    client_session_ = client.get();
+    session_ = std::move(client);
+  } else {
+    return true;
+  }
+
+  scheduler_.AddSystem(ecs::Stage::kSim, "net", [this](ecs::World& world, f32 dt) {
+    session_->Tick(world, dt);
+  });
+  if (client_session_) {
+    // Remote transforms blend between snapshots. With a renderer that runs
+    // per frame; headless clients smooth at the fixed step instead.
+    const ecs::Stage stage =
+        config_.headless ? ecs::Stage::kPostSim : ecs::Stage::kPreRender;
+    scheduler_.AddSystem(stage, "net_interpolation", [](ecs::World& world, f32 dt) {
+      net::TickInterpolation(world, dt);
+    });
+  }
+  return true;
+}
+
 void Engine::CreateDemoScene() {
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
-  renderer_.UploadMesh(cube);
+  asset::Mesh ground = asset::MakeCube(2.5f, asset::MakeAssetId("builtin/ground"));
+  if (!config_.headless) {
+    renderer_.UploadMesh(cube);
+    renderer_.UploadMesh(ground);
+  }
+
+  if (!config_.connect_address.empty()) {
+    // Clients get their world from server snapshots; the meshes above are
+    // uploaded so replicated Renderables resolve. The demo input swings the
+    // player cube in a circle to exercise the client-to-server path.
+    scheduler_.AddSystem(ecs::Stage::kSim, "demo_input", [this](ecs::World&, f32 dt) {
+      if (!client_session_ || !client_session_->joined()) return;
+      demo_input_time_ += dt;
+      net::PlayerInput input;
+      input.move_x = std::cos(demo_input_time_ * 0.8f) * 0.5f;
+      input.move_z = std::sin(demo_input_time_ * 0.8f) * 0.5f;
+      input.yaw = demo_input_time_ * 0.8f;
+      client_session_->SetInput(input);
+    });
+    REC_INFO("no game data given, joining as demo client");
+    return;
+  }
 
   ecs::Entity entity = world_.Create();
   world_.Add(entity, world::Transform{});
@@ -71,11 +124,14 @@ void Engine::CreateDemoScene() {
   world_.Add(entity, Spin{});
 
   // Ground under the cube so raytraced shadows have something to land on.
-  asset::Mesh ground = asset::MakeCube(2.5f, asset::MakeAssetId("builtin/ground"));
-  renderer_.UploadMesh(ground);
   ecs::Entity floor = world_.Create();
   world_.Add(floor, world::Transform{.position = {0, -3.6f, 0}});
   world_.Add(floor, world::Renderable{ground.id});
+
+  if (config_.host_server) {
+    world_.Add(entity, net::AllocateNetworkId());
+    world_.Add(floor, net::AllocateNetworkId());
+  }
 
   scheduler_.AddSystem(ecs::Stage::kSim, "demo_spin", [](ecs::World& world, f32 dt) {
     world.Each<Spin, world::Transform>([dt](ecs::Entity, Spin& spin, world::Transform& t) {
@@ -124,7 +180,7 @@ void Engine::MountArchives() {
 }
 
 int Engine::Run() {
-  while (!quit_) {
+  while (!quit_.load(std::memory_order_relaxed)) {
     if (window_ && !window_->PumpEvents()) break;
 
     int steps = timer_.Tick();
@@ -142,18 +198,21 @@ int Engine::Run() {
       render::FrameView view;
       view.camera.eye = {2.4f, 1.8f, 2.4f};
       // Rebuilt every frame so destroyed entities drop out on their own.
-      std::unordered_map<u64, Mat4> transforms;
+      base::UnorderedMap<u64, Mat4> transforms;
       world_.Each<world::Transform, world::Renderable>(
           [&](ecs::Entity entity, world::Transform& transform, world::Renderable& renderable) {
             u64 key = static_cast<u64>(entity.generation) << 32 | entity.index;
             Mat4 current = TransformMatrix(transform);
-            auto prev = prev_transforms_.find(key);
-            view.draws.push_back({renderable.mesh.hash, current,
-                                  prev != prev_transforms_.end() ? prev->second : current});
-            transforms.emplace(key, current);
+            const Mat4* prev = prev_transforms_.find(key);
+            view.draws.push_back({renderable.mesh.hash, current, prev ? *prev : current});
+            transforms.insert(key, current);
           });
       prev_transforms_ = std::move(transforms);
       renderer_.RenderFrame(view);
+    } else {
+      // No vsync to pace the loop; yield between fixed steps instead of
+      // spinning a core.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
   return 0;

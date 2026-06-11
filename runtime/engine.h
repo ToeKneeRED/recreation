@@ -1,9 +1,11 @@
 #ifndef RECREATION_RUNTIME_ENGINE_H_
 #define RECREATION_RUNTIME_ENGINE_H_
 
+#include <atomic>
 #include <memory>
 #include <string>
-#include <unordered_map>
+
+#include <base/containers/unordered_map.h>
 
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
@@ -29,6 +31,8 @@ struct EngineConfig {
   bool host_server = false;
   u16 port = 29700;
   std::string connect_address;
+  std::string player_name = "player";
+  u32 max_clients = 64;
 };
 
 class Engine {
@@ -37,9 +41,14 @@ class Engine {
   int Run();
   void Shutdown();
 
+  // Safe to call from a signal handler; Run() returns after the current
+  // frame.
+  void RequestQuit() { quit_.store(true, std::memory_order_relaxed); }
+
  private:
   bool LoadGameData();
   void MountArchives();
+  bool StartNetworking();
   void CreateDemoScene();
 
   EngineConfig config_;
@@ -59,11 +68,14 @@ class Engine {
 
   render::Renderer renderer_;
   // Last frame's world matrices keyed by entity, for motion vectors.
-  std::unordered_map<u64, Mat4> prev_transforms_;
-  net::ReplicationRegistry replication_;
+  base::UnorderedMap<u64, Mat4> prev_transforms_;
   std::unique_ptr<net::Session> session_;
+  // Typed views into session_, null unless that role is active.
+  net::ServerSession* server_session_ = nullptr;
+  net::ClientSession* client_session_ = nullptr;
+  f32 demo_input_time_ = 0;
 
-  bool quit_ = false;
+  std::atomic<bool> quit_ = false;
 };
 
 }  // namespace rec
