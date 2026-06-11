@@ -39,6 +39,12 @@ compressed plugin records are rejected at load time.
 
 Targets: Windows, Linux, Android (via the NDK toolchain file).
 
+With Nix, `nix develop` provides the toolchain, SDL3, the Vulkan loader,
+validation layers and tools. Configure with the pinned dependency set via
+`cmake -B build/nix -G Ninja $RECREATION_FETCHCONTENT_FLAGS`, and launch
+Vulkan binaries through the `vkrun` wrapper so the loader and the host GPU
+driver are found. `nix build` produces a hermetic build from the same pins.
+
 ## Mods
 
 Mod compatibility follows the same rules the original games use. Plugins merge

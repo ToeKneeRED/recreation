@@ -4,3 +4,5 @@ out/
 compile_commands.json
 .vs/
 .idea/
+.direnv/
+result
