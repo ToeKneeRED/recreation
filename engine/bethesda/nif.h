@@ -1,10 +1,11 @@
 #ifndef RECREATION_BETHESDA_NIF_H_
 #define RECREATION_BETHESDA_NIF_H_
 
-#include <memory>
 #include <optional>
 #include <string>
-#include <vector>
+
+#include <base/containers/vector.h>
+#include <base/memory/unique_pointer.h>
 
 #include "asset/mesh.h"
 #include "core/types.h"
@@ -20,7 +21,7 @@ struct NifHeader {
   u32 user_version = 0;
   u32 user_version_2 = 0;
   u32 block_count = 0;
-  std::vector<std::string> block_types;
+  base::Vector<std::string> block_types;
 };
 
 std::optional<NifHeader> ParseNifHeader(ByteSpan data);
@@ -28,7 +29,7 @@ std::optional<NifHeader> ParseNifHeader(ByteSpan data);
 // Converts the geometry blocks (BSTriShape, NiTriShape) into an engine mesh.
 // Shader property blocks (BSLightingShaderProperty, BSEffectShaderProperty)
 // become material references resolved by the material converter.
-std::unique_ptr<asset::Mesh> ConvertNif(ByteSpan data, asset::AssetId id);
+base::UniquePointer<asset::Mesh> ConvertNif(ByteSpan data, asset::AssetId id);
 
 }  // namespace rec::bethesda
 

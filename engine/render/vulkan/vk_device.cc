@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstring>
-#include <vector>
+
+#include <base/containers/vector.h>
 
 #include "core/log.h"
 #include "render/rhi/device.h"
@@ -25,22 +26,22 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBits
 bool HasValidationLayer() {
   u32 count = 0;
   vkEnumerateInstanceLayerProperties(&count, nullptr);
-  std::vector<VkLayerProperties> layers(count);
+  base::Vector<VkLayerProperties> layers(count);
   vkEnumerateInstanceLayerProperties(&count, layers.data());
   return std::ranges::any_of(layers, [](const auto& layer) {
     return std::strcmp(layer.layerName, kValidationLayer) == 0;
   });
 }
 
-std::vector<VkExtensionProperties> DeviceExtensions(VkPhysicalDevice physical) {
+base::Vector<VkExtensionProperties> DeviceExtensions(VkPhysicalDevice physical) {
   u32 count = 0;
   vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-  std::vector<VkExtensionProperties> extensions(count);
+  base::Vector<VkExtensionProperties> extensions(count);
   vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, extensions.data());
   return extensions;
 }
 
-bool HasExtension(const std::vector<VkExtensionProperties>& available, const char* name) {
+bool HasExtension(const base::Vector<VkExtensionProperties>& available, const char* name) {
   return std::ranges::any_of(
       available, [name](const auto& ext) { return std::strcmp(ext.extensionName, name) == 0; });
 }
@@ -50,7 +51,7 @@ bool HasExtension(const std::vector<VkExtensionProperties>& available, const cha
 int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
   u32 count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
-  std::vector<VkQueueFamilyProperties> families(count);
+  base::Vector<VkQueueFamilyProperties> families(count);
   vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, families.data());
   for (u32 i = 0; i < count; ++i) {
     if (!(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) continue;
@@ -64,7 +65,7 @@ int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
 VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface) {
   u32 count = 0;
   vkEnumeratePhysicalDevices(instance, &count, nullptr);
-  std::vector<VkPhysicalDevice> devices(count);
+  base::Vector<VkPhysicalDevice> devices(count);
   vkEnumeratePhysicalDevices(instance, &count, devices.data());
 
   VkPhysicalDevice best = VK_NULL_HANDLE;
@@ -108,8 +109,9 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
     return device;
   }
 
-  std::vector<const char*> instance_extensions = surface_extensions;
-  std::vector<const char*> layers;
+  base::Vector<const char*> instance_extensions;
+  instance_extensions.assign(surface_extensions.begin(), surface_extensions.end());
+  base::Vector<const char*> layers;
   bool validation = desc.enable_validation && HasValidationLayer();
   if (validation) {
     layers.push_back(kValidationLayer);
@@ -166,7 +168,7 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
       static_cast<u32>(FindGraphicsFamily(device->physical_device_, device->surface_));
 
   auto available = DeviceExtensions(device->physical_device_);
-  std::vector<const char*> device_extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+  base::Vector<const char*> device_extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
   bool want_raytracing = desc.request_raytracing &&
                          HasExtension(available, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
@@ -208,10 +210,9 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   if (want_raytracing) {
     chain(&accel);
     chain(&rt_pipeline);
-    device_extensions.insert(device_extensions.end(),
-                             {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-                              VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-                              VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME});
+    device_extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    device_extensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    device_extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
   }
   if (want_ray_query) {
     chain(&ray_query);

@@ -16,9 +16,8 @@ bool StringTable::Load(const asset::Vfs& vfs, const std::string& plugin_name,
   return any;
 }
 
-const std::string* StringTable::Find(u32 string_id) const {
-  auto it = strings_.find(string_id);
-  return it == strings_.end() ? nullptr : &it->second;
+const base::String* StringTable::Find(u32 string_id) const {
+  return strings_.find(string_id);
 }
 
 bool StringTable::LoadFile(const asset::Vfs& vfs, const std::string& path, bool length_prefixed) {
@@ -49,10 +48,10 @@ bool StringTable::LoadFile(const asset::Vfs& vfs, const std::string& path, bool 
       std::memcpy(&length, start, 4);
       if (pos + 4 + length > bytes->size()) continue;
       // Length includes the terminator.
-      strings_.emplace(id, std::string(start + 4, length > 0 ? length - 1 : 0));
+      strings_.emplace(id, start + 4, static_cast<size_t>(length > 0 ? length - 1 : 0));
     } else {
       size_t max_length = bytes->size() - pos;
-      strings_.emplace(id, std::string(start, strnlen(start, max_length)));
+      strings_.emplace(id, start, strnlen(start, max_length));
     }
   }
   return true;

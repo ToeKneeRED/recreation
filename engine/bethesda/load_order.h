@@ -3,7 +3,9 @@
 
 #include <string>
 #include <unordered_map>
-#include <vector>
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
 
 #include "bethesda/plugin.h"
 
@@ -20,13 +22,17 @@ class LoadOrder {
   // Resolves a raw form id from `referencing_plugin` against its master list
   // into a load order independent id.
   GlobalFormId Resolve(RawFormId raw, u16 referencing_plugin,
-                       const std::vector<std::string>& masters) const;
+                       const base::Vector<std::string>& masters) const;
 
   u16 IndexOf(const std::string& file_name) const;
-  const std::vector<std::string>& plugins() const { return plugins_; }
+  const base::Vector<std::string>& plugins() const { return plugins_; }
 
  private:
-  std::vector<std::string> plugins_;
+  // Elements stay std::string: plugin names come from std::getline and feed
+  // std::filesystem style path concatenation.
+  base::Vector<std::string> plugins_;
+  // std::string keyed map stays STL: std::string lacks the character_type
+  // typedef base::UnorderedMap needs for automatic string hashing.
   std::unordered_map<std::string, u16> index_by_name_;
 };
 
@@ -50,9 +56,9 @@ class RecordStore {
   void EachOfType(u32 fourcc, const std::function<void(GlobalFormId, const Record&)>& fn) const;
 
  private:
-  std::vector<PluginFile> plugins_;  // keeps subrecord spans alive
-  std::unordered_map<u64, StoredRecord> records_;
-  std::unordered_map<u32, std::vector<u64>> by_type_;
+  base::Vector<PluginFile> plugins_;  // keeps subrecord spans alive
+  base::UnorderedMap<u64, StoredRecord> records_;
+  base::UnorderedMap<u32, base::Vector<u64>> by_type_;
 };
 
 }  // namespace rec::bethesda

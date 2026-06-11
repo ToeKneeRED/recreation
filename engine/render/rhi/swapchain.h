@@ -2,7 +2,8 @@
 #define RECREATION_RENDER_RHI_SWAPCHAIN_H_
 
 #include <memory>
-#include <vector>
+
+#include <base/containers/vector.h>
 
 #include "render/rhi/device.h"
 
@@ -36,8 +37,8 @@ class Swapchain {
   VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
   VkFormat format_ = VK_FORMAT_UNDEFINED;
   VkExtent2D extent_{};
-  std::vector<VkImage> images_;
-  std::vector<VkImageView> views_;
+  base::Vector<VkImage> images_;
+  base::Vector<VkImageView> views_;
 };
 
 }  // namespace rec::render

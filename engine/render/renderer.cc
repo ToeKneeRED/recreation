@@ -203,7 +203,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
   if (rt_shadows_) {
-    std::vector<RayTracingContext::Instance> instances;
+    base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
       instances.push_back({.mesh_key = item.mesh, .transform = item.transform});
@@ -289,9 +289,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
         mesh_pipeline_->Bind(ctx.cmd, globals_set);
         for (const DrawItem& item : view.draws) {
-          auto it = meshes_.find(item.mesh);
-          if (it == meshes_.end()) continue;
-          mesh_pipeline_->Draw(ctx.cmd, it->second,
+          const GpuMesh* mesh = meshes_.find(item.mesh);
+          if (!mesh) continue;
+          mesh_pipeline_->Draw(ctx.cmd, *mesh,
                                {.model = item.transform, .prev_model = item.prev_transform});
         }
         vkCmdEndRendering(ctx.cmd);
@@ -434,9 +434,9 @@ void Renderer::Shutdown() {
   if (device_ && !device_->is_stub()) {
     device_->WaitIdle();
     DestroyFrameResources();
-    for (auto& [key, mesh] : meshes_) {
-      device_->DestroyBuffer(mesh.vertices);
-      device_->DestroyBuffer(mesh.indices);
+    for (auto kv : meshes_) {
+      device_->DestroyBuffer(kv.value.vertices);
+      device_->DestroyBuffer(kv.value.indices);
     }
     meshes_.clear();
     taa_.Destroy(*device_);

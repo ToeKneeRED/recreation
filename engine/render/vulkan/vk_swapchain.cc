@@ -18,7 +18,7 @@ bool Swapchain::Init(u32 width, u32 height) {
   u32 format_count = 0;
   vkGetPhysicalDeviceSurfaceFormatsKHR(device_.physical_device(), device_.surface(), &format_count,
                                        nullptr);
-  std::vector<VkSurfaceFormatKHR> formats(format_count);
+  base::Vector<VkSurfaceFormatKHR> formats(format_count);
   vkGetPhysicalDeviceSurfaceFormatsKHR(device_.physical_device(), device_.surface(), &format_count,
                                        formats.data());
 
@@ -37,11 +37,11 @@ bool Swapchain::Init(u32 width, u32 height) {
   u32 mode_count = 0;
   vkGetPhysicalDeviceSurfacePresentModesKHR(device_.physical_device(), device_.surface(),
                                             &mode_count, nullptr);
-  std::vector<VkPresentModeKHR> modes(mode_count);
+  base::Vector<VkPresentModeKHR> modes(mode_count);
   vkGetPhysicalDeviceSurfacePresentModesKHR(device_.physical_device(), device_.surface(),
                                             &mode_count, modes.data());
   VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;  // always available
-  if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
+  if (modes.find(VK_PRESENT_MODE_MAILBOX_KHR) != nullptr) {
     present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
   }
 

@@ -2,7 +2,7 @@
 
 namespace rec::ecs {
 
-void Scheduler::AddSystem(Stage stage, std::string name, SystemFn fn) {
+void Scheduler::AddSystem(Stage stage, base::NameString name, SystemFn fn) {
   stages_[static_cast<size_t>(stage)].push_back({std::move(name), std::move(fn)});
 }
 

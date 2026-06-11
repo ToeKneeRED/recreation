@@ -2,10 +2,12 @@
 #define RECREATION_ASSET_VFS_H_
 
 #include <functional>
-#include <memory>
 #include <optional>
 #include <string>
-#include <vector>
+#include <string_view>
+
+#include <base/containers/vector.h>
+#include <base/memory/unique_pointer.h>
 
 #include "core/types.h"
 
@@ -18,7 +20,7 @@ class FileProvider {
   virtual ~FileProvider() = default;
 
   virtual bool Contains(std::string_view normalized_path) const = 0;
-  virtual std::optional<std::vector<u8>> Read(std::string_view normalized_path) const = 0;
+  virtual std::optional<base::Vector<u8>> Read(std::string_view normalized_path) const = 0;
   virtual void Enumerate(const std::function<void(std::string_view)>& fn) const = 0;
   virtual std::string name() const = 0;
 };
@@ -28,18 +30,18 @@ class FileProvider {
 // override behavior mods rely on.
 class Vfs {
  public:
-  void Mount(std::unique_ptr<FileProvider> provider);
+  void Mount(base::UniquePointer<FileProvider> provider);
 
-  std::optional<std::vector<u8>> Read(std::string_view path) const;
+  std::optional<base::Vector<u8>> Read(std::string_view path) const;
   bool Contains(std::string_view path) const;
 
   size_t mount_count() const { return providers_.size(); }
 
  private:
-  std::vector<std::unique_ptr<FileProvider>> providers_;
+  base::Vector<base::UniquePointer<FileProvider>> providers_;
 };
 
-std::unique_ptr<FileProvider> MakeLooseFileProvider(std::string root_directory);
+base::UniquePointer<FileProvider> MakeLooseFileProvider(std::string root_directory);
 
 }  // namespace rec::asset
 

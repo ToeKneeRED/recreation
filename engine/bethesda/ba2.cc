@@ -25,7 +25,7 @@ class Ba2Provider final : public asset::FileProvider {
       : path_(std::move(path)), header_(header) {}
 
   bool Contains(std::string_view) const override { return false; }
-  std::optional<std::vector<u8>> Read(std::string_view) const override { return std::nullopt; }
+  std::optional<base::Vector<u8>> Read(std::string_view) const override { return std::nullopt; }
   void Enumerate(const std::function<void(std::string_view)>&) const override {}
   std::string name() const override { return path_; }
 
@@ -43,7 +43,7 @@ bool IsKnownVersion(u32 version) {
 
 }  // namespace
 
-std::unique_ptr<asset::FileProvider> OpenBa2(const std::string& path) {
+base::UniquePointer<asset::FileProvider> OpenBa2(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) return nullptr;
   Ba2Header header{};
@@ -58,10 +58,10 @@ std::unique_ptr<asset::FileProvider> OpenBa2(const std::string& path) {
     return nullptr;
   }
   REC_INFO("ba2 {}: v{}, {} files", path, header.version, header.file_count);
-  return std::make_unique<Ba2Provider>(path, header);
+  return base::MakeUnique<Ba2Provider>(path, header);
 }
 
-std::unique_ptr<asset::FileProvider> OpenArchive(const std::string& path) {
+base::UniquePointer<asset::FileProvider> OpenArchive(const std::string& path) {
   if (path.ends_with(".bsa") || path.ends_with(".BSA")) return OpenBsa(path);
   if (path.ends_with(".ba2") || path.ends_with(".BA2")) return OpenBa2(path);
   return nullptr;

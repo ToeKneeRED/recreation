@@ -4,7 +4,8 @@
 #include <functional>
 #include <optional>
 #include <string>
-#include <vector>
+
+#include <base/containers/vector.h>
 
 #include "bethesda/game_profile.h"
 #include "bethesda/record.h"
@@ -30,7 +31,7 @@ class PluginFile {
   bool VisitRecords(const RecordVisitor& visitor) const;
 
   const std::string& file_name() const { return file_name_; }
-  const std::vector<std::string>& masters() const { return masters_; }
+  const base::Vector<std::string>& masters() const { return masters_; }
   bool is_master() const { return (header_flags_ & kPluginFlagMaster) != 0; }
   bool is_light() const { return is_light_; }
   bool is_localized() const { return (header_flags_ & kPluginFlagLocalized) != 0; }
@@ -43,8 +44,10 @@ class PluginFile {
   bool ParseHeader(const GameProfile& profile);
 
   std::string file_name_;
-  std::vector<u8> data_;
-  std::vector<std::string> masters_;
+  base::Vector<u8> data_;
+  // Elements stay std::string: master names flow into LoadOrder::IndexOf and
+  // std::ranges::find against GameProfile::base_masters.
+  base::Vector<std::string> masters_;
   u32 header_flags_ = 0;
   f32 version_ = 0;
   u32 record_count_ = 0;

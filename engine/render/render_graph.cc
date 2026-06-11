@@ -137,7 +137,7 @@ void RenderGraph::AddPass(std::string name, SetupFn setup, ExecuteFn execute) {
 bool RenderGraph::Compile(Device& device, TransientPool& pool) {
   // Transients get the union of every declared usage so one physical image
   // serves all passes that touch it.
-  std::vector<VkImageUsageFlags> usages(resources_.size(), 0);
+  base::Vector<VkImageUsageFlags> usages(resources_.size());
   for (const Pass& pass : passes_) {
     for (const auto& access : pass.builder.accesses) {
       usages[access.handle - 1] |= ImageUsageFor(access.usage);

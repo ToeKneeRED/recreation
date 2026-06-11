@@ -1,7 +1,7 @@
 #ifndef RECREATION_ASSET_TEXTURE_H_
 #define RECREATION_ASSET_TEXTURE_H_
 
-#include <vector>
+#include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
 #include "core/types.h"
@@ -29,7 +29,7 @@ struct Texture {
   u32 array_layers = 1;
   bool is_cubemap = false;
   bool is_srgb = false;
-  std::vector<u8> data;
+  base::Vector<u8> data;
 };
 
 }  // namespace rec::asset

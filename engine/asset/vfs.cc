@@ -19,14 +19,14 @@ std::string NormalizePath(std::string_view path) {
   return out;
 }
 
-void Vfs::Mount(std::unique_ptr<FileProvider> provider) {
+void Vfs::Mount(base::UniquePointer<FileProvider> provider) {
   providers_.push_back(std::move(provider));
 }
 
-std::optional<std::vector<u8>> Vfs::Read(std::string_view path) const {
+std::optional<base::Vector<u8>> Vfs::Read(std::string_view path) const {
   std::string normalized = NormalizePath(path);
-  for (auto it = providers_.rbegin(); it != providers_.rend(); ++it) {
-    if ((*it)->Contains(normalized)) return (*it)->Read(normalized);
+  for (size_t i = providers_.size(); i-- > 0;) {
+    if (providers_[i]->Contains(normalized)) return providers_[i]->Read(normalized);
   }
   return std::nullopt;
 }
@@ -47,11 +47,11 @@ class LooseFileProvider final : public FileProvider {
     return std::filesystem::exists(root_ / std::filesystem::path(normalized_path));
   }
 
-  std::optional<std::vector<u8>> Read(std::string_view normalized_path) const override {
+  std::optional<base::Vector<u8>> Read(std::string_view normalized_path) const override {
     std::ifstream file(root_ / std::filesystem::path(normalized_path),
                        std::ios::binary | std::ios::ate);
     if (!file) return std::nullopt;
-    std::vector<u8> data(static_cast<size_t>(file.tellg()));
+    base::Vector<u8> data(static_cast<size_t>(file.tellg()));
     file.seekg(0);
     file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
     return data;
@@ -73,8 +73,8 @@ class LooseFileProvider final : public FileProvider {
 
 }  // namespace
 
-std::unique_ptr<FileProvider> MakeLooseFileProvider(std::string root_directory) {
-  return std::make_unique<LooseFileProvider>(std::move(root_directory));
+base::UniquePointer<FileProvider> MakeLooseFileProvider(std::string root_directory) {
+  return base::MakeUnique<LooseFileProvider>(std::move(root_directory));
 }
 
 }  // namespace rec::asset

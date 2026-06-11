@@ -32,13 +32,13 @@ std::optional<NifHeader> ParseNifHeader(ByteSpan data) {
   return header;
 }
 
-std::unique_ptr<asset::Mesh> ConvertNif(ByteSpan data, asset::AssetId id) {
+base::UniquePointer<asset::Mesh> ConvertNif(ByteSpan data, asset::AssetId id) {
   auto header = ParseNifHeader(data);
   if (!header) {
     REC_WARN("not a nif");
     return nullptr;
   }
-  auto mesh = std::make_unique<asset::Mesh>();
+  auto mesh = base::MakeUnique<asset::Mesh>();
   mesh->id = id;
   mesh->lods.emplace_back();
   // TODO: walk BSTriShape blocks, decode the vertex desc (half floats for

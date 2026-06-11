@@ -45,7 +45,7 @@ u16 LoadOrder::IndexOf(const std::string& file_name) const {
 }
 
 GlobalFormId LoadOrder::Resolve(RawFormId raw, u16 referencing_plugin,
-                                const std::vector<std::string>& masters) const {
+                                const base::Vector<std::string>& masters) const {
   // Mod index below the master count points at a master, otherwise the
   // record is defined by the referencing plugin itself. ESL slots cannot be
   // referenced via the FE prefix from inside a plugin's own master table.
@@ -83,9 +83,9 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
     plugin->VisitRecords([&](Record& record) {
       GlobalFormId id = order.Resolve(record.header.form_id, i, masters);
       u32 type = record.header.type;
-      auto [it, inserted] = records_.try_emplace(id.packed());
-      it->second.record = std::move(record);
-      it->second.winning_plugin = i;
+      auto [stored, inserted] = records_.emplace(id.packed());
+      stored->record = std::move(record);
+      stored->winning_plugin = i;
       if (inserted) by_type_[type].push_back(id.packed());
     });
     plugins_.push_back(std::move(*plugin));
@@ -95,17 +95,17 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
 }
 
 const RecordStore::StoredRecord* RecordStore::Find(GlobalFormId id) const {
-  auto it = records_.find(id.packed());
-  return it == records_.end() ? nullptr : &it->second;
+  return records_.find(id.packed());
 }
 
 void RecordStore::EachOfType(u32 fourcc,
                              const std::function<void(GlobalFormId, const Record&)>& fn) const {
-  auto it = by_type_.find(fourcc);
-  if (it == by_type_.end()) return;
-  for (u64 packed : it->second) {
-    const StoredRecord& stored = records_.at(packed);
-    fn(GlobalFormId{static_cast<u16>(packed >> 32), static_cast<u32>(packed)}, stored.record);
+  const base::Vector<u64>* ids = by_type_.find(fourcc);
+  if (!ids) return;
+  for (u64 packed : *ids) {
+    const StoredRecord* stored = records_.find(packed);
+    if (!stored) continue;
+    fn(GlobalFormId{static_cast<u16>(packed >> 32), static_cast<u32>(packed)}, stored->record);
   }
 }
 

@@ -2,8 +2,9 @@
 #define RECREATION_RENDER_RAYTRACING_H_
 
 #include <memory>
-#include <unordered_map>
-#include <vector>
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
 
 #include "core/math.h"
 #include "core/types.h"
@@ -49,7 +50,7 @@ class RayTracingContext {
 
   // Records a full TLAS rebuild into cmd, including the barrier that makes
   // it visible to shader ray queries. Instances without a BLAS are skipped.
-  void BuildTlas(VkCommandBuffer cmd, u32 slot, const std::vector<Instance>& instances);
+  void BuildTlas(VkCommandBuffer cmd, u32 slot, const base::Vector<Instance>& instances);
 
   VkAccelerationStructureKHR tlas(u32 slot) const { return tlas_[slot].handle; }
 
@@ -77,7 +78,7 @@ class RayTracingContext {
   Device& device_;
   RayTracingSettings settings_;
   u32 scratch_alignment_ = 128;
-  std::unordered_map<u64, Blas> blas_;
+  base::UnorderedMap<u64, Blas> blas_;
   // Reused across builds. Freeing scratch right after the fence tripped
   // lavapipe, whose build workers can outlive the signal; a persistent
   // arena avoids both that and the per-build allocation.

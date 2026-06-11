@@ -27,7 +27,7 @@ class BsaProvider final : public asset::FileProvider {
       : path_(std::move(path)), header_(header) {}
 
   bool Contains(std::string_view) const override { return false; }
-  std::optional<std::vector<u8>> Read(std::string_view) const override { return std::nullopt; }
+  std::optional<base::Vector<u8>> Read(std::string_view) const override { return std::nullopt; }
   void Enumerate(const std::function<void(std::string_view)>&) const override {}
   std::string name() const override { return path_; }
 
@@ -41,7 +41,7 @@ class BsaProvider final : public asset::FileProvider {
 
 }  // namespace
 
-std::unique_ptr<asset::FileProvider> OpenBsa(const std::string& path) {
+base::UniquePointer<asset::FileProvider> OpenBsa(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) return nullptr;
   BsaHeader header{};
@@ -55,7 +55,7 @@ std::unique_ptr<asset::FileProvider> OpenBsa(const std::string& path) {
     return nullptr;
   }
   REC_INFO("bsa {}: v{}, {} files", path, header.version, header.file_count);
-  return std::make_unique<BsaProvider>(path, header);
+  return base::MakeUnique<BsaProvider>(path, header);
 }
 
 }  // namespace rec::bethesda

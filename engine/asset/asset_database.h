@@ -2,8 +2,10 @@
 #define RECREATION_ASSET_ASSET_DATABASE_H_
 
 #include <functional>
-#include <memory>
-#include <unordered_map>
+
+#include <base/containers/unordered_map.h>
+#include <base/memory/unique_pointer.h>
+#include <base/strings/xstring.h>
 
 #include "asset/asset_id.h"
 #include "asset/material.h"
@@ -16,17 +18,17 @@ namespace rec::asset {
 // Converts raw bytes from the Vfs into an engine asset. The bethesda module
 // registers converters for .nif, .dds, .bgsm and friends. Keyed by extension
 // so new formats plug in without touching this module.
-using MeshConverter = std::function<std::unique_ptr<Mesh>(ByteSpan, AssetId)>;
-using TextureConverter = std::function<std::unique_ptr<Texture>(ByteSpan, AssetId)>;
-using MaterialConverter = std::function<std::unique_ptr<Material>(ByteSpan, AssetId)>;
+using MeshConverter = std::function<base::UniquePointer<Mesh>(ByteSpan, AssetId)>;
+using TextureConverter = std::function<base::UniquePointer<Texture>(ByteSpan, AssetId)>;
+using MaterialConverter = std::function<base::UniquePointer<Material>(ByteSpan, AssetId)>;
 
 class AssetDatabase {
  public:
   explicit AssetDatabase(Vfs& vfs) : vfs_(vfs) {}
 
-  void RegisterMeshConverter(std::string extension, MeshConverter converter);
-  void RegisterTextureConverter(std::string extension, TextureConverter converter);
-  void RegisterMaterialConverter(std::string extension, MaterialConverter converter);
+  void RegisterMeshConverter(base::String extension, MeshConverter converter);
+  void RegisterTextureConverter(base::String extension, TextureConverter converter);
+  void RegisterMaterialConverter(base::String extension, MaterialConverter converter);
 
   // Loads (converting on first use) or returns the cached asset. Synchronous
   // for now, the streaming path will move conversion onto the job system.
@@ -38,12 +40,12 @@ class AssetDatabase {
 
  private:
   Vfs& vfs_;
-  std::unordered_map<std::string, MeshConverter> mesh_converters_;
-  std::unordered_map<std::string, TextureConverter> texture_converters_;
-  std::unordered_map<std::string, MaterialConverter> material_converters_;
-  std::unordered_map<u64, std::unique_ptr<Mesh>> meshes_;
-  std::unordered_map<u64, std::unique_ptr<Texture>> textures_;
-  std::unordered_map<u64, std::unique_ptr<Material>> materials_;
+  base::UnorderedMap<base::String, MeshConverter> mesh_converters_;
+  base::UnorderedMap<base::String, TextureConverter> texture_converters_;
+  base::UnorderedMap<base::String, MaterialConverter> material_converters_;
+  base::UnorderedMap<u64, base::UniquePointer<Mesh>> meshes_;
+  base::UnorderedMap<u64, base::UniquePointer<Texture>> textures_;
+  base::UnorderedMap<u64, base::UniquePointer<Material>> materials_;
 };
 
 }  // namespace rec::asset

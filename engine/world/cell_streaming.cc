@@ -29,12 +29,12 @@ void CellStreamer::Update(ecs::World& world, const f32 player_position[3]) {
     }
   }
 
-  std::vector<u32> to_unload;
-  for (const auto& [key, cell] : loaded_) {
-    i16 x = static_cast<i16>(key >> 16);
-    i16 y = static_cast<i16>(key & 0xffff);
+  base::Vector<u32> to_unload;
+  for (auto kv : loaded_) {
+    i16 x = static_cast<i16>(kv.key >> 16);
+    i16 y = static_cast<i16>(kv.key & 0xffff);
     if (std::abs(x - center_x) > radius || std::abs(y - center_y) > radius) {
-      to_unload.push_back(key);
+      to_unload.push_back(kv.key);
     }
   }
   for (u32 key : to_unload) UnloadCell(world, key);
@@ -49,10 +49,10 @@ void CellStreamer::LoadCell(ecs::World& world, i16 grid_x, i16 grid_y) {
 }
 
 void CellStreamer::UnloadCell(ecs::World& world, u32 key) {
-  auto it = loaded_.find(key);
-  if (it == loaded_.end()) return;
-  for (ecs::Entity entity : it->second.entities) world.Destroy(entity);
-  loaded_.erase(it);
+  LoadedCell* cell = loaded_.find(key);
+  if (!cell) return;
+  for (ecs::Entity entity : cell->entities) world.Destroy(entity);
+  loaded_.erase(key);
 }
 
 void CellStreamer::LoadInterior(ecs::World& world, bethesda::GlobalFormId cell_id) {

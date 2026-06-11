@@ -2,7 +2,8 @@
 #define RECREATION_BETHESDA_RECORD_H_
 
 #include <string>
-#include <vector>
+
+#include <base/containers/vector.h>
 
 #include "bethesda/form_id.h"
 #include "core/types.h"
@@ -50,8 +51,8 @@ struct Record {
   Record& operator=(const Record&) = delete;
 
   RecordHeader header;
-  std::vector<u8> decompressed;  // backing storage when compressed
-  std::vector<Subrecord> subrecords;
+  base::Vector<u8> decompressed;  // backing storage when compressed
+  base::Vector<Subrecord> subrecords;
 
   const Subrecord* Find(u32 fourcc) const;
   std::string GetString(u32 fourcc) const;  // zero terminated subrecord as string

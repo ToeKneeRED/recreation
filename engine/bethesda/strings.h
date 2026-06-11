@@ -2,7 +2,9 @@
 #define RECREATION_BETHESDA_STRINGS_H_
 
 #include <string>
-#include <unordered_map>
+
+#include <base/containers/unordered_map.h>
+#include <base/strings/xstring.h>
 
 #include "asset/vfs.h"
 #include "core/types.h"
@@ -16,13 +18,13 @@ class StringTable {
  public:
   bool Load(const asset::Vfs& vfs, const std::string& plugin_name, const std::string& language);
 
-  const std::string* Find(u32 string_id) const;
+  const base::String* Find(u32 string_id) const;
   size_t size() const { return strings_.size(); }
 
  private:
   bool LoadFile(const asset::Vfs& vfs, const std::string& path, bool length_prefixed);
 
-  std::unordered_map<u32, std::string> strings_;
+  base::UnorderedMap<u32, base::String> strings_;
 };
 
 }  // namespace rec::bethesda

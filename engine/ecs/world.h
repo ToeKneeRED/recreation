@@ -1,10 +1,12 @@
 #ifndef RECREATION_ECS_WORLD_H_
 #define RECREATION_ECS_WORLD_H_
 
-#include <map>
-#include <memory>
+#include <tuple>
 #include <utility>
-#include <vector>
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
+#include <base/memory/unique_pointer.h>
 
 #include "ecs/archetype.h"
 #include "ecs/component.h"
@@ -74,10 +76,10 @@ class World {
   Archetype* GetOrCreateArchetype(const Signature& signature);
   void MoveEntity(Entity entity, EntityRecord& record, Archetype* destination);
 
-  std::vector<EntityRecord> records_;
-  std::vector<u32> free_indices_;
-  std::vector<std::unique_ptr<Archetype>> archetypes_;
-  std::map<Signature, Archetype*> archetype_lookup_;
+  base::Vector<EntityRecord> records_;
+  base::Vector<u32> free_indices_;
+  base::Vector<base::UniquePointer<Archetype>> archetypes_;
+  base::UnorderedMap<Signature, Archetype*, SignatureHash, SignatureEqual> archetype_lookup_;
   size_t live_count_ = 0;
 };
 

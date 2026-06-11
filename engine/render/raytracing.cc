@@ -46,9 +46,9 @@ std::unique_ptr<RayTracingContext> RayTracingContext::Create(Device& device) {
 }
 
 RayTracingContext::~RayTracingContext() {
-  for (auto& [key, blas] : blas_) {
-    vkDestroyAccelerationStructureKHR(device_.device(), blas.handle, nullptr);
-    device_.DestroyBuffer(blas.buffer);
+  for (auto kv : blas_) {
+    vkDestroyAccelerationStructureKHR(device_.device(), kv.value.handle, nullptr);
+    device_.DestroyBuffer(kv.value.buffer);
   }
   device_.DestroyBuffer(blas_scratch_);
   for (Tlas& tlas : tlas_) DestroyTlas(tlas);
@@ -208,19 +208,19 @@ bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
 }
 
 void RayTracingContext::BuildTlas(VkCommandBuffer cmd, u32 slot,
-                                  const std::vector<Instance>& instances) {
+                                  const base::Vector<Instance>& instances) {
   Tlas& tlas = tlas_[slot];
 
-  std::vector<VkAccelerationStructureInstanceKHR> gpu_instances;
+  base::Vector<VkAccelerationStructureInstanceKHR> gpu_instances;
   gpu_instances.reserve(instances.size());
   for (const Instance& instance : instances) {
-    auto it = blas_.find(instance.mesh_key);
-    if (it == blas_.end()) continue;
+    const Blas* blas = blas_.find(instance.mesh_key);
+    if (!blas) continue;
     VkAccelerationStructureInstanceKHR gpu{};
     gpu.transform = ToTransformMatrix(instance.transform);
     gpu.mask = 0xff;
     gpu.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    gpu.accelerationStructureReference = it->second.address;
+    gpu.accelerationStructureReference = blas->address;
     gpu_instances.push_back(gpu);
   }
 

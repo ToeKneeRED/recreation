@@ -1,8 +1,8 @@
 #ifndef RECREATION_WORLD_CELL_STREAMING_H_
 #define RECREATION_WORLD_CELL_STREAMING_H_
 
-#include <unordered_map>
-#include <vector>
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
 
 #include "asset/asset_database.h"
 #include "bethesda/load_order.h"
@@ -34,7 +34,7 @@ class CellStreamer {
 
  private:
   struct LoadedCell {
-    std::vector<ecs::Entity> entities;
+    base::Vector<ecs::Entity> entities;
   };
 
   void LoadCell(ecs::World& world, i16 grid_x, i16 grid_y);
@@ -43,7 +43,7 @@ class CellStreamer {
   const bethesda::RecordStore& records_;
   asset::AssetDatabase& assets_;
   Settings settings_;
-  std::unordered_map<u32, LoadedCell> loaded_;
+  base::UnorderedMap<u32, LoadedCell> loaded_;
 };
 
 }  // namespace rec::world

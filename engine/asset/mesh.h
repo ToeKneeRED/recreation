@@ -1,7 +1,7 @@
 #ifndef RECREATION_ASSET_MESH_H_
 #define RECREATION_ASSET_MESH_H_
 
-#include <vector>
+#include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
 #include "core/types.h"
@@ -31,15 +31,15 @@ struct Submesh {
 };
 
 struct MeshLod {
-  std::vector<Vertex> vertices;
-  std::vector<SkinnedVertexExtra> skinning;
-  std::vector<u32> indices;
-  std::vector<Submesh> submeshes;
+  base::Vector<Vertex> vertices;
+  base::Vector<SkinnedVertexExtra> skinning;
+  base::Vector<u32> indices;
+  base::Vector<Submesh> submeshes;
 };
 
 struct Mesh {
   AssetId id;
-  std::vector<MeshLod> lods;
+  base::Vector<MeshLod> lods;
   f32 bounds_center[3] = {0, 0, 0};
   f32 bounds_radius = 0;
 };

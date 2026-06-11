@@ -10,13 +10,13 @@ namespace {
 
 constexpr u32 kDdsMagic = FourCc('D', 'D', 'S', ' ');
 
-std::unique_ptr<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id) {
+base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id) {
   if (data.size() < 128) return nullptr;
   u32 magic;
   std::memcpy(&magic, data.data(), 4);
   if (magic != kDdsMagic) return nullptr;
 
-  auto texture = std::make_unique<asset::Texture>();
+  auto texture = base::MakeUnique<asset::Texture>();
   texture->id = id;
   std::memcpy(&texture->height, data.data() + 12, 4);
   std::memcpy(&texture->width, data.data() + 16, 4);
@@ -28,8 +28,8 @@ std::unique_ptr<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id) {
   return texture;
 }
 
-std::unique_ptr<asset::Material> ConvertBgsm(ByteSpan data, asset::AssetId id) {
-  auto material = std::make_unique<asset::Material>();
+base::UniquePointer<asset::Material> ConvertBgsm(ByteSpan data, asset::AssetId id) {
+  auto material = base::MakeUnique<asset::Material>();
   material->id = id;
   // TODO: BGSM/BGEM layout (version, texture paths, alpha settings), then
   // map specular/smoothness to metallic/roughness.

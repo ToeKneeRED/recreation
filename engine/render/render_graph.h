@@ -3,7 +3,8 @@
 
 #include <functional>
 #include <string>
-#include <vector>
+
+#include <base/containers/vector.h>
 
 #include "core/types.h"
 #include "render/rhi/resources.h"
@@ -59,7 +60,7 @@ class TransientPool {
   };
 
   Device& device_;
-  std::vector<Entry> entries_;
+  base::Vector<Entry> entries_;
 };
 
 // Handed to pass execute callbacks. Descriptor sets come from a per frame
@@ -84,7 +85,7 @@ class RenderGraph {
       ResourceHandle handle;
       ResourceUsage usage;
     };
-    std::vector<Access> accesses;
+    base::Vector<Access> accesses;
   };
 
   using SetupFn = std::function<void(PassBuilder&)>;
@@ -127,12 +128,12 @@ class RenderGraph {
     std::string name;
     PassBuilder builder;
     ExecuteFn execute;
-    std::vector<VkImageMemoryBarrier2> barriers;
+    base::Vector<VkImageMemoryBarrier2> barriers;
   };
 
-  std::vector<Resource> resources_;
-  std::vector<Pass> passes_;
-  std::vector<VkImageMemoryBarrier2> final_barriers_;
+  base::Vector<Resource> resources_;
+  base::Vector<Pass> passes_;
+  base::Vector<VkImageMemoryBarrier2> final_barriers_;
 };
 
 }  // namespace rec::render

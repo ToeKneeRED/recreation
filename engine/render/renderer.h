@@ -2,8 +2,9 @@
 #define RECREATION_RENDER_RENDERER_H_
 
 #include <memory>
-#include <unordered_map>
-#include <vector>
+
+#include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
 
 #include "asset/mesh.h"
 #include "core/math.h"
@@ -45,7 +46,7 @@ struct DrawItem {
 
 struct FrameView {
   CameraPose camera;
-  std::vector<DrawItem> draws;
+  base::Vector<DrawItem> draws;
 };
 
 class Renderer {
@@ -96,11 +97,11 @@ class Renderer {
   std::unique_ptr<TransientPool> transient_pool_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;
-  std::unordered_map<u64, GpuMesh> meshes_;
+  base::UnorderedMap<u64, GpuMesh> meshes_;
   FrameResources frames_[kFramesInFlight];
   // One per swapchain image: a present may still wait on the semaphore
   // until its image is reacquired, so frame slots cannot own these.
-  std::vector<VkSemaphore> render_finished_;
+  base::Vector<VkSemaphore> render_finished_;
   std::unique_ptr<Upscaler> upscaler_;
   std::unique_ptr<RayTracingContext> raytracing_;
   RenderGraph graph_;

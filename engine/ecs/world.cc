@@ -7,7 +7,7 @@ namespace rec::ecs {
 namespace detail {
 namespace {
 std::atomic<ComponentId> g_next_id{0};
-std::vector<ComponentInfo> g_infos(256);
+base::Vector<ComponentInfo> g_infos(256);
 }  // namespace
 
 ComponentId NextComponentId() { return g_next_id.fetch_add(1); }
@@ -36,7 +36,7 @@ Entity World::Create() {
   EntityRecord& record = records_[index];
   record.alive = true;
   Entity entity{index, record.generation};
-  record.archetype = archetypes_.front().get();
+  record.archetype = archetypes_.front().Get_UseOnlyIfYouKnowWhatYouareDoing();
   record.row = record.archetype->AddRow(entity);
   ++live_count_;
   return entity;
@@ -92,11 +92,10 @@ bool World::HasRaw(Entity entity, ComponentId id) const {
 }
 
 Archetype* World::GetOrCreateArchetype(const Signature& signature) {
-  auto it = archetype_lookup_.find(signature);
-  if (it != archetype_lookup_.end()) return it->second;
-  archetypes_.push_back(std::make_unique<Archetype>(signature));
-  Archetype* archetype = archetypes_.back().get();
-  archetype_lookup_.emplace(signature, archetype);
+  if (Archetype** found = archetype_lookup_.find(signature)) return *found;
+  archetypes_.push_back(base::MakeUnique<Archetype>(signature));
+  Archetype* archetype = archetypes_.back().Get_UseOnlyIfYouKnowWhatYouareDoing();
+  archetype_lookup_.insert(signature, archetype);
   return archetype;
 }
 

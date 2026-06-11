@@ -2,7 +2,10 @@
 #define RECREATION_ECS_ARCHETYPE_H_
 
 #include <algorithm>
-#include <vector>
+#include <cstring>
+
+#include <base/containers/vector.h>
+#include <base/hashing/fnv1a.h>
 
 #include "ecs/component.h"
 #include "ecs/entity.h"
@@ -10,7 +13,7 @@
 namespace rec::ecs {
 
 // Sorted set of component ids identifying an archetype.
-using Signature = std::vector<ComponentId>;
+using Signature = base::Vector<ComponentId>;
 
 inline Signature MakeSignature(std::initializer_list<ComponentId> ids) {
   Signature sig(ids);
@@ -25,6 +28,22 @@ inline bool SignatureContains(const Signature& sig, ComponentId id) {
 inline bool SignatureContainsAll(const Signature& sig, const Signature& subset) {
   return std::includes(sig.begin(), sig.end(), subset.begin(), subset.end());
 }
+
+// Functors for hashing signatures as raw bytes (sorted ids make this stable).
+struct SignatureHash {
+  mem_size operator()(const Signature& sig) const {
+    return base::fnv1a(reinterpret_cast<const u8*>(sig.data()),
+                       sig.size() * sizeof(ComponentId));
+  }
+};
+
+struct SignatureEqual {
+  bool operator()(const Signature& a, const Signature& b) const {
+    return a.size() == b.size() &&
+           (a.empty() ||
+            std::memcmp(a.data(), b.data(), a.size() * sizeof(ComponentId)) == 0);
+  }
+};
 
 // Columnar storage. One column per component type, rows are entities.
 class Archetype {
@@ -54,12 +73,12 @@ class Archetype {
   struct Column {
     ComponentId id;
     u32 stride;
-    std::vector<u8> data;
+    base::Vector<u8> data;
   };
 
   Signature signature_;
-  std::vector<Column> columns_;
-  std::vector<Entity> entities_;
+  base::Vector<Column> columns_;
+  base::Vector<Entity> entities_;
 };
 
 }  // namespace rec::ecs

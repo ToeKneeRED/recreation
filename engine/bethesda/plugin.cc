@@ -45,7 +45,7 @@ struct Reader {
   }
 };
 
-bool ParseSubrecords(ByteSpan data, std::vector<Subrecord>* out) {
+bool ParseSubrecords(ByteSpan data, base::Vector<Subrecord>* out) {
   Reader reader{data};
   u32 extended_size = 0;
   while (reader.remaining() >= 6) {
@@ -69,7 +69,7 @@ bool ParseSubrecords(ByteSpan data, std::vector<Subrecord>* out) {
   return reader.remaining() == 0;
 }
 
-bool DecompressRecord(ByteSpan compressed, std::vector<u8>* out) {
+bool DecompressRecord(ByteSpan compressed, base::Vector<u8>* out) {
   if (compressed.size() < 4) return false;
   u32 uncompressed_size;
   std::memcpy(&uncompressed_size, compressed.data(), 4);
@@ -90,7 +90,7 @@ bool ParseRecord(const RecordHeader& header, ByteSpan record_data, Record* out) 
   ByteSpan payload = record_data;
   if (header.flags & kRecordFlagCompressed) {
     if (!DecompressRecord(record_data, &out->decompressed)) return false;
-    payload = ByteSpan(out->decompressed);
+    payload = ByteSpan(out->decompressed.data(), out->decompressed.size());
   }
   return ParseSubrecords(payload, &out->subrecords);
 }
@@ -141,7 +141,7 @@ std::optional<PluginFile> PluginFile::Open(const std::string& path, const GamePr
 }
 
 bool PluginFile::ParseHeader(const GameProfile& profile) {
-  Reader reader{ByteSpan(data_)};
+  Reader reader{ByteSpan(data_.data(), data_.size())};
   RecordHeader header;
   if (!reader.Read(&header) || header.type != kTes4) return false;
   if (reader.remaining() < header.data_size) return false;
@@ -171,7 +171,7 @@ bool PluginFile::ParseHeader(const GameProfile& profile) {
 }
 
 bool PluginFile::VisitRecords(const RecordVisitor& visitor) const {
-  Reader reader{ByteSpan(data_)};
+  Reader reader{ByteSpan(data_.data(), data_.size())};
   reader.pos = records_begin_;
 
   while (reader.remaining() >= sizeof(GroupHeader)) {

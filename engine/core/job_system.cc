@@ -1,5 +1,7 @@
 #include "core/job_system.h"
 
+#include <utility>
+
 namespace rec {
 
 JobSystem::JobSystem(unsigned thread_count) {
@@ -22,10 +24,12 @@ JobSystem::~JobSystem() {
   for (auto& worker : workers_) worker.join();
 }
 
-void JobSystem::Submit(std::function<void()> job) {
+void JobSystem::Submit(JobFn job) {
   {
     std::scoped_lock lock(mutex_);
-    queue_.push_back(std::move(job));
+    // SimpleDeque only offers a copying push_back; the closure must be
+    // copy-constructible anyway for StaticFunction.
+    queue_.push_back(job);
   }
   wake_.notify_one();
 }
@@ -37,7 +41,7 @@ void JobSystem::WaitIdle() {
 
 void JobSystem::WorkerLoop() {
   for (;;) {
-    std::function<void()> job;
+    JobFn job;
     {
       std::unique_lock lock(mutex_);
       wake_.wait(lock, [this] { return stop_ || !queue_.empty(); });

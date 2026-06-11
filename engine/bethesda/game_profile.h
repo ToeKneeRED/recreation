@@ -2,7 +2,8 @@
 #define RECREATION_BETHESDA_GAME_PROFILE_H_
 
 #include <string>
-#include <vector>
+
+#include <base/containers/vector.h>
 
 #include "core/types.h"
 
@@ -20,7 +21,9 @@ struct GameProfile {
   std::string name;
   ArchiveFormat archive_format = ArchiveFormat::kBsa;
   f32 plugin_version = 0;          // HEDR version field
-  std::vector<std::string> base_masters;
+  // Elements stay std::string: master names feed path concatenation and
+  // std::ifstream in the loaders.
+  base::Vector<std::string> base_masters;
   bool supports_esl = true;
   bool has_loose_script_source = true;
 
