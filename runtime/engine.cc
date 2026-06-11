@@ -70,6 +70,13 @@ void Engine::CreateDemoScene() {
   world_.Add(entity, world::Renderable{cube.id});
   world_.Add(entity, Spin{});
 
+  // Ground under the cube so raytraced shadows have something to land on.
+  asset::Mesh ground = asset::MakeCube(2.5f, asset::MakeAssetId("builtin/ground"));
+  renderer_.UploadMesh(ground);
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, world::Transform{.position = {0, -3.6f, 0}});
+  world_.Add(floor, world::Renderable{ground.id});
+
   scheduler_.AddSystem(ecs::Stage::kSim, "demo_spin", [](ecs::World& world, f32 dt) {
     world.Each<Spin, world::Transform>([dt](ecs::Entity, Spin& spin, world::Transform& t) {
       spin.angle += spin.speed * dt;

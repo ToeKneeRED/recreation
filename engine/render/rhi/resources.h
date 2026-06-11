@@ -28,6 +28,7 @@ struct GpuMesh {
   GpuBuffer vertices;
   GpuBuffer indices;
   u32 index_count = 0;
+  u32 vertex_count = 0;
 };
 
 }  // namespace rec::render

@@ -28,9 +28,15 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   output_width_ = swapchain_->extent().width;
   output_height_ = swapchain_->extent().height;
 
+  if (desc.enable_raytracing && device_->caps().raytracing) {
+    raytracing_ = RayTracingContext::Create(*device_);
+    raytracing_->Configure(desc.raytracing);
+  }
+  rt_shadows_ = raytracing_ && device_->caps().ray_query && desc.raytracing.shadows;
+
   transient_pool_ = std::make_unique<TransientPool>(*device_);
-  mesh_pipeline_ =
-      MeshPipeline::Create(*device_, kSceneColorFormat, kMotionFormat, kDepthFormat);
+  mesh_pipeline_ = MeshPipeline::Create(*device_, kSceneColorFormat, kMotionFormat, kDepthFormat,
+                                        rt_shadows_);
   post_ = PostPass::Create(*device_, swapchain_->format());
   if (!mesh_pipeline_ || !post_ || !taa_.Initialize(*device_)) return false;
 
@@ -52,11 +58,6 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
 
-  if (desc.enable_raytracing && device_->caps().raytracing) {
-    raytracing_ = std::make_unique<RayTracingContext>(*device_);
-    raytracing_->Configure(desc.raytracing);
-  }
-
   return true;
 }
 
@@ -76,16 +77,22 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh) {
   if (mesh.lods.empty() || mesh.lods[0].vertices.empty()) return false;
 
   const asset::MeshLod& lod = mesh.lods[0];
+  VkBufferUsageFlags rt_usage =
+      raytracing_ ? VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                  : 0;
   GpuMesh gpu;
   gpu.vertices = device_->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(lod.vertices.data()),
                lod.vertices.size() * sizeof(asset::Vertex)),
-      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | rt_usage);
   gpu.indices = device_->CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(lod.indices.data()), lod.indices.size() * sizeof(u32)),
-      VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT | rt_usage);
   gpu.index_count = static_cast<u32>(lod.indices.size());
+  gpu.vertex_count = static_cast<u32>(lod.vertices.size());
   meshes_[mesh.id.hash] = gpu;
+  if (raytracing_) raytracing_->BuildBlas(mesh.id.hash, gpu);
   return true;
 }
 
@@ -194,6 +201,20 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       {.name = "depth", .format = kDepthFormat, .width = render_width_,
        .height = render_height_});
 
+  u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
+  if (rt_shadows_) {
+    std::vector<RayTracingContext::Instance> instances;
+    instances.reserve(view.draws.size());
+    for (const DrawItem& item : view.draws) {
+      instances.push_back({.mesh_key = item.mesh, .transform = item.transform});
+    }
+    graph_.AddPass(
+        "tlas_build", [](RenderGraph::PassBuilder&) {},
+        [this, tlas_slot, instances = std::move(instances)](PassContext& ctx) {
+          raytracing_->BuildTlas(ctx.cmd, tlas_slot, instances);
+        });
+  }
+
   graph_.AddPass(
       "scene",
       [&](RenderGraph::PassBuilder& builder) {
@@ -201,7 +222,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         builder.Write(motion, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
       },
-      [this, scene_color, motion, depth, &frame, &view](PassContext& ctx) {
+      [this, scene_color, motion, depth, tlas_slot, &frame, &view](PassContext& ctx) {
         VkRenderingAttachmentInfo colors[2];
         colors[0] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         colors[0].imageView = ctx.graph->image(scene_color).view;
@@ -240,13 +261,31 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
         VkDescriptorSet globals_set = ctx.allocate_set(mesh_pipeline_->set_layout());
         VkDescriptorBufferInfo buffer_info{frame.globals.buffer, 0, sizeof(FrameGlobals)};
-        VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        write.dstSet = globals_set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        write.pBufferInfo = &buffer_info;
-        vkUpdateDescriptorSets(device_->device(), 1, &write, 0, nullptr);
+        VkWriteDescriptorSet writes[2];
+        writes[0] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        writes[0].dstSet = globals_set;
+        writes[0].dstBinding = 0;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[0].pBufferInfo = &buffer_info;
+        u32 write_count = 1;
+
+        VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
+        VkWriteDescriptorSetAccelerationStructureKHR tlas_info{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+        if (rt_shadows_) {
+          tlas = raytracing_->tlas(tlas_slot);
+          tlas_info.accelerationStructureCount = 1;
+          tlas_info.pAccelerationStructures = &tlas;
+          writes[1] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+          writes[1].pNext = &tlas_info;
+          writes[1].dstSet = globals_set;
+          writes[1].dstBinding = 1;
+          writes[1].descriptorCount = 1;
+          writes[1].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+          write_count = 2;
+        }
+        vkUpdateDescriptorSets(device_->device(), write_count, writes, 0, nullptr);
 
         mesh_pipeline_->Bind(ctx.cmd, globals_set);
         for (const DrawItem& item : view.draws) {
@@ -257,8 +296,6 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         }
         vkCmdEndRendering(ctx.cmd);
       });
-
-  if (raytracing_) raytracing_->AddPasses(graph_);
 
   ResourceHandle post_input = scene_color;
   switch (desc_.aa_mode) {
@@ -324,11 +361,14 @@ bool Renderer::CreateFrameResources() {
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 8},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 8},
+        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 4},
     };
     VkDescriptorPoolCreateInfo descriptor_info{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     descriptor_info.maxSets = 16;
-    descriptor_info.poolSizeCount = 3;
+    // The acceleration structure pool size is only legal with the extension
+    // enabled, drop it otherwise.
+    descriptor_info.poolSizeCount = device_->caps().raytracing ? 4 : 3;
     descriptor_info.pPoolSizes = sizes;
     if (vkCreateDescriptorPool(device_->device(), &descriptor_info, nullptr,
                                &frame.descriptor_pool) != VK_SUCCESS) {

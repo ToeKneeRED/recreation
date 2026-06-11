@@ -23,6 +23,7 @@ endif()
 recreation_embed_shaders(recreation_render
   shaders/mesh.vert
   shaders/mesh.frag
+  shaders/mesh_rt.frag
   shaders/fullscreen.vert
   shaders/tonemap.frag
   shaders/taa.comp

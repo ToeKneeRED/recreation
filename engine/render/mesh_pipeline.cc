@@ -4,24 +4,30 @@
 #include "core/log.h"
 #include "render/shader_util.h"
 #include "shaders/mesh_frag.h"
+#include "shaders/mesh_rt_frag.h"
 #include "shaders/mesh_vert.h"
 
 namespace rec::render {
 
 std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, VkFormat color_format,
-                                                   VkFormat motion_format, VkFormat depth_format) {
+                                                   VkFormat motion_format, VkFormat depth_format,
+                                                   bool rt_shadows) {
   auto pipeline = std::unique_ptr<MeshPipeline>(new MeshPipeline(device));
 
-  VkDescriptorSetLayoutBinding globals_binding{};
-  globals_binding.binding = 0;
-  globals_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  globals_binding.descriptorCount = 1;
-  globals_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  VkDescriptorSetLayoutBinding bindings[2]{};
+  bindings[0].binding = 0;
+  bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  bindings[0].descriptorCount = 1;
+  bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  bindings[1].binding = 1;
+  bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+  bindings[1].descriptorCount = 1;
+  bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
   VkDescriptorSetLayoutCreateInfo set_info{
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_info.bindingCount = 1;
-  set_info.pBindings = &globals_binding;
+  set_info.bindingCount = rt_shadows ? 2 : 1;
+  set_info.pBindings = bindings;
   if (vkCreateDescriptorSetLayout(device.device(), &set_info, nullptr, &pipeline->set_layout_) !=
       VK_SUCCESS) {
     return nullptr;
@@ -42,7 +48,9 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, VkFormat colo
   }
 
   VkShaderModule vert = CreateShaderModule(device.device(), k_mesh_vert, sizeof(k_mesh_vert));
-  VkShaderModule frag = CreateShaderModule(device.device(), k_mesh_frag, sizeof(k_mesh_frag));
+  VkShaderModule frag =
+      rt_shadows ? CreateShaderModule(device.device(), k_mesh_rt_frag, sizeof(k_mesh_rt_frag))
+                 : CreateShaderModule(device.device(), k_mesh_frag, sizeof(k_mesh_frag));
   if (vert == VK_NULL_HANDLE || frag == VK_NULL_HANDLE) {
     REC_ERROR("mesh shader module creation failed");
     return nullptr;

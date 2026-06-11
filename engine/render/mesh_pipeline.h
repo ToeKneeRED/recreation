@@ -24,12 +24,15 @@ struct MeshPushConstants {
 };
 
 // Bringup pipeline: classic vertex buffer, lambert shading, reversed z
-// depth. Outputs hdr color and motion vectors. The real material system
-// replaces this once descriptors and bindless textures land.
+// depth. Outputs hdr color and motion vectors. With rt_shadows the fragment
+// shader ray queries the TLAS bound at set 0 binding 1 for a hard shadow
+// term. The real material system replaces this once descriptors and
+// bindless textures land.
 class MeshPipeline {
  public:
   static std::unique_ptr<MeshPipeline> Create(Device& device, VkFormat color_format,
-                                              VkFormat motion_format, VkFormat depth_format);
+                                              VkFormat motion_format, VkFormat depth_format,
+                                              bool rt_shadows);
   ~MeshPipeline();
 
   MeshPipeline(const MeshPipeline&) = delete;

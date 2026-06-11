@@ -103,6 +103,7 @@ class Renderer {
   TaaPass taa_;
   Mat4 prev_view_proj_ = Mat4::Identity();
   bool has_prev_frame_ = false;
+  bool rt_shadows_ = false;
   u32 frame_index_ = 0;
   u32 render_width_ = 0;
   u32 render_height_ = 0;

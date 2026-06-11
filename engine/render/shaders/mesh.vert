@@ -18,9 +18,12 @@ layout(push_constant) uniform Push {
 layout(location = 0) out vec3 out_normal;
 layout(location = 1) out vec4 out_curr_clip;
 layout(location = 2) out vec4 out_prev_clip;
+layout(location = 3) out vec3 out_world_pos;
 
 void main() {
-  vec4 clip = frame.view_proj * push.model * vec4(in_position, 1.0);
+  vec4 world = push.model * vec4(in_position, 1.0);
+  vec4 clip = frame.view_proj * world;
+  out_world_pos = world.xyz;
   // Motion vectors compare unjittered positions, so jitter only moves the
   // rasterized sample, never the reprojection.
   out_curr_clip = clip;
