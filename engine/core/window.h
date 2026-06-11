@@ -1,10 +1,12 @@
 #ifndef RECREATION_CORE_WINDOW_H_
 #define RECREATION_CORE_WINDOW_H_
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "core/input.h"
 #include "core/types.h"
 
 namespace rec {
@@ -32,6 +34,20 @@ class Window {
   virtual u32 width() const = 0;
   virtual u32 height() const = 0;
 
+  // Input collected by the last PumpEvents.
+  const InputState& input() const { return input_; }
+
+  // While enabled the cursor is hidden and mouse_dx/dy keep accumulating
+  // without hitting the screen edge. Mouse look uses this.
+  virtual void SetRelativeMouseMode(bool enabled) {}
+  virtual bool relative_mouse_mode() const { return false; }
+
+  // Called for every native event before the window handles it. With the
+  // SDL3 backend the pointer is an SDL_Event. ImGui hooks in here.
+  void set_event_hook(std::function<void(const void* native_event)> hook) {
+    event_hook_ = std::move(hook);
+  }
+
   // Vulkan glue. Backends that can present return the instance extensions
   // they need and write a VkSurfaceKHR through the opaque out pointer.
   // Headless windows return nothing, which tells the renderer to stay off.
@@ -40,6 +56,10 @@ class Window {
 
   // Returns a platform window, or a headless stub when none is available.
   static std::unique_ptr<Window> Create(const WindowDesc& desc);
+
+ protected:
+  InputState input_;
+  std::function<void(const void*)> event_hook_;
 };
 
 }  // namespace rec

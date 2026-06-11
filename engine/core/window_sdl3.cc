@@ -1,11 +1,39 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include <cstring>
+
 #include "core/log.h"
 #include "core/window.h"
 
 namespace rec {
 namespace {
+
+Key TranslateKey(SDL_Scancode code) {
+  switch (code) {
+    case SDL_SCANCODE_W: return Key::kW;
+    case SDL_SCANCODE_A: return Key::kA;
+    case SDL_SCANCODE_S: return Key::kS;
+    case SDL_SCANCODE_D: return Key::kD;
+    case SDL_SCANCODE_Q: return Key::kQ;
+    case SDL_SCANCODE_E: return Key::kE;
+    case SDL_SCANCODE_SPACE: return Key::kSpace;
+    case SDL_SCANCODE_LSHIFT: return Key::kLeftShift;
+    case SDL_SCANCODE_LCTRL: return Key::kLeftCtrl;
+    case SDL_SCANCODE_ESCAPE: return Key::kEscape;
+    case SDL_SCANCODE_F1: return Key::kF1;
+    default: return Key::kCount;
+  }
+}
+
+MouseButton TranslateButton(u8 button) {
+  switch (button) {
+    case SDL_BUTTON_LEFT: return MouseButton::kLeft;
+    case SDL_BUTTON_RIGHT: return MouseButton::kRight;
+    case SDL_BUTTON_MIDDLE: return MouseButton::kMiddle;
+    default: return MouseButton::kCount;
+  }
+}
 
 class Sdl3Window final : public Window {
  public:
@@ -17,11 +45,55 @@ class Sdl3Window final : public Window {
   }
 
   bool PumpEvents() override {
+    input_.mouse_dx = 0;
+    input_.mouse_dy = 0;
+    input_.wheel = 0;
+    std::memset(input_.pressed, 0, sizeof(input_.pressed));
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-      if (event.type == SDL_EVENT_QUIT) return false;
+      if (event_hook_) event_hook_(&event);
+      switch (event.type) {
+        case SDL_EVENT_QUIT:
+          return false;
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP: {
+          Key key = TranslateKey(event.key.scancode);
+          if (key == Key::kCount) break;
+          bool down = event.type == SDL_EVENT_KEY_DOWN;
+          if (down && !event.key.repeat && !input_.keys[static_cast<u8>(key)]) {
+            input_.pressed[static_cast<u8>(key)] = true;
+          }
+          input_.keys[static_cast<u8>(key)] = down;
+          break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP: {
+          MouseButton button = TranslateButton(event.button.button);
+          if (button == MouseButton::kCount) break;
+          input_.mouse[static_cast<u8>(button)] = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+          break;
+        }
+        case SDL_EVENT_MOUSE_MOTION:
+          input_.mouse_dx += event.motion.xrel;
+          input_.mouse_dy += event.motion.yrel;
+          break;
+        case SDL_EVENT_MOUSE_WHEEL:
+          input_.wheel += event.wheel.y;
+          break;
+        default:
+          break;
+      }
     }
     return true;
+  }
+
+  void SetRelativeMouseMode(bool enabled) override {
+    SDL_SetWindowRelativeMouseMode(window_, enabled);
+  }
+
+  bool relative_mouse_mode() const override {
+    return SDL_GetWindowRelativeMouseMode(window_);
   }
 
   NativeWindowHandles native_handles() const override {

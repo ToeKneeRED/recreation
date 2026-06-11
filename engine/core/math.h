@@ -15,6 +15,15 @@ struct Vec3 {
 
 inline Vec3 operator-(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 
+inline Vec3 operator+(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+
+inline Vec3 operator*(const Vec3& v, f32 s) { return {v.x * s, v.y * s, v.z * s}; }
+
+inline Vec3& operator+=(Vec3& a, const Vec3& b) {
+  a = a + b;
+  return a;
+}
+
 inline f32 Dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
 inline Vec3 Cross(const Vec3& a, const Vec3& b) {
