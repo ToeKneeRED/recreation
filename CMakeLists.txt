@@ -57,6 +57,9 @@ include(shaders)
 find_package(SDL3 QUIET)
 if(NOT SDL3_FOUND AND RECREATION_FETCH_SDL3)
   set(SDL_TEST_LIBRARY OFF)
+  # Static keeps the artifacts self contained, no SDL3.dll shipping.
+  set(SDL_SHARED OFF)
+  set(SDL_STATIC ON)
   FetchContent_Declare(SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG release-3.2.16

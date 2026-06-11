@@ -1,0 +1,65 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build glslang-tools zlib1g-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev libdecor-0-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libgl-dev libegl-dev libdrm-dev libgbm-dev
+      - name: configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON
+      - name: build
+        run: cmake --build build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recreation-linux-x64
+          path: |
+            build/runtime/recreation
+            build/tools/esminfo/esminfo
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: configure
+        run: cmake -B build -DRECREATION_FETCH_SDL3=ON
+      - name: build
+        run: cmake --build build --config Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recreation-windows-x64
+          path: |
+            build/runtime/Release/recreation.exe
+            build/tools/esminfo/Release/esminfo.exe
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build glslang-tools
+      - name: configure
+        run: >
+          cmake -B build-android -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake
+          -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29
+          -DCMAKE_BUILD_TYPE=Release -DRECREATION_BUILD_TOOLS=OFF
+      - name: build
+        run: cmake --build build-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recreation-android-arm64
+          path: build-android/runtime/recreation
