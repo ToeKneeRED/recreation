@@ -70,6 +70,8 @@ class Sdl3Window final : public Window {
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP: {
+          input_.mouse_x = event.button.x;
+          input_.mouse_y = event.button.y;
           MouseButton button = TranslateButton(event.button.button);
           if (button == MouseButton::kCount) break;
           input_.mouse[static_cast<u8>(button)] = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
@@ -78,6 +80,8 @@ class Sdl3Window final : public Window {
         case SDL_EVENT_MOUSE_MOTION:
           input_.mouse_dx += event.motion.xrel;
           input_.mouse_dy += event.motion.yrel;
+          input_.mouse_x = event.motion.x;
+          input_.mouse_y = event.motion.y;
           break;
         case SDL_EVENT_MOUSE_WHEEL:
           input_.wheel += event.wheel.y;

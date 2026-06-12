@@ -45,6 +45,9 @@ bool Engine::Initialize(const EngineConfig& config) {
     if (!debug_ui_.Initialize(*window_, renderer_)) {
       REC_WARN("debug ui unavailable");
     }
+    if (!game_ui_.Initialize(*window_, renderer_)) {
+      REC_WARN("game ui unavailable");
+    }
   }
 
   if (physics_.Initialize()) {
@@ -409,14 +412,17 @@ void Engine::UpdateCamera(f32 frame_delta) {
   if (!window_) return;
   const InputState& input = window_->input();
 
-  bool allow_mouse = !debug_ui_.wants_mouse() || camera_.looking();
-  bool allow_keyboard = !debug_ui_.wants_keyboard();
+  // The pause menu freezes the camera and frees the cursor so it can click.
+  bool menu = game_ui_.menu_open();
+  bool allow_mouse = !menu && (!debug_ui_.wants_mouse() || camera_.looking());
+  bool allow_keyboard = !menu && !debug_ui_.wants_keyboard();
   camera_.Update(input, allow_mouse, allow_keyboard, frame_delta);
-  window_->SetRelativeMouseMode(camera_.looking());
+  window_->SetRelativeMouseMode(!menu && camera_.looking());
 
   if (input.key_pressed(Key::kF1) && !debug_ui_.wants_keyboard()) debug_ui_.ToggleVisible();
-  if (input.key_pressed(Key::kF) && !debug_ui_.wants_keyboard()) ThrowPhysicsCube();
-  if (input.key_pressed(Key::kEscape) && !debug_ui_.wants_keyboard()) RequestQuit();
+  if (input.key_pressed(Key::kF) && !menu && !debug_ui_.wants_keyboard()) ThrowPhysicsCube();
+  if (input.key_pressed(Key::kEscape) && !debug_ui_.wants_keyboard()) game_ui_.ToggleMenu();
+  if (game_ui_.quit_requested()) RequestQuit();
 }
 
 void Engine::ThrowPhysicsCube() {
@@ -467,6 +473,7 @@ int Engine::Run() {
           });
       prev_transforms_ = std::move(transforms);
       debug_ui_.Build(renderer_, camera_, frame_delta, &view);
+      game_ui_.Build(*window_, renderer_, camera_, frame_delta, &view);
       renderer_.RenderFrame(view);
     } else {
       // No vsync to pace the loop; yield between fixed steps instead of
@@ -480,6 +487,7 @@ int Engine::Run() {
 void Engine::Shutdown() {
   if (!config_.headless) {
     renderer_.WaitIdle();
+    game_ui_.Shutdown();
     debug_ui_.Shutdown();
     renderer_.Shutdown();
   }

@@ -16,6 +16,7 @@
 #include "core/window.h"
 #include "debug_ui.h"
 #include "fly_camera.h"
+#include "game_ui.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
 #include "net/session.h"
@@ -86,6 +87,7 @@ class Engine {
   render::Renderer renderer_;
   FlyCamera camera_;
   DebugUi debug_ui_;
+  GameUi game_ui_;
   physics::PhysicsWorld physics_;
   // Dynamic bodies mirrored into ECS transforms after each step.
   struct PhysicsEntity {

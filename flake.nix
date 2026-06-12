@@ -47,8 +47,8 @@
           version = "0.1.0";
           src = self;
 
-          nativeBuildInputs = with pkgs; [ cmake ninja directx-shader-compiler ];
-          buildInputs = with pkgs; [ sdl3 openssl ];
+          nativeBuildInputs = with pkgs; [ cmake ninja directx-shader-compiler pkg-config ];
+          buildInputs = with pkgs; [ sdl3 openssl freetype harfbuzz ];
 
           cmakeFlags = fetchContentFlags ++ [
             "-DRECREATION_ZETANET_DIR=${zetanet-src}"
@@ -140,6 +140,11 @@
               gdb
               directx-shader-compiler  # dxc, hlsl -> spirv
               glslang                  # FidelityFX shader permutations
+              pkg-config               # libultragui finds freetype/harfbuzz
+              freetype                 # libultragui text rasterization
+              harfbuzz                 # libultragui text shaping
+              glib                     # harfbuzz.pc requires glib-2.0
+              fontconfig               # fc-match for the hud font
               sdl3
               openssl  # zetanet crypto backend
               vulkan-headers

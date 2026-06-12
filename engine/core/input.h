@@ -33,6 +33,10 @@ struct InputState {
   bool mouse[static_cast<u8>(MouseButton::kCount)] = {};
   f32 mouse_dx = 0;
   f32 mouse_dy = 0;
+  // Absolute cursor position in window pixels, persisted across pumps. Used by
+  // the gui (the camera uses the deltas above).
+  f32 mouse_x = 0;
+  f32 mouse_y = 0;
   f32 wheel = 0;
 
   bool key(Key k) const { return keys[static_cast<u8>(k)]; }

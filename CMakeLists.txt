@@ -108,6 +108,35 @@ endif()
 
 add_subdirectory(third_party)
 
+# libultragui: GPU UI middleware (sibling checkout) for the HUD and menus. Built
+# in draw-data mode with a custom SDL-fed platform and a headless RHI, so it
+# pulls in neither GLFW nor a second Vulkan path; the engine renders its draw
+# list with its own pipelines. Only freetype + harfbuzz + yoga are needed.
+# Skipped (HUD compiles out) when the checkout or SDL3 is missing.
+set(RECREATION_LIBULTRAGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libultragui" CACHE PATH
+  "Path to a libultragui checkout")
+set(RECREATION_HAS_UGUI OFF)
+if(SDL3_FOUND AND EXISTS "${RECREATION_LIBULTRAGUI_DIR}/CMakeLists.txt")
+  set(ULTRAGUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_BACKEND_VULKAN OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_LUA OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_AUDIO OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_LOTTIE OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_VIDEO OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_PLATFORM_GLFW OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_BUILD_SHADERS OFF CACHE BOOL "" FORCE)
+  set(ULTRAGUI_PLATFORM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ugui_platform.cc"
+    CACHE FILEPATH "" FORCE)
+  set(ULTRAGUI_RHI_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ugui_rhi.cc"
+    CACHE FILEPATH "" FORCE)
+  add_subdirectory(${RECREATION_LIBULTRAGUI_DIR} libultragui EXCLUDE_FROM_ALL)
+  set(RECREATION_HAS_UGUI ON)
+  message(STATUS "libultragui found, hud enabled")
+else()
+  message(STATUS "libultragui not found, hud disabled")
+endif()
+
 set(RECREATION_MODULES
   core
   ecs

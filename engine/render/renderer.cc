@@ -948,7 +948,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                       post_params);
       });
 
-  if (view.ui_draw) {
+  if (view.ui_draw || view.hud_draw) {
     graph_.AddPass(
         "ui",
         [&](RenderGraph::PassBuilder& builder) {
@@ -967,7 +967,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           rendering.colorAttachmentCount = 1;
           rendering.pColorAttachments = &color;
           vkCmdBeginRendering(ctx.cmd, &rendering);
-          view.ui_draw(ctx.cmd);
+          if (view.hud_draw) view.hud_draw(ctx.cmd);
+          if (view.ui_draw) view.ui_draw(ctx.cmd);
           vkCmdEndRendering(ctx.cmd);
         });
   }

@@ -1,0 +1,429 @@
+#include "game_ui.h"
+
+#include "fly_camera.h"
+
+#if defined(RECREATION_HAS_UGUI)
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
+
+#include <ugui/style/style.h>
+#include <ugui/ultragui.h>
+#include <ugui/widgets/text.h>
+#include <ugui/widgets/widget.h>
+#include <ugui/widgets/widget_registry.h>
+
+#include "core/log.h"
+#include "core/window.h"
+#include "gui_backend.h"
+#include "render/renderer.h"
+#include "ugui_platform.h"
+
+namespace rec {
+namespace {
+
+namespace fs = std::filesystem;
+
+// Scrolling compass geometry. 8 marks per 360deg turn, 3 turns so the strip
+// always covers the window whatever the heading; the engine slides it by
+// setting compass_strip's left offset each frame.
+constexpr float kCompassWindow = 340.0f;
+constexpr float kCompassLabel = 70.0f;
+constexpr int kCompassTurns = 3;
+constexpr float kCompassCenter = kCompassWindow * 0.5f;
+
+const char* kCardinals[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+
+float CompassStripLeft(float heading_deg) {
+  float eff = heading_deg + 360.0f;  // middle turn
+  return kCompassCenter - (eff / 45.0f) * kCompassLabel - kCompassLabel * 0.5f;
+}
+
+std::string BuildUi() {
+  std::string s;
+  s += R"(
+panel root {
+  width: 100vw; height: 100vh; position: relative;
+
+  panel topbar {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 64;
+    layout: row; justify: center; align: start; padding: 16 0 0 0;
+    panel compass_window {
+      width: 340; height: 30; position: relative; overflow: hidden;
+      panel compass_strip {
+        position: absolute; top: 0; left: 0; height: 30; width: 1680;
+        layout: row; align: center;
+)";
+
+  // Generated cardinal labels.
+  int count = 8 * kCompassTurns;
+  for (int i = 0; i < count; ++i) {
+    const char* card = kCardinals[i % 8];
+    bool major = (i % 2) == 0;       // N E S W
+    bool north = (i % 8) == 0;
+    const char* color = north ? "#ffcc55" : (major ? "#e8ecf6" : "#6b7488");
+    int font = major ? 15 : 11;
+    s += "        text cl" + std::to_string(i) + " { text: \"" + card +
+         "\"; width: 70; text-align: center; font-size: " + std::to_string(font) +
+         "; color: " + color +
+         "; text-shadow-color: #000000d0; text-shadow-x: 1; text-shadow-y: 1; }\n";
+  }
+
+  s += R"(
+      }
+      panel compass_marker {
+        position: absolute; top: 0; left: 169; width: 2; height: 30;
+        background: #ffcc55;
+      }
+    }
+  }
+
+  panel crosshair {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center;
+    panel cross {
+      width: 24; height: 24; position: relative;
+      panel ch_t { position: absolute; left: 11; top: 0;  width: 2; height: 8; background: #ffffffcc; }
+      panel ch_b { position: absolute; left: 11; top: 16; width: 2; height: 8; background: #ffffffcc; }
+      panel ch_l { position: absolute; left: 0;  top: 11; width: 8; height: 2; background: #ffffffcc; }
+      panel ch_r { position: absolute; left: 16; top: 11; width: 8; height: 2; background: #ffffffcc; }
+      panel ch_dot { position: absolute; left: 11; top: 11; width: 2; height: 2; background: #ffcc55; }
+    }
+  }
+
+  panel vitals {
+    position: absolute; left: 30; bottom: 30; layout: column; gap: 9;
+    panel bar_health_track {
+      width: 280; height: 13; overflow: hidden;
+      background: #0c0e16cc; corner-radius: 7;
+      border-color: #00000077; border-width: 1;
+      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
+      panel bar_health_fill {
+        width: 100%; height: 100%; corner-radius: 7;
+        background: #b23a3a; background-end: #e8645d;
+      }
+    }
+    panel bar_magicka_track {
+      width: 280; height: 13; overflow: hidden;
+      background: #0c0e16cc; corner-radius: 7;
+      border-color: #00000077; border-width: 1;
+      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
+      panel bar_magicka_fill {
+        width: 100%; height: 100%; corner-radius: 7;
+        background: #3a63b2; background-end: #5d92e8;
+      }
+    }
+    panel bar_stamina_track {
+      width: 280; height: 13; overflow: hidden;
+      background: #0c0e16cc; corner-radius: 7;
+      border-color: #00000077; border-width: 1;
+      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
+      panel bar_stamina_fill {
+        width: 100%; height: 100%; corner-radius: 7;
+        background: #3aa05a; background-end: #5de88a;
+      }
+    }
+  }
+
+  panel readout {
+    position: absolute; right: 30; bottom: 30; layout: column; align: end; gap: 3;
+    text hud_fps { text: "-- fps"; font-size: 15; color: #cfd6e6;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text hud_coords { text: "x -- y -- z --"; font-size: 12; color: #aab2c6;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text hud_heading { text: "--"; font-size: 12; color: #aab2c6;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+  }
+
+  panel menu {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center;
+    background: #05070cf2;
+    panel menu_card {
+      layout: column; align: center; padding: 44 60;
+      background: #0d1018f7; background-end: #0a0c14f7; corner-radius: 16;
+      border-color: #ffffff1c; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 20;
+      text menu_title {
+        text: "Paused"; font-size: 40; color: #f2f4fb;
+        letter-spacing: 10; text-transform: uppercase;
+      }
+      text menu_sub {
+        text: "recreation"; font-size: 13; color: #ffcc55;
+        letter-spacing: 4; text-transform: uppercase;
+      }
+      panel menu_rule { width: 340; height: 1; background: #ffffff1f; margin: 24 0 22 0; }
+      panel menu_buttons {
+        layout: column; gap: 8; width: 340;
+        button btn_resume {
+          text: "Resume"; font-size: 19; color: #e8ecf6; text-align: center;
+          background: #ffcc5522; corner-radius: 9; padding: 14 0; cursor: pointer;
+          border-color: #ffcc5544; border-width: 1;
+          :hover { background: #ffcc5538; color: #ffffff; }
+          :pressed { background: #ffcc5555; }
+        }
+        button btn_settings {
+          text: "Settings"; font-size: 19; color: #9aa2b6; text-align: center;
+          background: #ffffff08; corner-radius: 9; padding: 14 0; cursor: pointer;
+          :hover { background: #ffffff14; color: #d8def0; }
+          :pressed { background: #ffffff20; }
+        }
+        button btn_quit {
+          text: "Quit to Desktop"; font-size: 19; color: #d88a8a; text-align: center;
+          background: #ffffff08; corner-radius: 9; padding: 14 0; cursor: pointer;
+          :hover { background: #b23a3a33; color: #ffd0d0; }
+          :pressed { background: #b23a3a55; }
+        }
+      }
+    }
+  }
+}
+)";
+  return s;
+}
+
+const char* FindFont() {
+  static std::string resolved;
+  if (const char* env = std::getenv("RECREATION_UI_FONT"); env && fs::exists(env)) {
+    resolved = env;
+    return resolved.c_str();
+  }
+  if (FILE* p = popen("fc-match -f '%{file}' 'sans:style=Regular' 2>/dev/null", "r")) {
+    char buf[1024];
+    size_t n = std::fread(buf, 1, sizeof(buf) - 1, p);
+    pclose(p);
+    if (n > 0) {
+      buf[n] = '\0';
+      std::string path(buf);
+      while (!path.empty() && (path.back() == '\n' || path.back() == '\r')) path.pop_back();
+      if (!path.empty() && fs::exists(path)) {
+        resolved = path;
+        return resolved.c_str();
+      }
+    }
+  }
+  static const char* candidates[] = {
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/TTF/DejaVuSans.ttf",
+      "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+      "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
+  };
+  for (const char* c : candidates) {
+    if (fs::exists(c)) {
+      resolved = c;
+      return resolved.c_str();
+    }
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+struct GameUi::Impl {
+  ugui::UIContext ui;
+  ui::UguiHostState host;
+  ui::GuiRenderBackend backend;
+  ugui::FontHandle font = ugui::kInvalidFont;
+  u32 font_revision = ~0u;
+  const ugui::DrawData* draw_data = nullptr;
+  bool initialized = false;
+  bool menu_open = false;
+  bool quit_requested = false;
+  bool prev_mouse[3] = {};
+  float stamina = 1.0f;
+
+  void SetStyleField(const char* name, void (*mutate)(ugui::Style&, float), float arg) {
+    ugui::wid w = ui.FindWidget(name);
+    if (!w.valid()) return;
+    ugui::StyleC* sc = ui.world().Get<ugui::StyleC>(w);
+    if (!sc) return;
+    ugui::Style s = sc->style;
+    mutate(s, arg);
+    ugui::SetStyle(ui.world(), w, s);
+  }
+
+  void ApplyMenuVisibility() {
+    SetStyleField(
+        "menu",
+        [](ugui::Style& s, float v) {
+          s.visibility = v > 0.5f ? ugui::Visibility::kVisible : ugui::Visibility::kCollapsed;
+        },
+        menu_open ? 1.0f : 0.0f);
+  }
+};
+
+GameUi::GameUi() : impl_(std::make_unique<Impl>()) {}
+GameUi::~GameUi() { Shutdown(); }
+
+bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
+  render::Device* device = renderer.device();
+  if (!device || device->is_stub()) return false;
+
+  impl_->host.window_width = static_cast<float>(window.width());
+  impl_->host.window_height = static_cast<float>(window.height());
+
+  ugui::UIConfig cfg;
+  cfg.draw_data = true;
+  cfg.external_window = &impl_->host;
+  cfg.width = static_cast<int>(window.width());
+  cfg.height = static_cast<int>(window.height());
+  if (!impl_->ui.Init(cfg)) {
+    REC_WARN("ultragui init failed");
+    return false;
+  }
+
+  if (const char* font_path = FindFont()) {
+    impl_->font = impl_->ui.LoadFont(font_path);
+    impl_->ui.set_default_font(impl_->font);
+    REC_INFO("ultragui font: {}", font_path);
+  } else {
+    REC_WARN("no ui font found (set RECREATION_UI_FONT), hud text will be blank");
+  }
+
+  ui::GuiRenderBackend::InitInfo bi;
+  bi.instance = device->instance();
+  bi.physical_device = device->physical_device();
+  bi.device = device->device();
+  bi.queue_family = device->graphics_family();
+  bi.queue = device->graphics_queue();
+  bi.color_format = renderer.swapchain_format();
+  bi.frames_in_flight = 2;
+  if (!impl_->backend.Init(bi)) {
+    REC_WARN("ultragui vulkan backend init failed");
+    impl_->ui.Shutdown();
+    return false;
+  }
+  impl_->ui.set_texture_backend(&impl_->backend);
+
+  std::string doc = BuildUi();
+  impl_->ui.LoadUiString(doc.c_str(), "hud");
+
+  Impl* impl = impl_.get();
+  impl_->ui.input().set_on_click([impl](ugui::wid w, ugui::MouseButton btn) {
+    if (btn != ugui::MouseButton::kLeft) return;
+    ugui::WidgetNode* n = impl->ui.world().Get<ugui::WidgetNode>(w);
+    if (!n) return;
+    if (n->name == "btn_resume") {
+      impl->menu_open = false;
+      impl->ApplyMenuVisibility();
+    } else if (n->name == "btn_quit") {
+      impl->quit_requested = true;
+    }
+  });
+
+  // Debug aid: RECREATION_UI_MENU opens the pause menu at startup.
+  if (std::getenv("RECREATION_UI_MENU")) impl_->menu_open = true;
+  impl_->ApplyMenuVisibility();  // menu starts hidden unless forced open
+  impl_->initialized = true;
+  REC_INFO("ultragui hud initialized (draw-data mode)");
+  return true;
+}
+
+void GameUi::Shutdown() {
+  if (!impl_ || !impl_->initialized) return;
+  impl_->backend.Shutdown();
+  impl_->ui.Shutdown();
+  impl_->initialized = false;
+}
+
+void GameUi::ToggleMenu() {
+  if (!impl_->initialized) return;
+  impl_->menu_open = !impl_->menu_open;
+  impl_->ApplyMenuVisibility();
+}
+
+bool GameUi::menu_open() const { return impl_->initialized && impl_->menu_open; }
+bool GameUi::quit_requested() const { return impl_->initialized && impl_->quit_requested; }
+
+void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 frame_delta,
+                   render::FrameView* view) {
+  if (!impl_->initialized) return;
+  Impl* impl = impl_.get();
+
+  impl->host.window_width = static_cast<float>(window.width());
+  impl->host.window_height = static_cast<float>(window.height());
+
+  // Feed the per-frame input snapshot into ultragui's queue.
+  const InputState& in = window.input();
+  ugui::InputQueue& q = impl->ui.platform()->input_queue();
+  q.PushMove({in.mouse_x, in.mouse_y});
+  const ugui::MouseButton buttons[3] = {ugui::MouseButton::kLeft, ugui::MouseButton::kRight,
+                                        ugui::MouseButton::kMiddle};
+  const MouseButton rec_buttons[3] = {MouseButton::kLeft, MouseButton::kRight,
+                                      MouseButton::kMiddle};
+  for (int i = 0; i < 3; ++i) {
+    bool down = in.button(rec_buttons[i]);
+    if (down != impl->prev_mouse[i]) q.PushButton(buttons[i], down);
+    impl->prev_mouse[i] = down;
+  }
+  if (in.wheel != 0.0f) q.PushScroll({0.0f, in.wheel});
+
+  // --- Drive HUD values from real engine state ---
+  // Compass heading from the camera's facing direction.
+  Vec3 fwd = camera.forward();
+  float heading = std::atan2(fwd.x, -fwd.z) * 57.29578f;
+  if (heading < 0.0f) heading += 360.0f;
+  impl->SetStyleField(
+      "compass_strip", [](ugui::Style& s, float v) { s.left_offset = ugui::Length::Px(v); },
+      CompassStripLeft(heading));
+
+  // Stamina drains while sprinting (shift + movement), regenerates otherwise.
+  bool moving = in.key(Key::kW) || in.key(Key::kA) || in.key(Key::kS) || in.key(Key::kD);
+  bool sprinting = in.key(Key::kLeftShift) && moving;
+  impl->stamina += (sprinting ? -0.45f : 0.30f) * frame_delta;
+  impl->stamina = std::clamp(impl->stamina, 0.0f, 1.0f);
+  impl->SetStyleField(
+      "bar_stamina_fill", [](ugui::Style& s, float v) { s.width = ugui::Length::Pct(v); },
+      impl->stamina * 100.0f);
+
+  // Readout text.
+  char buf[160];
+  std::snprintf(buf, sizeof(buf), "%.0f fps", frame_delta > 0 ? 1.0f / frame_delta : 0.0f);
+  ugui::SetText(impl->ui.FindWidget("hud_fps"), buf);
+  Vec3 pos = camera.position();
+  std::snprintf(buf, sizeof(buf), "x %.0f   y %.0f   z %.0f", pos.x, pos.y, pos.z);
+  ugui::SetText(impl->ui.FindWidget("hud_coords"), buf);
+  const char* card = kCardinals[static_cast<int>(std::fmod(heading + 22.5f, 360.0f) / 45.0f) % 8];
+  std::snprintf(buf, sizeof(buf), "%s  %.0f deg", card, heading);
+  ugui::SetText(impl->ui.FindWidget("hud_heading"), buf);
+
+  // Produce the draw list (input routing + layout + paint, no GPU work).
+  const ugui::DrawData& dd = impl->ui.RenderDrawData();
+  impl->draw_data = &dd;
+
+  // Upload the glyph atlas if it grew this frame.
+  if (impl->ui.text_engine().atlas_revision() != impl->font_revision) {
+    ugui::Vec2 as = impl->ui.text_engine().atlas_size();
+    impl->backend.UpdateFontAtlas(impl->ui.text_engine().atlas_pixels(),
+                                  static_cast<u32>(as.x), static_cast<u32>(as.y));
+    impl->font_revision = impl->ui.text_engine().atlas_revision();
+  }
+
+  impl->backend.NewFrame();
+  view->hud_draw = [impl](VkCommandBuffer cmd) {
+    if (impl->draw_data) impl->backend.Render(*impl->draw_data, cmd);
+  };
+}
+
+}  // namespace rec
+
+#else  // !RECREATION_HAS_UGUI
+
+namespace rec {
+
+struct GameUi::Impl {};
+GameUi::GameUi() = default;
+GameUi::~GameUi() = default;
+bool GameUi::Initialize(Window&, render::Renderer&) { return false; }
+void GameUi::Shutdown() {}
+void GameUi::Build(Window&, render::Renderer&, FlyCamera&, f32, render::FrameView*) {}
+void GameUi::ToggleMenu() {}
+bool GameUi::menu_open() const { return false; }
+bool GameUi::quit_requested() const { return false; }
+
+}  // namespace rec
+
+#endif  // RECREATION_HAS_UGUI

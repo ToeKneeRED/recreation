@@ -60,7 +60,9 @@ struct FrameView {
   f32 frame_delta_seconds = 1.0f / 60.0f;  // upscalers want real frame time
   base::Vector<DrawItem> draws;
   // Recorded inside the final ui pass with the backbuffer bound as the
-  // color attachment. The debug ui renders ImGui draw data here.
+  // color attachment. hud_draw (the libultragui HUD/menu) records first, then
+  // ui_draw (the debug ImGui overlay) on top.
+  std::function<void(VkCommandBuffer)> hud_draw;
   std::function<void(VkCommandBuffer)> ui_draw;
 };
 
