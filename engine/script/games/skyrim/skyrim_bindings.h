@@ -79,6 +79,10 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   void SetPlayerControl(i32 category, bool enabled) override;
   bool IsPlayerControlEnabled(i32 category) override;
 
+  // Global variables: seeded from the GLOB record, overridable.
+  f32 GetGlobalValue(papyrus::ObjectRef global) override;
+  void SetGlobalValue(papyrus::ObjectRef global, f32 value) override;
+
   // Actor values (new system): permanent base + damageable current.
   f32 GetActorValue(papyrus::ObjectRef actor, const std::string& av) override;
   f32 GetBaseActorValue(papyrus::ObjectRef actor, const std::string& av) override;
@@ -149,6 +153,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   std::unordered_map<u64, i32> crime_gold_;                             // faction -> gold
   std::array<bool, SkyrimBindings::kControlCount> player_controls_{};   // true = enabled
   bool player_controls_init_ = false;
+  std::unordered_map<u64, f32> global_values_;  // GlobalVariable overrides
 };
 
 }  // namespace rec::script::skyrim

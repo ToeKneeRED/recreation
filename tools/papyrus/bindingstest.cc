@@ -168,6 +168,25 @@ int main(int argc, char** argv) {
     check("CELL IsInterior matches DATA flag",
           bindings.IsInterior(ObjectRef{Handle(*cell)}) == cell_interior);
 
+  // GlobalVariable: authored value from GLOB record, then override.
+  std::optional<GlobalFormId> glob;
+  f32 glob_authored = 0;
+  records.EachOfType(FourCc('G', 'L', 'O', 'B'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    if (glob) return;
+    Record rec;
+    if (!records.Parse(id, &rec)) return;
+    const Subrecord* fltv = rec.Find(FourCc('F', 'L', 'T', 'V'));
+    if (!fltv || fltv->data.size() < 4) return;
+    glob = id;
+    std::memcpy(&glob_authored, fltv->data.data(), 4);
+  });
+  if (glob) {
+    ObjectRef g{Handle(*glob)};
+    check("global value matches authored FLTV", bindings.GetGlobalValue(g) == glob_authored);
+    bindings.SetGlobalValue(g, 42.0f);
+    check("global value override -> 42", bindings.GetGlobalValue(g) == 42.0f);
+  }
+
   // Quest state (new system).
   ObjectRef quest{0x123};
   check("quest stage default 0", bindings.GetStage(quest) == 0);

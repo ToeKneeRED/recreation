@@ -310,6 +310,28 @@ void RegisterObjectReference(papyrus::NativeRegistry& reg, SkyrimBindings* bindi
   });
 }
 
+void RegisterGlobalVariable(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
+  reg.Register("GlobalVariable", "GetValue", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Float(Resolve(bindings).GetGlobalValue(self));
+  });
+  reg.Register("GlobalVariable", "SetValue", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    Resolve(bindings).SetGlobalValue(self, ArgF(a, 0));
+    return Value();
+  });
+  reg.Register("GlobalVariable", "GetValueInt", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(static_cast<i32>(Resolve(bindings).GetGlobalValue(self)));
+  });
+  reg.Register("GlobalVariable", "SetValueInt", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    Resolve(bindings).SetGlobalValue(self, static_cast<f32>(ArgI(a, 0)));
+    return Value();
+  });
+  reg.Register("GlobalVariable", "Mod", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    SkyrimBindings& b = Resolve(bindings);
+    b.SetGlobalValue(self, b.GetGlobalValue(self) + ArgF(a, 0));
+    return Value();
+  });
+}
+
 void RegisterCell(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Cell", "IsInterior", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Bool(Resolve(bindings).IsInterior(self));
@@ -478,6 +500,7 @@ void RegisterSkyrimNatives(papyrus::NativeRegistry& reg, SkyrimBindings* binding
   RegisterQuest(reg, bindings);
   RegisterFaction(reg, bindings);
   RegisterCell(reg, bindings);
+  RegisterGlobalVariable(reg, bindings);
 }
 
 }  // namespace rec::script::skyrim

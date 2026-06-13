@@ -120,6 +120,10 @@ class SkyrimBindings {
   virtual void SetPlayerControl(i32 category, bool enabled) {}
   virtual bool IsPlayerControlEnabled(i32 category) { return true; }
 
+  // Global variables: initial value from the GLOB record, overridable.
+  virtual f32 GetGlobalValue(papyrus::ObjectRef global) { return 0; }
+  virtual void SetGlobalValue(papyrus::ObjectRef global, f32 value) {}
+
   // Game settings and time.
   virtual f32 GetGameSettingFloat(const std::string& name) { return 0; }
   virtual f32 GetRealHoursPassed() { return 0; }

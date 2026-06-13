@@ -252,6 +252,28 @@ bool RecordBackedSkyrimBindings::IsPlayerControlEnabled(i32 category) {
   return category >= 0 && category < kControlCount ? player_controls_[category] : true;
 }
 
+f32 RecordBackedSkyrimBindings::GetGlobalValue(ObjectRef global) {
+  auto it = global_values_.find(global.handle);
+  if (it != global_values_.end()) return it->second;
+  // Fall back to the GLOB record's authored value (FLTV).
+  if (records_) {
+    bethesda::Record rec;
+    if (records_->Parse(ToFormId(global), &rec)) {
+      const bethesda::Subrecord* fltv = rec.Find(FourCc('F', 'L', 'T', 'V'));
+      if (fltv && fltv->data.size() >= 4) {
+        f32 value;
+        std::memcpy(&value, fltv->data.data(), 4);
+        return value;
+      }
+    }
+  }
+  return 0.0f;
+}
+
+void RecordBackedSkyrimBindings::SetGlobalValue(ObjectRef global, f32 value) {
+  global_values_[global.handle] = value;
+}
+
 RecordBackedSkyrimBindings::ActorValue& RecordBackedSkyrimBindings::Av(ObjectRef actor,
                                                                        const std::string& av) {
   auto& values = actor_values_[actor.handle];
