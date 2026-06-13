@@ -2,9 +2,11 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <thread>
 
+#include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "bethesda/archive.h"
 #include "bethesda/converters.h"
@@ -38,7 +40,15 @@ bool Engine::Initialize(const EngineConfig& config) {
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
   }
 
-  if (!config_.data_dir.empty()) {
+  if (!config_.headless) {
+    if (!debug_ui_.Initialize(*window_, renderer_)) {
+      REC_WARN("debug ui unavailable");
+    }
+  }
+
+  if (!config_.gltf_path.empty()) {
+    if (!LoadGltfScene()) return false;
+  } else if (!config_.data_dir.empty()) {
     if (!LoadGameData()) return false;
   } else {
     CreateDemoScene();
@@ -179,6 +189,50 @@ void Engine::MountArchives() {
   }
 }
 
+bool Engine::LoadGltfScene() {
+  asset::GltfScene scene;
+  if (!asset::LoadGltfScene(config_.gltf_path, &scene)) return false;
+
+  if (!config_.headless) {
+    for (const asset::Texture& texture : scene.textures) {
+      if (texture.id) renderer_.UploadTexture(texture);
+    }
+    for (const asset::Material& material : scene.materials) renderer_.UploadMaterial(material);
+    for (const asset::Mesh& mesh : scene.meshes) renderer_.UploadMesh(mesh);
+  }
+
+  for (const asset::GltfScene::Instance& instance : scene.instances) {
+    ecs::Entity entity = world_.Create();
+    world::Transform transform;
+    transform.position[0] = instance.position.x;
+    transform.position[1] = instance.position.y;
+    transform.position[2] = instance.position.z;
+    std::memcpy(transform.rotation, instance.rotation, sizeof(transform.rotation));
+    transform.scale = instance.scale;
+    world_.Add(entity, transform);
+    world_.Add(entity, world::Renderable{scene.meshes[instance.mesh_index].id});
+  }
+
+  // Sponza-friendly start: inside the atrium looking down the long axis.
+  camera_.set_position({-7.0f, 1.7f, 0.0f});
+  camera_.set_yaw_pitch(1.5708f, 0.0f);
+  camera_.speed = 4.0f;
+  return true;
+}
+
+void Engine::UpdateCamera(f32 frame_delta) {
+  if (!window_) return;
+  const InputState& input = window_->input();
+
+  bool allow_mouse = !debug_ui_.wants_mouse() || camera_.looking();
+  bool allow_keyboard = !debug_ui_.wants_keyboard();
+  camera_.Update(input, allow_mouse, allow_keyboard, frame_delta);
+  window_->SetRelativeMouseMode(camera_.looking());
+
+  if (input.key_pressed(Key::kF1) && !debug_ui_.wants_keyboard()) debug_ui_.ToggleVisible();
+  if (input.key_pressed(Key::kEscape) && !debug_ui_.wants_keyboard()) RequestQuit();
+}
+
 int Engine::Run() {
   while (!quit_.load(std::memory_order_relaxed)) {
     if (window_ && !window_->PumpEvents()) break;
@@ -192,11 +246,15 @@ int Engine::Run() {
     }
 
     if (!config_.headless) {
-      scheduler_.RunStage(ecs::Stage::kPreRender, world_,
-                          static_cast<f32>(timer_.frame_delta()));
+      f32 frame_delta = static_cast<f32>(timer_.frame_delta());
+      debug_ui_.BeginFrame();
+      UpdateCamera(frame_delta);
+      scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
 
       render::FrameView view;
-      view.camera.eye = {2.4f, 1.8f, 2.4f};
+      view.camera.eye = camera_.position();
+      view.camera.target = camera_.target();
+      view.frame_delta_seconds = frame_delta;
       // Rebuilt every frame so destroyed entities drop out on their own.
       base::UnorderedMap<u64, Mat4> transforms;
       world_.Each<world::Transform, world::Renderable>(
@@ -208,6 +266,7 @@ int Engine::Run() {
             transforms.insert(key, current);
           });
       prev_transforms_ = std::move(transforms);
+      debug_ui_.Build(renderer_, camera_, frame_delta, &view);
       renderer_.RenderFrame(view);
     } else {
       // No vsync to pace the loop; yield between fixed steps instead of
@@ -219,7 +278,11 @@ int Engine::Run() {
 }
 
 void Engine::Shutdown() {
-  if (!config_.headless) renderer_.Shutdown();
+  if (!config_.headless) {
+    renderer_.WaitIdle();
+    debug_ui_.Shutdown();
+    renderer_.Shutdown();
+  }
   jobs_->WaitIdle();
 }
 

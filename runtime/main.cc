@@ -10,6 +10,7 @@ void PrintUsage() {
   REC_INFO("usage: recreation --data-dir <path> [options]");
   REC_INFO("  --data-dir <path>     game Data directory");
   REC_INFO("  --plugins <path>      plugins.txt (default: <data-dir>/../plugins.txt)");
+  REC_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
   REC_INFO("  --game <id>           skyrimse | fo4 | fo76 (default: autodetect)");
   REC_INFO("  --headless            no window, no renderer");
   REC_INFO("  --server              host a server");
@@ -46,6 +47,7 @@ int main(int argc, char** argv) {
     auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
 
     if (arg == "--data-dir") config.data_dir = next();
+    else if (arg == "--gltf") config.gltf_path = next();
     else if (arg == "--plugins") config.plugins_txt = next();
     else if (arg == "--game") config.game = ParseGame(next());
     else if (arg == "--headless") config.headless = true;

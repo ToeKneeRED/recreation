@@ -14,6 +14,8 @@
 #include "core/frame_timer.h"
 #include "core/job_system.h"
 #include "core/window.h"
+#include "debug_ui.h"
+#include "fly_camera.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
 #include "net/session.h"
@@ -25,6 +27,7 @@ namespace rec {
 struct EngineConfig {
   std::string data_dir;
   std::string plugins_txt;
+  std::string gltf_path;  // standalone gltf/glb scene (e.g. sponza)
   bethesda::Game game = bethesda::Game::kUnknown;  // kUnknown = autodetect
   render::RendererDesc renderer;
   bool headless = false;
@@ -50,6 +53,8 @@ class Engine {
   void MountArchives();
   bool StartNetworking();
   void CreateDemoScene();
+  bool LoadGltfScene();
+  void UpdateCamera(f32 frame_delta);
 
   EngineConfig config_;
   bethesda::Game game_ = bethesda::Game::kUnknown;
@@ -67,6 +72,8 @@ class Engine {
   std::unique_ptr<world::CellStreamer> streamer_;
 
   render::Renderer renderer_;
+  FlyCamera camera_;
+  DebugUi debug_ui_;
   // Last frame's world matrices keyed by entity, for motion vectors.
   base::UnorderedMap<u64, Mat4> prev_transforms_;
   std::unique_ptr<net::Session> session_;
