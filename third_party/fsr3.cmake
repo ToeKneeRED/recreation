@@ -1,0 +1,141 @@
+# AMD FidelityFX FSR 3.1 upscaler, vendor-compiled from the SDK checkout in
+# third_party/FidelityFX-SDK (see tools/get_fidelityfx.sh). The SDK's own
+# CMake is Windows-only, so the needed sources are built directly:
+#   - ffx_sc: the FidelityFX shader compiler host tool (GLSL path only),
+#     built with small Windows API shims from ffx_shim/sc/.
+#   - shader permutation headers: generated at build time by driving ffx_sc
+#     over the 10 fsr3upscaler passes (4 variants each), which shells out to
+#     glslangValidator from the dev shell.
+#   - recreation_ffx_fsr3: the classic components API (fsr3upscaler host
+#     component + vulkan backend + shader blob accessors) as a static lib.
+
+set(FFX_SDK ${CMAKE_CURRENT_SOURCE_DIR}/FidelityFX-SDK/sdk)
+set(FFX_SHIM ${CMAKE_CURRENT_SOURCE_DIR}/ffx_shim)
+set(FFX_SC_DIR ${FFX_SDK}/tools/ffx_shader_compiler)
+set(FFX_FSR3_SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/ffx_shaders/vk)
+
+find_program(RECREATION_GLSLANG glslangValidator REQUIRED)
+find_package(Threads REQUIRED)
+enable_language(C)  # the tool's vendored SPIRV-Reflect is C
+
+# ---------------------------------------------------------------------------
+# Host shader compiler tool.
+add_executable(ffx_sc
+  ${FFX_SC_DIR}/src/ffx_sc.cpp
+  ${FFX_SC_DIR}/src/glsl_compiler.cpp
+  ${FFX_SC_DIR}/src/utils.cpp
+  ${FFX_SC_DIR}/libs/MD5/md5.cpp
+  ${FFX_SC_DIR}/libs/SPIRV-Reflect/spirv_reflect.c
+  ${FFX_SC_DIR}/libs/tiny-process-library/process.cpp
+  ${FFX_SC_DIR}/libs/tiny-process-library/process_unix.cpp
+  ${FFX_SHIM}/sc/win_shim.cc
+  ${FFX_SHIM}/sc/hlsl_compiler_stub.cc
+)
+target_include_directories(ffx_sc PRIVATE
+  ${FFX_SHIM}/sc
+  ${FFX_SC_DIR}/src
+  ${FFX_SC_DIR}/libs/MD5
+  ${FFX_SC_DIR}/libs/SPIRV-Reflect
+  ${FFX_SC_DIR}/libs/tiny-process-library
+)
+target_compile_options(ffx_sc PRIVATE -w)
+# The tool's MD5 hex printer calls snprintf with an overstated buffer size,
+# which the nix toolchain's default _FORTIFY_SOURCE=3 turns into an abort at
+# runtime. The wrapper appends its hardening flags after ours, so the only
+# reliable off switch is the environment; keep pic/pie so linking still works.
+set_target_properties(ffx_sc PROPERTIES
+  C_COMPILER_LAUNCHER "${CMAKE_COMMAND};-E;env;NIX_HARDENING_ENABLE=pic pie"
+  CXX_COMPILER_LAUNCHER "${CMAKE_COMMAND};-E;env;NIX_HARDENING_ENABLE=pic pie")
+target_link_libraries(ffx_sc PRIVATE Threads::Threads)
+
+# ---------------------------------------------------------------------------
+# Shader permutation headers. ffx_sc expands the {0,1} permutation sets
+# itself (one invocation per pass and variant); the invocation lives in
+# cmake/ffx_sc_compile.cmake so the braces never meet a shell. No depfiles:
+# the SDK checkout is treated as immutable.
+set(FFX_FSR3_PASSES
+  accumulate
+  autogen_reactive
+  debug_view
+  luma_instability
+  luma_pyramid
+  prepare_inputs
+  prepare_reactivity
+  rcas
+  shading_change
+  shading_change_pyramid
+)
+
+file(MAKE_DIRECTORY ${FFX_FSR3_SHADER_DIR})
+set(FFX_FSR3_PERMUTATION_HEADERS)
+foreach(pass IN LISTS FFX_FSR3_PASSES)
+  set(shader ${FFX_SDK}/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_${pass}_pass.glsl)
+  foreach(variant base wave64 16bit wave64_16bit)
+    if(variant STREQUAL "base")
+      set(suffix "")
+      set(half 0)
+    elseif(variant STREQUAL "wave64")
+      set(suffix "_wave64")
+      set(half 0)
+    elseif(variant STREQUAL "16bit")
+      set(suffix "_16bit")
+      set(half 1)
+    else()
+      set(suffix "_wave64_16bit")
+      set(half 1)
+    endif()
+    set(name ffx_fsr3upscaler_${pass}_pass${suffix})
+    set(header ${FFX_FSR3_SHADER_DIR}/${name}_permutations.h)
+    add_custom_command(OUTPUT ${header}
+      COMMAND ${CMAKE_COMMAND}
+              -DFFX_SC=$<TARGET_FILE:ffx_sc>
+              -DGLSLANG=${RECREATION_GLSLANG}
+              -DGPU_DIR=${FFX_SDK}/include/FidelityFX/gpu
+              -DOUT_DIR=${FFX_FSR3_SHADER_DIR}
+              -DNAME=${name}
+              -DHALF=${half}
+              -DSHADER=${shader}
+              -P ${CMAKE_SOURCE_DIR}/cmake/ffx_sc_compile.cmake
+      DEPENDS ffx_sc ${shader} ${CMAKE_SOURCE_DIR}/cmake/ffx_sc_compile.cmake
+      COMMENT "ffx_sc ${name}"
+      VERBATIM)
+    list(APPEND FFX_FSR3_PERMUTATION_HEADERS ${header})
+  endforeach()
+endforeach()
+
+add_custom_target(ffx_fsr3_shaders DEPENDS ${FFX_FSR3_PERMUTATION_HEADERS})
+
+# ---------------------------------------------------------------------------
+# Runtime library: fsr3upscaler component + vulkan backend. ffx_compat.h is
+# force-included for the MSVC string functions and to route the backend's
+# vulkan calls through volk (the engine's loader).
+add_library(recreation_ffx_fsr3 STATIC
+  ${FFX_SDK}/src/components/fsr3upscaler/ffx_fsr3upscaler.cpp
+  ${FFX_SDK}/src/backends/vk/ffx_vk.cpp
+  ${FFX_SDK}/src/backends/shared/ffx_shader_blobs.cpp
+  ${FFX_SDK}/src/backends/shared/blob_accessors/ffx_fsr3upscaler_shaderblobs.cpp
+  ${FFX_SDK}/src/shared/ffx_assert.cpp
+  ${FFX_SDK}/src/shared/ffx_message.cpp
+  ${FFX_SDK}/src/shared/ffx_object_management.cpp
+  ${FFX_SDK}/src/shared/ffx_breadcrumbs_list.cpp
+  ${FFX_SHIM}/ffx_fi_stub.cc
+)
+add_library(recreation::ffx_fsr3 ALIAS recreation_ffx_fsr3)
+add_dependencies(recreation_ffx_fsr3 ffx_fsr3_shaders)
+target_include_directories(recreation_ffx_fsr3
+  PUBLIC
+    ${FFX_SHIM}/include  # interposed ffx_types.h, must precede the SDK
+    ${FFX_SDK}/include
+  PRIVATE
+    ${FFX_SDK}/src
+    ${FFX_SDK}/src/shared
+    ${FFX_SDK}/src/components
+    ${FFX_SDK}/src/backends/shared
+    ${FFX_FSR3_SHADER_DIR}
+)
+target_compile_definitions(recreation_ffx_fsr3 PRIVATE FFX_FSR3UPSCALER FFX_GCC)
+target_compile_options(recreation_ffx_fsr3 PRIVATE -w -include ${FFX_SHIM}/ffx_compat.h)
+# The SDK is C++17-era code; newer standards lose std::wstring_convert which
+# its non-Windows string conversion path still uses.
+set_target_properties(recreation_ffx_fsr3 PROPERTIES CXX_STANDARD 17)
+target_link_libraries(recreation_ffx_fsr3 PUBLIC volk)

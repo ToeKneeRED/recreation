@@ -17,6 +17,12 @@ recreation_add_module(render
 target_link_libraries(recreation_render
   PUBLIC recreation::core recreation::asset volk GPUOpen::VulkanMemoryAllocator)
 
+if(RECREATION_FSR3)
+  target_sources(recreation_render PRIVATE upscaler_fsr3.cc)
+  target_compile_definitions(recreation_render PRIVATE RECREATION_HAS_FSR3)
+  target_link_libraries(recreation_render PRIVATE recreation::ffx_fsr3)
+endif()
+
 if(NOT MSVC)
   set_source_files_properties(vulkan/vma_impl.cc PROPERTIES COMPILE_OPTIONS -w)
 endif()

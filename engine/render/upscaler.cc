@@ -5,12 +5,19 @@
 
 namespace rec::render {
 
+#if defined(RECREATION_HAS_FSR3)
+std::unique_ptr<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, Device& device);
+#endif
+
 // SDK backed implementations (FSR3, DLSS, XeSS) plug in here behind build
-// options once the RHI exposes what they need. Until then every request
-// falls back to TAA.
+// options. Anything not compiled in falls back to TAA.
 std::unique_ptr<Upscaler> CreateUpscaler(const UpscalerDesc& desc, Device& device) {
   switch (desc.kind) {
     case UpscalerKind::kFsr3:
+#if defined(RECREATION_HAS_FSR3)
+      if (!device.is_stub()) return CreateFsr3Upscaler(desc, device);
+      return nullptr;
+#endif
     case UpscalerKind::kDlss:
     case UpscalerKind::kXess:
       REC_WARN("upscaler backend not compiled in");

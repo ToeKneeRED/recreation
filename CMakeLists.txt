@@ -10,6 +10,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(RECREATION_BUILD_TOOLS "Build offline tools" ON)
 option(RECREATION_ENABLE_VALIDATION "Enable vulkan validation layers in debug" ON)
 option(RECREATION_FETCH_SDL3 "Download SDL3 when not found on the system" OFF)
+option(RECREATION_FSR3 "Enable the AMD FSR 3.1 upscaler backend" ON)
+
+if(RECREATION_FSR3 AND NOT EXISTS
+   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/FidelityFX-SDK/sdk/include/FidelityFX/host/ffx_fsr3upscaler.h)
+  message(STATUS "FidelityFX-SDK not found, fsr3 disabled (run tools/get_fidelityfx.sh)")
+  set(RECREATION_FSR3 OFF)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(warnings)
 

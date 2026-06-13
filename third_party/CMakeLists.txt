@@ -30,3 +30,9 @@ target_include_directories(recreation_cgltf INTERFACE ${CMAKE_CURRENT_SOURCE_DIR
 add_library(recreation_stb INTERFACE)
 add_library(recreation::stb ALIAS recreation_stb)
 target_include_directories(recreation_stb INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/stb)
+
+# AMD FidelityFX FSR 3.1 upscaler, downloaded via tools/get_fidelityfx.sh and
+# built with our own CMake (the SDK's is Windows-only).
+if(RECREATION_FSR3)
+  include(fsr3.cmake)
+endif()
