@@ -17,6 +17,7 @@ recreation_add_module(render
   raytracing.cc
   gpu_profiler.cc
   path_tracer.cc
+  volumetric_fog.cc
   upscaler.cc
   vulkan/vk_device.cc
   vulkan/vk_swapchain.cc
@@ -78,6 +79,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/water.ps.hlsl
   shaders/copy.cs.hlsl
   shaders/pathtrace.cs.hlsl
+  shaders/fog.cs.hlsl
 )
 
 # rtao.cs.hlsl and the nrd_* shaders pull in NRD.hlsli. The include dir is added

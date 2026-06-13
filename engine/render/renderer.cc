@@ -88,6 +88,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (rt_available_ && bindless_) {
     path_tracer_.Initialize(*device_, bindless_->set_layout());
   }
+  if (rt_available_) volumetric_fog_.Initialize(*device_);
 
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
@@ -121,6 +122,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     }
   }
   if (const char* pt = std::getenv("REC_PATHTRACE")) settings_.path_trace = std::atoi(pt) != 0;
+  if (const char* fg = std::getenv("REC_FOG")) settings_.fog = std::atoi(fg) != 0;
 
   return true;
 }
@@ -464,6 +466,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
+  bool fog_active = rt_available_ && settings_.fog && !path_trace;
   time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
@@ -594,7 +597,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
   if (rt_shadows || rtao_active || ddgi_active || water_pipeline_active || reflections_active ||
-      path_trace) {
+      path_trace || fog_active) {
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
@@ -1028,6 +1031,24 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           vkCmdEndRendering(ctx.cmd);
         });
   }
+
+  // Volumetric fog marches the lit scene against depth before the temporal
+  // pass, so the marched noise resolves into stable shafts.
+  if (fog_active) {
+    VolumetricFog::Frame ff;
+    ff.inv_view_proj = globals.inv_view_proj;
+    ff.camera_pos = view.camera.eye;
+    ff.sun_direction = settings_.sun_direction;
+    ff.sun_intensity = settings_.sun_intensity;
+    ff.sun_color = settings_.sun_color;
+    ff.density = settings_.fog_density;
+    ff.height_falloff = settings_.fog_height_falloff;
+    ff.base_height = settings_.fog_base_height;
+    ff.anisotropy = settings_.fog_anisotropy;
+    ff.frame_index = frame_index_;
+    lit = volumetric_fog_.AddToGraph(graph_, *raytracing_, tlas_slot, lit, depth_export,
+                                     {render_width_, render_height_}, ff);
+  }
   }  // end raster path
 
   // The path tracer already resolved antialiasing through accumulation; the
@@ -1272,6 +1293,7 @@ void Renderer::Shutdown() {
     exposure_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
+    volumetric_fog_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();
     environment_.reset();

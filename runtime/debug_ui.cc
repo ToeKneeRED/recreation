@@ -200,6 +200,12 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
         if (settings.path_trace) {
           ImGui::Text("accumulated %u spp", renderer.path_trace_samples());
         }
+        ImGui::Checkbox("Volumetric fog", &settings.fog);
+        if (settings.fog) {
+          ImGui::SliderFloat("Fog density", &settings.fog_density, 0.0f, 0.2f, "%.3f");
+          ImGui::SliderFloat("Fog height falloff", &settings.fog_height_falloff, 0.0f, 1.0f);
+          ImGui::SliderFloat("Fog anisotropy", &settings.fog_anisotropy, 0.0f, 0.95f);
+        }
         ImGui::EndDisabled();
         ImGui::BeginDisabled(!caps || !caps->fill_mode_non_solid);
         ImGui::Checkbox("Wireframe", &settings.wireframe);

@@ -76,6 +76,12 @@ struct RenderSettings {
 
   bool path_trace = false;  // reference progressive path tracer (needs ray query)
 
+  bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)
+  f32 fog_density = 0.03f;
+  f32 fog_height_falloff = 0.15f;
+  f32 fog_base_height = 0.0f;
+  f32 fog_anisotropy = 0.6f;  // henyey-greenstein g (forward scattering)
+
   Vec3 sun_direction{-0.35f, -0.9f, -0.25f};  // travel direction of the light
   f32 sun_intensity = 4.0f;
   Vec3 sun_color{1.0f, 0.96f, 0.9f};

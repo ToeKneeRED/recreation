@@ -21,6 +21,7 @@
 #include "render/environment.h"
 #include "render/gpu_profiler.h"
 #include "render/path_tracer.h"
+#include "render/volumetric_fog.h"
 #include "render/material_system.h"
 #include "render/mesh_pipeline.h"
 #include "render/post.h"
@@ -178,6 +179,7 @@ class Renderer {
   ExposurePass exposure_;
   GpuProfiler profiler_;
   PathTracer path_tracer_;
+  VolumetricFog volumetric_fog_;
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation
   bool pt_was_active_ = false;
