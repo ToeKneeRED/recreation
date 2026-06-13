@@ -26,6 +26,7 @@
 #include "ecs/world.h"
 #include "net/session.h"
 #include "physics/physics_world.h"
+#include "render/presets.h"
 #include "render/renderer.h"
 #include "script/games/skyrim/skyrim_bindings.h"
 #include "script/script_system.h"
@@ -50,6 +51,9 @@ struct EngineConfig {
   // lists what's attached; the default attaches every scripted quest.
   int max_quest_scripts = 0;
   render::RendererDesc renderer;
+  // Hardware quality tier. kAuto picks one from the gpu at startup; the rest
+  // force a tier (steam deck, android, low/medium/high/ultra, console).
+  render::QualityPreset preset = render::QualityPreset::kAuto;
   bool headless = false;
   bool host_server = false;
   u16 port = 29700;
@@ -117,6 +121,9 @@ class Engine {
   // snapshots its ring into the overlay (throttled).
   void RefreshNativeTrace(f32 dt);
   bool StartNetworking();
+  // Resolves the configured quality tier from the gpu (or a forced preset) and
+  // applies it to the renderer's live settings.
+  void ApplyRenderPreset();
   void CreateDemoScene();
   void CreateWaterDemoScene();
   void CreateTestCharacter();

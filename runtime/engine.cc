@@ -45,6 +45,7 @@ bool Engine::Initialize(const EngineConfig& config) {
   if (!config_.headless) {
     window_ = Window::Create({});
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
+    ApplyRenderPreset();
   }
 
   if (!config_.headless) {
@@ -147,6 +148,28 @@ bool Engine::StartNetworking() {
     });
   }
   return true;
+}
+
+void Engine::ApplyRenderPreset() {
+  render::Device* device = renderer_.device();
+  if (!device || device->is_stub()) return;  // no gpu, nothing to tune
+  const render::DeviceCaps& caps = device->caps();
+  render::QualityPreset resolved = render::ResolvePreset(config_.preset, caps);
+  render::RenderSettings tuned = render::PresetSettings(resolved, caps);
+
+  // Explicit reconstruction flags (--no-taa / --upscaler) still win over the
+  // preset's choice; --no-rt already gates ray tracing at the device level.
+  if (config_.renderer.aa_mode == render::AntiAliasingMode::kNone) {
+    tuned.aa_mode = render::AntiAliasingMode::kNone;
+    tuned.upscaler = render::UpscalerKind::kNone;
+  } else if (config_.renderer.upscaler != render::UpscalerKind::kNone) {
+    tuned.upscaler = config_.renderer.upscaler;
+    tuned.aa_mode = render::AntiAliasingMode::kUpscaler;
+  }
+
+  renderer_.settings() = tuned;
+  REC_INFO("render preset: {} ({})", render::PresetName(resolved),
+           config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
 }
 
 void Engine::CreateWaterDemoScene() {

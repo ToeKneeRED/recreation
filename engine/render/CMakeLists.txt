@@ -1,5 +1,6 @@
 recreation_add_module(render
   renderer.cc
+  presets.cc
   render_graph.cc
   mesh_pipeline.cc
   material_system.cc

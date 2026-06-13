@@ -207,6 +207,15 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   vkGetPhysicalDeviceProperties(device->physical_device_, &props);
   device->caps_.adapter_name = props.deviceName;
   device->caps_.api_version = props.apiVersion;
+  device->caps_.integrated = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+
+  VkPhysicalDeviceMemoryProperties mem;
+  vkGetPhysicalDeviceMemoryProperties(device->physical_device_, &mem);
+  for (u32 i = 0; i < mem.memoryHeapCount; ++i) {
+    if (mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+      device->caps_.device_local_bytes += mem.memoryHeaps[i].size;
+    }
+  }
   device->graphics_family_ =
       static_cast<u32>(FindGraphicsFamily(device->physical_device_, device->surface_));
 
@@ -332,9 +341,11 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
     return device;
   }
 
-  REC_INFO("gpu: {} (vk {}.{}, rt={} rayquery={} mesh={} vrs={})", device->caps_.adapter_name,
-           VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
-           device->caps_.raytracing, device->caps_.ray_query, device->caps_.mesh_shaders,
+  REC_INFO("gpu: {} ({}, {} MB, vk {}.{}, rt={} rayquery={} mesh={} vrs={})",
+           device->caps_.adapter_name, device->caps_.integrated ? "integrated" : "discrete",
+           device->caps_.device_local_bytes >> 20, VK_API_VERSION_MAJOR(props.apiVersion),
+           VK_API_VERSION_MINOR(props.apiVersion), device->caps_.raytracing,
+           device->caps_.ray_query, device->caps_.mesh_shaders,
            device->caps_.fragment_shading_rate);
   return device;
 }

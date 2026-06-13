@@ -12,6 +12,7 @@
 #include <imgui_impl_vulkan.h>
 
 #include "core/log.h"
+#include "render/presets.h"
 
 namespace rec {
 namespace {
@@ -23,6 +24,16 @@ const char* kTonemaps[] = {"ACES", "Reinhard", "None"};
 const char* kDebugViews[] = {"Off",         "Base color",   "World normal",
                              "Roughness",   "Metallic",     "Ambient occlusion",
                              "Indirect GI", "Direct light", "Emissive", "Reflection"};
+
+// Row 0 is "Custom" (hand-tuned); the rest map to QualityPreset below.
+const char* kPresets[] = {"Custom",  "Auto-detect", "Android", "Steam Deck", "Low end",
+                          "Console", "Medium",      "High",    "Ultra"};
+const render::QualityPreset kPresetValues[] = {
+    render::QualityPreset::kAuto,      // unused for row 0
+    render::QualityPreset::kAuto,      render::QualityPreset::kAndroid,
+    render::QualityPreset::kSteamDeck, render::QualityPreset::kLowEnd,
+    render::QualityPreset::kConsole,   render::QualityPreset::kMedium,
+    render::QualityPreset::kHigh,      render::QualityPreset::kUltra};
 
 }  // namespace
 
@@ -119,6 +130,17 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
       ImGui::PlotLines("##frametimes", frame_times_, IM_ARRAYSIZE(frame_times_),
                        static_cast<int>(frame_time_cursor_), nullptr, 0.0f, 33.3f,
                        {ImGui::GetContentRegionAvail().x, 48});
+
+      // One-click hardware tier: overwrites every feature toggle below. Touching
+      // any of them afterwards just leaves this on the chosen row (still custom).
+      if (ImGui::Combo("Quality preset", &preset_choice_, kPresets, IM_ARRAYSIZE(kPresets)) &&
+          preset_choice_ > 0 && caps) {
+        render::QualityPreset preset = kPresetValues[preset_choice_];
+        settings = render::PresetSettings(preset, *caps);
+        if (preset == render::QualityPreset::kAuto) {
+          REC_INFO("preset: auto -> {}", render::PresetName(render::DetectPreset(*caps)));
+        }
+      }
 
       const auto& timings = renderer.pass_timings();
       if (!timings.empty()) {

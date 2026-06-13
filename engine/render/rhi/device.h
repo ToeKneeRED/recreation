@@ -33,6 +33,8 @@ struct DeviceCaps {
   f32 max_anisotropy = 1.0f;         // 1 = anisotropic filtering unavailable
   f32 timestamp_period = 0.0f;       // ns per timestamp tick, 0 = no gpu timing
   bool debug_utils = false;          // VK_EXT_debug_utils for markers/labels
+  bool integrated = false;           // integrated/handheld gpu (shared memory)
+  u64 device_local_bytes = 0;        // summed DEVICE_LOCAL heap size, vram proxy
 };
 
 // Owns instance, surface, physical and logical device and the queues.

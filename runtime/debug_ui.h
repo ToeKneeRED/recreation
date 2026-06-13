@@ -78,6 +78,7 @@ class DebugUi {
   bool visible_ = true;
   bool trace_visible_ = true;  // the native-call trace window (F2 toggles)
   bool show_demo_ = false;
+  int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
   VkFormat swapchain_format_ = VK_FORMAT_UNDEFINED;  // outlives imgui init info
   f32 frame_times_[150] = {};
   u32 frame_time_cursor_ = 0;

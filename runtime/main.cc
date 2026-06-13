@@ -22,6 +22,8 @@ void PrintUsage() {
   REC_INFO("  --interior <id>       load one interior cell (editor id or 0x form id)");
   REC_INFO("  --grass-density <f>   grass density multiplier (default: 1.0, 0 disables)");
   REC_INFO("  --max-quests <n>      cap quest scripts attached at load (0 = all, default)");
+  REC_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");
+  REC_INFO("                        medium | high | ultra | console");
   REC_INFO("  --no-taa              disable temporal antialiasing");
   REC_INFO("  --upscaler <id>       fsr3 | dlss | xess");
   REC_INFO("  --no-rt               disable raytracing");
@@ -74,6 +76,7 @@ int main(int argc, char** argv) {
     else if (arg == "--interior") config.interior = next();
     else if (arg == "--grass-density") config.grass_density = std::stof(next());
     else if (arg == "--max-quests") config.max_quest_scripts = std::stoi(next());
+    else if (arg == "--preset") config.preset = rec::render::ParsePreset(next());
     else if (arg == "--no-taa") config.renderer.aa_mode = rec::render::AntiAliasingMode::kNone;
     else if (arg == "--upscaler") config.renderer.upscaler = ParseUpscaler(next());
     else if (arg == "--no-rt") config.renderer.enable_raytracing = false;
