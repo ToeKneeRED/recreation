@@ -14,15 +14,21 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$REPO/build/managed}"
 
-if [ -z "${DOTNET_ROOT:-}" ] || [ ! -x "$DOTNET_ROOT/dotnet" ]; then
-  echo "DOTNET_ROOT must point at a .NET root with a dotnet CLI" >&2
+# Prefer a dotnet already on PATH (the nix dev shell puts one there); otherwise
+# fall back to DOTNET_ROOT. The runtime still needs DOTNET_ROOT set so ClrHost
+# can find libhostfxr at run time.
+DOTNET="$(command -v dotnet || true)"
+if [ -z "$DOTNET" ] && [ -n "${DOTNET_ROOT:-}" ] && [ -x "$DOTNET_ROOT/dotnet" ]; then
+  DOTNET="$DOTNET_ROOT/dotnet"
+fi
+if [ -z "$DOTNET" ]; then
+  echo "no dotnet CLI on PATH and DOTNET_ROOT has none; enter 'nix develop' or set DOTNET_ROOT" >&2
   exit 1
 fi
 
-export PATH="$DOTNET_ROOT:$PATH"
 export DOTNET_CLI_HOME="${DOTNET_CLI_HOME:-$REPO/build/dotnet-home}"
 export DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 mkdir -p "$DOTNET_CLI_HOME"
 
-exec dotnet build "$REPO/engine/script/managed/Recreation.Scripting.csproj" \
+exec "$DOTNET" build "$REPO/engine/script/managed/Recreation.Scripting.csproj" \
   -c Release -o "$OUT" -v minimal
