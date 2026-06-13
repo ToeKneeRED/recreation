@@ -96,6 +96,31 @@ int main(int argc, char** argv) {
     std::printf("  (no keyworded weapon found to test form natives)\n");
   }
 
+  // Spatial natives (records-authored placement + override store).
+  std::optional<GlobalFormId> ref;
+  f32 authored[3] = {0, 0, 0};
+  records.EachOfType(FourCc('R', 'E', 'F', 'R'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    if (ref) return;
+    Record rec;
+    if (!records.Parse(id, &rec)) return;
+    const Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+    if (!data || data->data.size() < 12) return;
+    ref = id;
+    std::memcpy(authored, data->data.data(), 12);
+  });
+  if (ref) {
+    ObjectRef r{Handle(*ref)};
+    check("REFR GetPositionX matches authored DATA", bindings.GetPositionX(r) == authored[0]);
+    bindings.SetPosition(r, 1.0f, 2.0f, 3.0f);
+    check("SetPosition overrides X", bindings.GetPositionX(r) == 1.0f);
+    check("SetPosition overrides Z", bindings.GetPositionZ(r) == 3.0f);
+    ObjectRef other{0x999};
+    bindings.SetPosition(other, 1.0f, 2.0f, 0.0f);  // 3 units away on Z from r
+    check("GetDistance is 3", bindings.GetDistance(r, other) == 3.0f);
+    bindings.MoveTo(r, other);
+    check("MoveTo snaps to target", bindings.GetDistance(r, other) == 0.0f);
+  }
+
   std::printf("%s (%d failures)\n", failures ? "BINDINGSTEST FAILED" : "BINDINGSTEST PASSED",
               failures);
   return failures ? 1 : 0;

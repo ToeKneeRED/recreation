@@ -1,6 +1,7 @@
 #ifndef RECREATION_SCRIPT_GAMES_SKYRIM_SKYRIM_BINDINGS_H_
 #define RECREATION_SCRIPT_GAMES_SKYRIM_SKYRIM_BINDINGS_H_
 
+#include <array>
 #include <string>
 #include <unordered_map>
 
@@ -38,6 +39,15 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   std::string GetName(papyrus::ObjectRef form) override;
   bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) override;
 
+  // Spatial state: authored placement from the REFR record, overridable by
+  // SetPosition / MoveTo (the override store is the new system).
+  f32 GetPositionX(papyrus::ObjectRef ref) override;
+  f32 GetPositionY(papyrus::ObjectRef ref) override;
+  f32 GetPositionZ(papyrus::ObjectRef ref) override;
+  void SetPosition(papyrus::ObjectRef ref, f32 x, f32 y, f32 z) override;
+  f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) override;
+  void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) override;
+
   // Actor values (new system).
   f32 GetActorValue(papyrus::ObjectRef actor, const std::string& av) override;
   void SetActorValue(papyrus::ObjectRef actor, const std::string& av, f32 value) override;
@@ -51,12 +61,14 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
 
  private:
   bethesda::GlobalFormId ToFormId(papyrus::ObjectRef ref) const;
+  std::array<f32, 3> Position(papyrus::ObjectRef ref);
 
   const bethesda::RecordStore* records_ = nullptr;
   const bethesda::StringTable* strings_ = nullptr;
   papyrus::ObjectRef player_;
   std::unordered_map<u64, std::unordered_map<std::string, f32>> actor_values_;
   std::unordered_map<u64, std::unordered_map<u64, i32>> inventory_;
+  std::unordered_map<u64, std::array<f32, 3>> positions_;  // SetPosition/MoveTo overrides
 };
 
 }  // namespace rec::script::skyrim

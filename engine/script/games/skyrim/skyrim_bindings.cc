@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 
 #include "bethesda/record.h"
@@ -102,6 +103,43 @@ bool RecordBackedSkyrimBindings::HasKeyword(ObjectRef form, ObjectRef keyword) {
     if (id == want) return true;
   }
   return false;
+}
+
+std::array<f32, 3> RecordBackedSkyrimBindings::Position(ObjectRef ref) {
+  auto it = positions_.find(ref.handle);
+  if (it != positions_.end()) return it->second;
+  // Fall back to the authored placement in the REFR record (DATA = pos+rot).
+  if (records_) {
+    bethesda::Record record;
+    if (records_->Parse(ToFormId(ref), &record)) {
+      const bethesda::Subrecord* data = record.Find(FourCc('D', 'A', 'T', 'A'));
+      if (data && data->data.size() >= 12) {
+        std::array<f32, 3> p{};
+        std::memcpy(p.data(), data->data.data(), 12);
+        return p;
+      }
+    }
+  }
+  return {0.0f, 0.0f, 0.0f};
+}
+
+f32 RecordBackedSkyrimBindings::GetPositionX(ObjectRef ref) { return Position(ref)[0]; }
+f32 RecordBackedSkyrimBindings::GetPositionY(ObjectRef ref) { return Position(ref)[1]; }
+f32 RecordBackedSkyrimBindings::GetPositionZ(ObjectRef ref) { return Position(ref)[2]; }
+
+void RecordBackedSkyrimBindings::SetPosition(ObjectRef ref, f32 x, f32 y, f32 z) {
+  positions_[ref.handle] = {x, y, z};
+}
+
+f32 RecordBackedSkyrimBindings::GetDistance(ObjectRef a, ObjectRef b) {
+  std::array<f32, 3> pa = Position(a);
+  std::array<f32, 3> pb = Position(b);
+  f32 dx = pa[0] - pb[0], dy = pa[1] - pb[1], dz = pa[2] - pb[2];
+  return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+void RecordBackedSkyrimBindings::MoveTo(ObjectRef ref, ObjectRef target) {
+  positions_[ref.handle] = Position(target);
 }
 
 f32 RecordBackedSkyrimBindings::GetActorValue(ObjectRef actor, const std::string& av) {
