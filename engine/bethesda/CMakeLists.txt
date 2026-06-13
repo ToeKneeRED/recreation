@@ -8,6 +8,7 @@ recreation_add_module(bethesda
   nif.cc
   converters.cc
   strings.cc
+  script_attachment.cc
 )
 
 target_link_libraries(recreation_bethesda PUBLIC recreation::core recreation::asset)

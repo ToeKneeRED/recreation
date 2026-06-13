@@ -153,6 +153,7 @@
               fontconfig               # fc-match for the hud font
               sdl3
               openssl  # zetanet crypto backend
+              dotnet-sdk_9             # .net core clr host + managed build
               vulkan-headers
               vulkan-loader
               vulkan-validation-layers
@@ -164,6 +165,13 @@
             shellHook = ''
               export VK_LAYER_PATH=${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d
               export RECREATION_FETCHCONTENT_FLAGS="${builtins.concatStringsSep " " fetchContentFlags}"
+
+              # .NET CLR host: the C++ side dlopens libhostfxr.so out of the
+              # runtime tree under DOTNET_ROOT, and the managed build needs the
+              # sdk on PATH (nixpkgs ships it non-relocatable, so point at it).
+              export DOTNET_ROOT=${pkgs.dotnet-sdk_9}/share/dotnet
+              export DOTNET_CLI_TELEMETRY_OPTOUT=1
+              export DOTNET_NOLOGO=1
 
               if [ -z "''${DISPLAY:-}" ] && [ -S /tmp/.X11-unix/X0 ]; then
                 export DISPLAY=:0
