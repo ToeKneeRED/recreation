@@ -117,6 +117,24 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
                        static_cast<int>(frame_time_cursor_), nullptr, 0.0f, 33.3f,
                        {ImGui::GetContentRegionAvail().x, 48});
 
+      const auto& timings = renderer.pass_timings();
+      if (!timings.empty()) {
+        if (ImGui::CollapsingHeader("GPU passes", ImGuiTreeNodeFlags_DefaultOpen)) {
+          ImGui::Text("gpu frame %.2f ms", renderer.gpu_frame_ms());
+          if (ImGui::BeginTable("passes", 2,
+                                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            for (const auto& t : timings) {
+              ImGui::TableNextRow();
+              ImGui::TableNextColumn();
+              ImGui::TextUnformatted(t.name.c_str());
+              ImGui::TableNextColumn();
+              ImGui::Text("%.3f ms", t.ms);
+            }
+            ImGui::EndTable();
+          }
+        }
+      }
+
       if (ImGui::CollapsingHeader("Anti-aliasing & upscaling",
                                   ImGuiTreeNodeFlags_DefaultOpen)) {
         int aa = settings.aa_mode == render::AntiAliasingMode::kNone   ? 0

@@ -104,6 +104,15 @@ class RenderGraph {
 
   void AddPass(std::string name, SetupFn setup, ExecuteFn execute);
 
+  // Optional per-pass brackets (gpu profiler timestamps + debug labels). Begin
+  // runs before the pass barriers, end after the pass executes.
+  using PassBegin = std::function<void(VkCommandBuffer, const char*)>;
+  using PassEnd = std::function<void(VkCommandBuffer)>;
+  void SetPassHooks(PassBegin begin, PassEnd end) {
+    pass_begin_ = std::move(begin);
+    pass_end_ = std::move(end);
+  }
+
   bool Compile(Device& device, TransientPool& pool);
   void Execute(PassContext& ctx);
   void Reset();
@@ -134,6 +143,8 @@ class RenderGraph {
   base::Vector<Resource> resources_;
   base::Vector<Pass> passes_;
   base::Vector<VkImageMemoryBarrier2> final_barriers_;
+  PassBegin pass_begin_;
+  PassEnd pass_end_;
 };
 
 }  // namespace rec::render

@@ -209,6 +209,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
 void RenderGraph::Execute(PassContext& ctx) {
   ctx.graph = this;
   for (Pass& pass : passes_) {
+    if (pass_begin_) pass_begin_(ctx.cmd, pass.name.c_str());
     if (!pass.barriers.empty()) {
       VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
       dep.imageMemoryBarrierCount = static_cast<u32>(pass.barriers.size());
@@ -216,6 +217,7 @@ void RenderGraph::Execute(PassContext& ctx) {
       vkCmdPipelineBarrier2(ctx.cmd, &dep);
     }
     if (pass.execute) pass.execute(ctx);
+    if (pass_end_) pass_end_(ctx.cmd);
   }
   if (!final_barriers_.empty()) {
     VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};

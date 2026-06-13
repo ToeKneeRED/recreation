@@ -31,6 +31,8 @@ struct DeviceCaps {
   bool fragment_shading_rate = false;
   bool fill_mode_non_solid = false;  // wireframe debug views
   f32 max_anisotropy = 1.0f;         // 1 = anisotropic filtering unavailable
+  f32 timestamp_period = 0.0f;       // ns per timestamp tick, 0 = no gpu timing
+  bool debug_utils = false;          // VK_EXT_debug_utils for markers/labels
 };
 
 // Owns instance, surface, physical and logical device and the queues.

@@ -15,6 +15,7 @@ recreation_add_module(render
   shader_util.cc
   taa.cc
   raytracing.cc
+  gpu_profiler.cc
   upscaler.cc
   vulkan/vk_device.cc
   vulkan/vk_swapchain.cc

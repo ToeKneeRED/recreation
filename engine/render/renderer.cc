@@ -83,6 +83,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   applied_aa_ = settings_.aa_mode;
   applied_vsync_ = settings_.vsync;
 
+  profiler_.Initialize(*device_, kFramesInFlight);
+
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
   if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
@@ -385,6 +387,11 @@ void Renderer::RenderFrame(const FrameView& view) {
   VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.cmd, &begin);
+
+  profiler_.BeginFrame(frame.cmd, frame_index_ % kFramesInFlight);
+  graph_.SetPassHooks(
+      [this](VkCommandBuffer cmd, const char* name) { profiler_.BeginPass(cmd, name); },
+      [this](VkCommandBuffer cmd) { profiler_.EndPass(cmd); });
 
   PassContext ctx;
   ctx.cmd = frame.cmd;
@@ -1195,6 +1202,7 @@ void Renderer::Shutdown() {
 #endif
     bloom_.Destroy(*device_);
     exposure_.Destroy(*device_);
+    profiler_.Shutdown();
     water_.reset();
     ddgi_.reset();
     environment_.reset();

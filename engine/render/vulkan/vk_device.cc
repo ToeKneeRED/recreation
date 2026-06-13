@@ -51,6 +51,14 @@ bool HasExtension(const base::Vector<VkExtensionProperties>& available, const ch
       available, [name](const auto& ext) { return std::strcmp(ext.extensionName, name) == 0; });
 }
 
+bool HasInstanceExtension(const char* name) {
+  u32 count = 0;
+  vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+  base::Vector<VkExtensionProperties> extensions(count);
+  vkEnumerateInstanceExtensionProperties(nullptr, &count, extensions.data());
+  return HasExtension(extensions, name);
+}
+
 // Graphics family that can also present. Async compute and transfer queues
 // come later, one universal queue is enough for bringup.
 int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
@@ -120,10 +128,14 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   bool validation = desc.enable_validation && HasValidationLayer();
   if (validation) {
     layers.push_back(kValidationLayer);
-    instance_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   } else if (desc.enable_validation) {
     REC_WARN("validation requested but layer not installed");
   }
+  // Debug utils carries the queue/command-buffer labels the GPU profiler emits
+  // (and that capture tools group passes by), so enable it whenever present,
+  // not just under validation.
+  bool debug_utils = HasInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  if (debug_utils) instance_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
 #if defined(RECREATION_HAS_DLSS)
   // DLSS/NGX must have its instance and device extensions enabled at creation
@@ -290,6 +302,8 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   if (features.features.samplerAnisotropy) {
     device->caps_.max_anisotropy = props.limits.maxSamplerAnisotropy;
   }
+  device->caps_.timestamp_period = props.limits.timestampPeriod;
+  device->caps_.debug_utils = debug_utils;
 
   f32 priority = 1.0f;
   VkDeviceQueueCreateInfo queue_info{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};

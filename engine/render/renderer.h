@@ -19,6 +19,7 @@
 #include "render/denoiser_nrd.h"
 #include "render/exposure.h"
 #include "render/environment.h"
+#include "render/gpu_profiler.h"
 #include "render/material_system.h"
 #include "render/mesh_pipeline.h"
 #include "render/post.h"
@@ -109,6 +110,12 @@ class Renderer {
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   const MaterialSystem* materials() const { return material_system_.get(); }
 
+  // Per-pass GPU timings from the last resolved frame, for the debug overlay.
+  const base::Vector<GpuProfiler::PassTiming>& pass_timings() const {
+    return profiler_.results();
+  }
+  f32 gpu_frame_ms() const { return profiler_.total_ms(); }
+
  private:
   static constexpr u32 kFramesInFlight = 2;
   static constexpr VkFormat kSceneColorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -167,6 +174,7 @@ class Renderer {
 #endif
   BloomPass bloom_;
   ExposurePass exposure_;
+  GpuProfiler profiler_;
 
   // Settings already in effect, diffed against settings_ each frame.
   UpscalerKind applied_upscaler_ = UpscalerKind::kNone;
