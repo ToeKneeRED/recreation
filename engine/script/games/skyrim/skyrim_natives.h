@@ -42,6 +42,11 @@ class SkyrimBindings {
   virtual f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) { return 0; }
   virtual void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) {}
   virtual void SetEnabled(papyrus::ObjectRef ref, bool enabled) {}
+  virtual papyrus::ObjectRef GetBaseObject(papyrus::ObjectRef ref) { return {}; }
+
+  // Cell data (CELL record).
+  virtual bool IsInterior(papyrus::ObjectRef cell) { return false; }
+  virtual f32 GetCellWaterLevel(papyrus::ObjectRef cell) { return 0; }
   virtual bool IsDisabled(papyrus::ObjectRef ref) { return false; }
   virtual i32 GetItemCount(papyrus::ObjectRef container, papyrus::ObjectRef item) { return 0; }
   virtual void AddItem(papyrus::ObjectRef container, papyrus::ObjectRef item, i32 count) {}

@@ -205,6 +205,9 @@ void RegisterObjectReference(papyrus::NativeRegistry& reg, SkyrimBindings* bindi
   reg.Register("ObjectReference", "GetDistance", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     return Value::Float(Resolve(bindings).GetDistance(self, ArgO(a, 0)));
   });
+  reg.Register("ObjectReference", "GetBaseObject", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Object(Resolve(bindings).GetBaseObject(self));
+  });
   reg.Register("ObjectReference", "MoveTo", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).MoveTo(self, ArgO(a, 0));
     return Value();
@@ -276,6 +279,15 @@ void RegisterObjectReference(papyrus::NativeRegistry& reg, SkyrimBindings* bindi
   reg.Register("ObjectReference", "SetOpen", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).SetOpen(self, ArgB(a, 0, true));
     return Value();
+  });
+}
+
+void RegisterCell(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
+  reg.Register("Cell", "IsInterior", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(Resolve(bindings).IsInterior(self));
+  });
+  reg.Register("Cell", "GetWaterLevel", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Float(Resolve(bindings).GetCellWaterLevel(self));
   });
 }
 
@@ -437,6 +449,7 @@ void RegisterSkyrimNatives(papyrus::NativeRegistry& reg, SkyrimBindings* binding
   RegisterActor(reg, bindings);
   RegisterQuest(reg, bindings);
   RegisterFaction(reg, bindings);
+  RegisterCell(reg, bindings);
 }
 
 }  // namespace rec::script::skyrim

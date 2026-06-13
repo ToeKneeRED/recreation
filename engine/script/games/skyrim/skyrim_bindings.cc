@@ -261,19 +261,47 @@ bool RecordBackedSkyrimBindings::IsEssential(ObjectRef actor_base) {
   return (AcbsFlags(records_, ToFormId(actor_base)) & 0x02) != 0;
 }
 
-papyrus::ObjectRef RecordBackedSkyrimBindings::GetRace(ObjectRef actor_base) {
+papyrus::ObjectRef RecordBackedSkyrimBindings::ResolveFormRef(ObjectRef from, u32 subrecord_type) {
   if (!records_) return {};
-  bethesda::GlobalFormId id = ToFormId(actor_base);
+  bethesda::GlobalFormId id = ToFormId(from);
   const bethesda::RecordStore::StoredRecord* stored = records_->Find(id);
   if (!stored) return {};
   bethesda::Record rec;
   if (!records_->Parse(id, &rec)) return {};
-  const bethesda::Subrecord* rnam = rec.Find(FourCc('R', 'N', 'A', 'M'));
-  if (!rnam || rnam->data.size() < 4) return {};
+  const bethesda::Subrecord* sub = rec.Find(subrecord_type);
+  if (!sub || sub->data.size() < 4) return {};
   u32 raw;
-  std::memcpy(&raw, rnam->data.data(), 4);
-  bethesda::GlobalFormId race = records_->ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin);
-  return papyrus::ObjectRef{race.packed()};
+  std::memcpy(&raw, sub->data.data(), 4);
+  bethesda::GlobalFormId resolved =
+      records_->ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin);
+  return papyrus::ObjectRef{resolved.packed()};
+}
+
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetRace(ObjectRef actor_base) {
+  return ResolveFormRef(actor_base, FourCc('R', 'N', 'A', 'M'));
+}
+
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetBaseObject(ObjectRef ref) {
+  return ResolveFormRef(ref, FourCc('N', 'A', 'M', 'E'));
+}
+
+bool RecordBackedSkyrimBindings::IsInterior(ObjectRef cell) {
+  if (!records_) return false;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(cell), &rec)) return false;
+  const bethesda::Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+  return data && !data->data.empty() && (data->data[0] & 0x1);
+}
+
+f32 RecordBackedSkyrimBindings::GetCellWaterLevel(ObjectRef cell) {
+  if (!records_) return 0.0f;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(cell), &rec)) return 0.0f;
+  const bethesda::Subrecord* xclw = rec.Find(FourCc('X', 'C', 'L', 'W'));
+  if (!xclw || xclw->data.size() < 4) return 0.0f;
+  f32 value;
+  std::memcpy(&value, xclw->data.data(), 4);
+  return value;
 }
 
 f32 RecordBackedSkyrimBindings::GetActorValue(ObjectRef actor, const std::string& av) {

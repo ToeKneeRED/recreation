@@ -142,6 +142,32 @@ int main(int argc, char** argv) {
     check("MoveTo snaps to target", bindings.GetDistance(r, other) == 0.0f);
   }
 
+  // Record-backed object queries: GetBaseObject and Cell.IsInterior.
+  std::optional<GlobalFormId> placed;
+  records.EachOfType(FourCc('R', 'E', 'F', 'R'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    if (placed) return;
+    Record rec;
+    if (records.Parse(id, &rec) && rec.Find(FourCc('N', 'A', 'M', 'E'))) placed = id;
+  });
+  if (placed)
+    check("REFR GetBaseObject resolves a base form",
+          bindings.GetBaseObject(ObjectRef{Handle(*placed)}).handle != 0);
+
+  std::optional<GlobalFormId> cell;
+  bool cell_interior = false;
+  records.EachOfType(FourCc('C', 'E', 'L', 'L'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    if (cell) return;
+    Record rec;
+    if (!records.Parse(id, &rec)) return;
+    const Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+    if (!data || data->data.empty()) return;
+    cell = id;
+    cell_interior = (data->data[0] & 0x1) != 0;
+  });
+  if (cell)
+    check("CELL IsInterior matches DATA flag",
+          bindings.IsInterior(ObjectRef{Handle(*cell)}) == cell_interior);
+
   // Quest state (new system).
   ObjectRef quest{0x123};
   check("quest stage default 0", bindings.GetStage(quest) == 0);

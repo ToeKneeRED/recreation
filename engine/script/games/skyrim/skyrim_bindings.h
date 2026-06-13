@@ -51,6 +51,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   void SetPosition(papyrus::ObjectRef ref, f32 x, f32 y, f32 z) override;
   f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) override;
   void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) override;
+  papyrus::ObjectRef GetBaseObject(papyrus::ObjectRef ref) override;
+  bool IsInterior(papyrus::ObjectRef cell) override;
+  f32 GetCellWaterLevel(papyrus::ObjectRef cell) override;
   f32 GetScale(papyrus::ObjectRef ref) override;
   void SetScale(papyrus::ObjectRef ref, f32 scale) override;
   bool IsLocked(papyrus::ObjectRef ref) override;
@@ -117,6 +120,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
     f32 current = 0;
   };
   bethesda::GlobalFormId ToFormId(papyrus::ObjectRef ref) const;
+  // Reads a 4-byte form-id subrecord off `from`'s record and resolves it
+  // against the load order. Used for record fields that point at another form.
+  papyrus::ObjectRef ResolveFormRef(papyrus::ObjectRef from, u32 subrecord_type);
   std::array<f32, 3> Position(papyrus::ObjectRef ref);
   ActorValue& Av(papyrus::ObjectRef actor, const std::string& av);
 
