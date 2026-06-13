@@ -1,0 +1,245 @@
+// pexrun: exercise the Papyrus interpreter.
+//
+//   pexrun selftest                       run built-in interpreter checks
+//   pexrun <data_dir> <Script> <Function> link a shipped script and run one
+//                                         no-argument function on a bare instance
+//
+// The embedded TestVm implements VmInterface with in-memory arrays and member
+// storage; cross-object calls and properties return None. This isolates the
+// interpreter so its opcode handling can be checked end to end.
+
+#include <algorithm>
+#include <cstdio>
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "asset/vfs.h"
+#include "bethesda/archive.h"
+#include "script/papyrus/interpreter.h"
+#include "script/papyrus/pex.h"
+#include "script/papyrus/value.h"
+
+namespace {
+
+using namespace rec;
+using namespace rec::script::papyrus;
+
+// Minimal VM backing for the interpreter: one instance's member variables, a
+// flat array heap, and a current state string. Calls and properties are stubs.
+class TestVm : public VmInterface {
+ public:
+  std::unordered_map<std::string, Value> members;
+  std::vector<std::pair<std::string, Value>> property_sets;  // recorded for tests
+
+  Value CallMethod(ObjectRef, const std::string&, std::vector<Value>) override { return Value(); }
+  Value CallStatic(const std::string&, const std::string&, std::vector<Value>) override {
+    return Value();
+  }
+  Value CallParent(ObjectRef, const std::string&, std::vector<Value>) override { return Value(); }
+  Value GetProperty(ObjectRef, const std::string&) override { return Value(); }
+  void SetProperty(ObjectRef, const std::string& p, Value v) override {
+    property_sets.emplace_back(p, std::move(v));
+  }
+  Value* MemberVar(ObjectRef, const std::string& name) override {
+    auto it = members.find(name);
+    return it == members.end() ? nullptr : &it->second;
+  }
+  std::string CurrentState(ObjectRef) override { return state_; }
+  void GotoState(ObjectRef, const std::string& s) override { state_ = s; }
+  bool IsObjectOfType(ObjectRef, const std::string&) override { return true; }
+
+  ArrayRef ArrayCreate(const std::string&, i32 size) override {
+    arrays_.emplace_back(std::max(0, size));
+    return ArrayRef{static_cast<u32>(arrays_.size())};  // 1-based; 0 = None
+  }
+  i32 ArrayLength(ArrayRef a) override {
+    return Valid(a) ? static_cast<i32>(arrays_[a.id - 1].size()) : 0;
+  }
+  Value ArrayGet(ArrayRef a, i32 i) override {
+    return Valid(a) && i >= 0 && i < (i32)arrays_[a.id - 1].size() ? arrays_[a.id - 1][i] : Value();
+  }
+  void ArraySet(ArrayRef a, i32 i, Value v) override {
+    if (Valid(a) && i >= 0 && i < (i32)arrays_[a.id - 1].size()) arrays_[a.id - 1][i] = std::move(v);
+  }
+  i32 ArrayFind(ArrayRef a, const Value& v, i32 start) override {
+    if (!Valid(a)) return -1;
+    const auto& arr = arrays_[a.id - 1];
+    for (i32 i = std::max(0, start); i < (i32)arr.size(); ++i)
+      if (arr[i].Equals(v)) return i;
+    return -1;
+  }
+  i32 ArrayRFind(ArrayRef a, const Value& v, i32 start) override {
+    if (!Valid(a)) return -1;
+    const auto& arr = arrays_[a.id - 1];
+    i32 from = start < 0 ? (i32)arr.size() - 1 : std::min(start, (i32)arr.size() - 1);
+    for (i32 i = from; i >= 0; --i)
+      if (arr[i].Equals(v)) return i;
+    return -1;
+  }
+
+ private:
+  bool Valid(ArrayRef a) const { return a.id != 0 && a.id <= arrays_.size(); }
+  std::vector<std::vector<Value>> arrays_;
+  std::string state_;
+};
+
+// Builds a tiny .pex in memory so the interpreter runs over a known program.
+struct Builder {
+  PexFile pex;
+  Object obj;
+  StringIndex S(const std::string& s) {
+    for (StringIndex i = 0; i < pex.string_table.size(); ++i)
+      if (pex.string_table[i] == s) return i;
+    pex.string_table.push_back(s);
+    return static_cast<StringIndex>(pex.string_table.size() - 1);
+  }
+  VariableData Id(const std::string& n) { return {VariableData::Type::kIdentifier, S(n), 0, 0, false}; }
+  VariableData IntV(i32 v) {
+    VariableData d;
+    d.type = VariableData::Type::kInteger;
+    d.int_value = v;
+    return d;
+  }
+  VariableData StrV(const std::string& s) {
+    return {VariableData::Type::kString, S(s), 0, 0, false};
+  }
+};
+
+Instruction Make(Op op, std::vector<VariableData> args) { return {op, std::move(args), {}}; }
+
+int SelfTest() {
+  int failures = 0;
+  auto check = [&](const char* what, bool ok) {
+    std::printf("  %-40s %s\n", what, ok ? "ok" : "FAIL");
+    if (!ok) ++failures;
+  };
+
+  // Value coercion sanity.
+  check("int->float coerce", Value::Int(3).ToFloat() == 3.0f);
+  check("float->int trunc", Value::Float(3.9f).ToInt() == 3);
+  check("string->bool empty", Value::Str("").ToBool() == false);
+  check("bool tostring", Value::Bool(true).ToString() == "True");
+  check("numeric equals promote", Value::Int(2).Equals(Value::Float(2.0f)));
+  check("compare lt", Value::Int(1).Compare(Value::Int(2)) < 0);
+
+  // A summation loop returning a string: exercises assign, iadd, cmp_le, a
+  // backward jmpt, strcat and return over real register resolution.
+  Builder b;
+  Function fn;
+  fn.return_type = b.S("String");
+  fn.params.push_back({b.S("n"), b.S("Int")});
+  fn.locals.push_back({b.S("acc"), b.S("Int")});
+  fn.locals.push_back({b.S("i"), b.S("Int")});
+  fn.locals.push_back({b.S("t"), b.S("Bool")});
+  fn.locals.push_back({b.S("r"), b.S("String")});
+  fn.code = {
+      Make(Op::kAssign, {b.Id("acc"), b.IntV(0)}),           // 0
+      Make(Op::kAssign, {b.Id("i"), b.IntV(1)}),             // 1
+      Make(Op::kIAdd, {b.Id("acc"), b.Id("acc"), b.Id("i")}),  // 2 loop
+      Make(Op::kIAdd, {b.Id("i"), b.Id("i"), b.IntV(1)}),    // 3
+      Make(Op::kCmpLe, {b.Id("t"), b.Id("i"), b.Id("n")}),   // 4
+      Make(Op::kJmpT, {b.Id("t"), b.IntV(-3)}),              // 5 -> 2
+      Make(Op::kStrCat, {b.Id("r"), b.StrV("sum="), b.Id("acc")}),  // 6
+      Make(Op::kReturn, {b.Id("r")}),                        // 7
+  };
+  TestVm vm;
+  Value out = ExecuteFunction(b.pex, b.obj, fn, ObjectRef{1}, {Value::Int(5)}, vm);
+  check("sum loop returns sum=15", out.ToString() == "sum=15");
+
+  // Arrays through the VM hooks.
+  Function af;
+  af.return_type = b.S("Int");
+  af.locals.push_back({b.S("arr"), b.S("Int[]")});
+  af.locals.push_back({b.S("len"), b.S("Int")});
+  af.code = {
+      Make(Op::kArrayCreate, {b.Id("arr"), b.IntV(3)}),
+      Make(Op::kArraySetElement, {b.Id("arr"), b.IntV(0), b.IntV(10)}),
+      Make(Op::kArraySetElement, {b.Id("arr"), b.IntV(2), b.IntV(30)}),
+      Make(Op::kArrayLength, {b.Id("len"), b.Id("arr")}),
+      Make(Op::kReturn, {b.Id("len")}),
+  };
+  Value alen = ExecuteFunction(b.pex, b.obj, af, ObjectRef{1}, {}, vm);
+  check("array length is 3", alen.ToInt() == 3);
+
+  std::printf("%s (%d failures)\n", failures ? "SELFTEST FAILED" : "SELFTEST PASSED", failures);
+  return failures ? 1 : 0;
+}
+
+const Function* FindFunction(const PexFile& pex, const Object& obj, const std::string& name,
+                             const Object** owner) {
+  for (const State& s : obj.states)
+    for (const NamedFunction& nf : s.functions)
+      if (pex.Str(nf.name) == name) {
+        *owner = &obj;
+        return &nf.function;
+      }
+  return nullptr;
+}
+
+int RunReal(const std::string& data_dir, const std::string& script, const std::string& function) {
+  asset::Vfs vfs;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(data_dir, ec))
+    if (auto p = bethesda::OpenArchive(entry.path().string())) vfs.Mount(std::move(p));
+
+  auto blob = vfs.Read("scripts/" + script + ".pex");
+  if (!blob) {
+    std::printf("not found: scripts/%s.pex\n", script.c_str());
+    return 1;
+  }
+  PexFile pex;
+  if (!ParsePex(ByteSpan(blob->data(), blob->size()), &pex) || pex.objects.empty()) {
+    std::printf("parse failed\n");
+    return 1;
+  }
+  const Object& obj = pex.objects[0];
+  const Object* owner = nullptr;
+  const Function* fn = FindFunction(pex, obj, function, &owner);
+  if (!fn) {
+    std::printf("no function %s in %s\n", function.c_str(), script.c_str());
+    return 1;
+  }
+  if (fn->is_native) {
+    std::printf("%s is native (no bytecode)\n", function.c_str());
+    return 1;
+  }
+
+  TestVm vm;
+  for (const MemberVariable& v : obj.variables) {
+    Value init;
+    switch (v.initial_value.type) {
+      case VariableData::Type::kInteger:
+        init = Value::Int(v.initial_value.int_value);
+        break;
+      case VariableData::Type::kFloat:
+        init = Value::Float(v.initial_value.float_value);
+        break;
+      case VariableData::Type::kBool:
+        init = Value::Bool(v.initial_value.bool_value);
+        break;
+      case VariableData::Type::kString:
+        init = Value::Str(pex.Str(v.initial_value.string_index));
+        break;
+      default:
+        break;
+    }
+    vm.members[pex.Str(v.name)] = init;
+  }
+
+  Value out = ExecuteFunction(pex, *owner, *fn, ObjectRef{1}, {}, vm);
+  std::printf("%s.%s() = %s\n", script.c_str(), function.c_str(), out.ToString().c_str());
+  std::printf("  %zu property sets, final state \"%s\"\n", vm.property_sets.size(),
+              vm.CurrentState(ObjectRef{1}).c_str());
+  return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "selftest") return SelfTest();
+  if (argc == 4) return RunReal(argv[1], argv[2], argv[3]);
+  std::fprintf(stderr, "usage: %s selftest | %s <data_dir> <Script> <Function>\n", argv[0], argv[0]);
+  return 2;
+}

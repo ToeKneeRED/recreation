@@ -1,6 +1,8 @@
 recreation_add_module(script
   papyrus/opcode.cc
   papyrus/pex.cc
+  papyrus/value.cc
+  papyrus/interpreter.cc
   papyrus_vm.cc
 )
 
