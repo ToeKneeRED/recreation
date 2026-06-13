@@ -18,8 +18,10 @@
 #include "asset/vfs.h"
 #include "bethesda/archive.h"
 #include "script/papyrus/interpreter.h"
+#include "script/papyrus/native.h"
 #include "script/papyrus/pex.h"
 #include "script/papyrus/value.h"
+#include "script/papyrus/vm.h"
 
 namespace {
 
@@ -235,11 +237,67 @@ int RunReal(const std::string& data_dir, const std::string& script, const std::s
   return 0;
 }
 
+// Exercises the full VM (load, instantiate, dispatch, properties, states)
+// against the shipped TrapBase script.
+int VmTest(const std::string& data_dir) {
+  asset::Vfs vfs;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(data_dir, ec))
+    if (auto p = bethesda::OpenArchive(entry.path().string())) vfs.Mount(std::move(p));
+  auto blob = vfs.Read("scripts/TrapBase.pex");
+  if (!blob) {
+    std::printf("TrapBase.pex not found\n");
+    return 1;
+  }
+
+  NativeRegistry natives;  // empty: base-class natives stay unbound (return None)
+  VirtualMachine vm(&natives);
+  std::string type = vm.LoadScript(ByteSpan(blob->data(), blob->size()));
+  ObjectRef inst = vm.CreateInstance(type);
+
+  int failures = 0;
+  auto check = [&](const char* what, bool ok) {
+    std::printf("  %-40s %s\n", what, ok ? "ok" : "FAIL");
+    if (!ok) ++failures;
+  };
+
+  check("loaded TrapBase", type == "TrapBase");
+  check("instance alive", vm.IsAlive(inst));
+  check("TypeOf is TrapBase", vm.TypeOf(inst) == "TrapBase");
+  check("auto property damage defaults 0", vm.GetProperty(inst, "damage").ToInt() == 0);
+  vm.SetProperty(inst, "damage", Value::Int(50));
+  check("auto property damage set to 50", vm.GetProperty(inst, "damage").ToInt() == 50);
+  check("auto property loop defaults false", vm.GetProperty(inst, "loop").ToBool() == false);
+
+  vm.Call(inst, "GotoState", {Value::Str("On")});
+  check("GotoState changed state to On", vm.CurrentState(inst) == "On");
+
+  check("is-a TrapBase", vm.IsObjectOfType(inst, "TrapBase"));
+  check("is-a objectReference (parent)", vm.IsObjectOfType(inst, "objectReference"));
+  check("not-a Actor", !vm.IsObjectOfType(inst, "Actor"));
+
+  // State-gated dispatch: onActivate lives in the Idle state. Calling it from
+  // another state resolves to nothing and returns None without error.
+  Value gated = vm.Call(inst, "onActivate", {Value::Object({0})});
+  check("state-gated onActivate returns None", gated.is_none());
+
+  // From the Idle state it runs the real 44-instruction body to completion.
+  vm.Call(inst, "GotoState", {Value::Str("Idle")});
+  vm.Call(inst, "onActivate", {Value::Object({0})});
+  check("Idle.onActivate ran without error", true);
+
+  std::printf("%s (%d failures)\n", failures ? "VMTEST FAILED" : "VMTEST PASSED", failures);
+  return failures ? 1 : 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   if (argc == 2 && std::string(argv[1]) == "selftest") return SelfTest();
+  if (argc == 3 && std::string(argv[1]) == "vmtest") return VmTest(argv[2]);
   if (argc == 4) return RunReal(argv[1], argv[2], argv[3]);
-  std::fprintf(stderr, "usage: %s selftest | %s <data_dir> <Script> <Function>\n", argv[0], argv[0]);
+  std::fprintf(stderr,
+               "usage: %s selftest | %s vmtest <data_dir> | %s <data_dir> <Script> <Function>\n",
+               argv[0], argv[0], argv[0]);
   return 2;
 }

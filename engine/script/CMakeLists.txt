@@ -3,6 +3,8 @@ recreation_add_module(script
   papyrus/pex.cc
   papyrus/value.cc
   papyrus/interpreter.cc
+  papyrus/native.cc
+  papyrus/vm.cc
   papyrus_vm.cc
 )
 
