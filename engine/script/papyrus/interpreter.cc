@@ -151,6 +151,25 @@ class Frame {
     return out;
   }
 
+  // Finds the index of the array element (a struct) whose `member` equals
+  // `value`, scanning forward from start or backward. -1 if none.
+  i32 FindStruct(ArrayRef array, const std::string& member, const Value& value, i32 start,
+                 bool reverse) {
+    i32 n = vm_.ArrayLength(array);
+    auto matches = [&](i32 i) {
+      Value e = vm_.ArrayGet(array, i);
+      return e.type() == ValueType::kStruct && vm_.StructGet(e.as_struct(), member).Equals(value);
+    };
+    if (reverse) {
+      for (i32 i = start < 0 ? n - 1 : std::min(start, n - 1); i >= 0; --i)
+        if (matches(i)) return i;
+    } else {
+      for (i32 i = std::max(0, start); i < n; ++i)
+        if (matches(i)) return i;
+    }
+    return -1;
+  }
+
   const PexFile& pex_;
   const Object& object_;
   const Function& fn_;
@@ -297,9 +316,61 @@ Value Frame::Run() {
         Write(a[1], Value::Int(vm_.ArrayRFind(ReadOperand(a[0]).as_array(), ReadOperand(a[2]),
                                               ReadOperand(a[3]).ToInt())));
         break;
+      // Fallout 4 / 76 opcodes. The same interpreter runs them so a Fallout
+      // dialect needs no new VM core, only its own native table.
+      case Op::kIs:
+        Write(a[0], Value::Bool(vm_.IsObjectOfType(ReadOperand(a[1]).as_object(), OperandName(a[2]))));
+        break;
+      case Op::kStructCreate:
+        Write(a[0], Value::Struct(vm_.StructCreate(DeclType(OperandName(a[0])))));
+        break;
+      case Op::kStructGet:
+        Write(a[0], vm_.StructGet(ReadOperand(a[1]).as_struct(), OperandName(a[2])));
+        break;
+      case Op::kStructSet:
+        vm_.StructSet(ReadOperand(a[0]).as_struct(), OperandName(a[1]), ReadOperand(a[2]));
+        break;
+      case Op::kArrayFindStruct:
+        Write(a[1], Value::Int(FindStruct(ReadOperand(a[0]).as_array(), OperandName(a[2]),
+                                          ReadOperand(a[3]), ReadOperand(a[4]).ToInt(), false)));
+        break;
+      case Op::kArrayRFindStruct:
+        Write(a[1], Value::Int(FindStruct(ReadOperand(a[0]).as_array(), OperandName(a[2]),
+                                          ReadOperand(a[3]), ReadOperand(a[4]).ToInt(), true)));
+        break;
+      case Op::kArrayAdd:
+        vm_.ArrayAdd(ReadOperand(a[0]).as_array(), ReadOperand(a[1]),
+                     a.size() > 2 ? ReadOperand(a[2]).ToInt() : 1);
+        break;
+      case Op::kArrayInsert:
+        vm_.ArrayInsert(ReadOperand(a[0]).as_array(), ReadOperand(a[2]).ToInt(), ReadOperand(a[1]));
+        break;
+      case Op::kArrayRemoveLast:
+        vm_.ArrayRemoveLast(ReadOperand(a[0]).as_array());
+        break;
+      case Op::kArrayRemove:
+        vm_.ArrayRemove(ReadOperand(a[0]).as_array(), ReadOperand(a[1]).ToInt(),
+                        a.size() > 2 ? ReadOperand(a[2]).ToInt() : 1);
+        break;
+      case Op::kArrayClear:
+        vm_.ArrayClear(ReadOperand(a[0]).as_array());
+        break;
+      case Op::kArrayGetAllMatchingStructs: {
+        ArrayRef src = ReadOperand(a[0]).as_array();
+        std::string member = OperandName(a[2]);
+        Value match = ReadOperand(a[3]);
+        ArrayRef out = vm_.ArrayCreate("", 0);
+        i32 n = vm_.ArrayLength(src);
+        for (i32 i = 0; i < n; ++i) {
+          Value e = vm_.ArrayGet(src, i);
+          if (e.type() == ValueType::kStruct && vm_.StructGet(e.as_struct(), member).Equals(match))
+            vm_.ArrayAdd(out, e, 1);
+        }
+        Write(a[1], Value::Array(out));
+        break;
+      }
       default:
-        REC_WARN("papyrus: opcode 0x{:02x} not executable in the Skyrim VM",
-                 static_cast<int>(in.op));
+        REC_WARN("papyrus: unknown opcode 0x{:02x}", static_cast<int>(in.op));
         break;
     }
     ip = next;

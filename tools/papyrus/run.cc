@@ -87,10 +87,42 @@ class TestVm : public VmInterface {
       if (arr[i].Equals(v)) return i;
     return -1;
   }
+  void ArrayAdd(ArrayRef a, const Value& v, i32 count) override {
+    if (Valid(a))
+      for (i32 i = 0; i < count; ++i) arrays_[a.id - 1].push_back(v);
+  }
+  void ArrayInsert(ArrayRef a, i32 i, const Value& v) override {
+    if (Valid(a) && i >= 0 && i <= (i32)arrays_[a.id - 1].size())
+      arrays_[a.id - 1].insert(arrays_[a.id - 1].begin() + i, v);
+  }
+  void ArrayRemove(ArrayRef a, i32 i, i32 c) override {
+    if (!Valid(a) || c <= 0 || i < 0 || i >= (i32)arrays_[a.id - 1].size()) return;
+    auto& arr = arrays_[a.id - 1];
+    arr.erase(arr.begin() + i, arr.begin() + std::min(i + c, (i32)arr.size()));
+  }
+  void ArrayRemoveLast(ArrayRef a) override {
+    if (Valid(a) && !arrays_[a.id - 1].empty()) arrays_[a.id - 1].pop_back();
+  }
+  void ArrayClear(ArrayRef a) override {
+    if (Valid(a)) arrays_[a.id - 1].clear();
+  }
+  StructRef StructCreate(const std::string&) override {
+    structs_.emplace_back();
+    return StructRef{static_cast<u32>(structs_.size())};
+  }
+  Value StructGet(StructRef s, const std::string& m) override {
+    if (s.id == 0 || s.id > structs_.size()) return Value();
+    auto it = structs_[s.id - 1].find(m);
+    return it == structs_[s.id - 1].end() ? Value() : it->second;
+  }
+  void StructSet(StructRef s, const std::string& m, Value v) override {
+    if (s.id != 0 && s.id <= structs_.size()) structs_[s.id - 1][m] = std::move(v);
+  }
 
  private:
   bool Valid(ArrayRef a) const { return a.id != 0 && a.id <= arrays_.size(); }
   std::vector<std::vector<Value>> arrays_;
+  std::vector<std::unordered_map<std::string, Value>> structs_;
   std::string state_;
 };
 
@@ -177,6 +209,50 @@ int SelfTest() {
   };
   Value alen = ExecuteFunction(b.pex, b.obj, af, ObjectRef{1}, {}, vm);
   check("array length is 3", alen.ToInt() == 3);
+
+  // Fallout 4/76 opcodes: resizable arrays (add/insert/removelast/remove).
+  Function rf;
+  rf.return_type = b.S("Int");
+  rf.locals.push_back({b.S("arr"), b.S("Int[]")});
+  rf.locals.push_back({b.S("rlen"), b.S("Int")});
+  rf.code = {
+      Make(Op::kArrayCreate, {b.Id("arr"), b.IntV(0)}),
+      Make(Op::kArrayAdd, {b.Id("arr"), b.IntV(5), b.IntV(3)}),       // [5,5,5]
+      Make(Op::kArrayAdd, {b.Id("arr"), b.IntV(9), b.IntV(1)}),       // [5,5,5,9]
+      Make(Op::kArrayInsert, {b.Id("arr"), b.IntV(7), b.IntV(0)}),    // [7,5,5,5,9]
+      Make(Op::kArrayRemoveLast, {b.Id("arr")}),                      // [7,5,5,5]
+      Make(Op::kArrayRemove, {b.Id("arr"), b.IntV(1), b.IntV(2)}),    // [7,5]
+      Make(Op::kArrayLength, {b.Id("rlen"), b.Id("arr")}),
+      Make(Op::kReturn, {b.Id("rlen")}),
+  };
+  check("fallout resizable array ops -> len 2",
+        ExecuteFunction(b.pex, b.obj, rf, ObjectRef{1}, {}, vm).ToInt() == 2);
+
+  // Fallout opcodes: structs (create/set/get).
+  Function sf;
+  sf.return_type = b.S("Int");
+  sf.locals.push_back({b.S("s"), b.S("MyStruct")});
+  sf.locals.push_back({b.S("sx"), b.S("Int")});
+  sf.code = {
+      Make(Op::kStructCreate, {b.Id("s")}),
+      Make(Op::kStructSet, {b.Id("s"), b.Id("field"), b.IntV(42)}),
+      Make(Op::kStructGet, {b.Id("sx"), b.Id("s"), b.Id("field")}),
+      Make(Op::kReturn, {b.Id("sx")}),
+  };
+  check("fallout struct create/set/get -> 42",
+        ExecuteFunction(b.pex, b.obj, sf, ObjectRef{1}, {}, vm).ToInt() == 42);
+
+  // Fallout 'is' opcode (TestVm answers true for any object).
+  Function isf;
+  isf.return_type = b.S("Bool");
+  isf.params.push_back({b.S("o"), b.S("Form")});
+  isf.locals.push_back({b.S("r"), b.S("Bool")});
+  isf.code = {
+      Make(Op::kIs, {b.Id("r"), b.Id("o"), b.Id("Actor")}),
+      Make(Op::kReturn, {b.Id("r")}),
+  };
+  check("fallout is-opcode executes -> true",
+        ExecuteFunction(b.pex, b.obj, isf, ObjectRef{1}, {Value::Object({2})}, vm).ToBool());
 
   std::printf("%s (%d failures)\n", failures ? "SELFTEST FAILED" : "SELFTEST PASSED", failures);
   return failures ? 1 : 0;

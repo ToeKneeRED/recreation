@@ -77,6 +77,8 @@ bool Value::ToBool() const {
       return std::get<ObjectRef>(data_).handle != 0;
     case ValueType::kArray:
       return std::get<ArrayRef>(data_).id != 0;
+    case ValueType::kStruct:
+      return std::get<StructRef>(data_).id != 0;
   }
   return false;
 }
@@ -97,6 +99,8 @@ std::string Value::ToString() const {
       return std::format("[object {:#x}]", std::get<ObjectRef>(data_).handle);
     case ValueType::kArray:
       return std::format("[array {}]", std::get<ArrayRef>(data_).id);
+    case ValueType::kStruct:
+      return std::format("[struct {}]", std::get<StructRef>(data_).id);
   }
   return "None";
 }
@@ -116,6 +120,8 @@ bool Value::Equals(const Value& other) const {
     return type_ == other.type_ && as_object() == other.as_object();
   if (type_ == ValueType::kArray || other.type_ == ValueType::kArray)
     return type_ == other.type_ && as_array() == other.as_array();
+  if (type_ == ValueType::kStruct || other.type_ == ValueType::kStruct)
+    return type_ == other.type_ && as_struct() == other.as_struct();
 
   // Numeric/bool: promote to float when either side is float, else compare ints.
   if (type_ == ValueType::kFloat || other.type_ == ValueType::kFloat)

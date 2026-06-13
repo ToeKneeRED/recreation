@@ -78,6 +78,14 @@ class VirtualMachine : public VmInterface {
   void ArraySet(ArrayRef array, i32 index, Value value) override;
   i32 ArrayFind(ArrayRef array, const Value& value, i32 start) override;
   i32 ArrayRFind(ArrayRef array, const Value& value, i32 start) override;
+  void ArrayAdd(ArrayRef array, const Value& value, i32 count) override;
+  void ArrayInsert(ArrayRef array, i32 index, const Value& value) override;
+  void ArrayRemove(ArrayRef array, i32 index, i32 count) override;
+  void ArrayRemoveLast(ArrayRef array) override;
+  void ArrayClear(ArrayRef array) override;
+  StructRef StructCreate(const std::string& type_name) override;
+  Value StructGet(StructRef instance, const std::string& member) override;
+  void StructSet(StructRef instance, const std::string& member, Value value) override;
 
  private:
   struct LoadedScript {
@@ -110,6 +118,7 @@ class VirtualMachine : public VmInterface {
                const std::string& method_name);
   void SeedMembers(Instance& inst, const std::string& type);
   bool ArrayValid(ArrayRef array) const { return array.id != 0 && array.id <= arrays_.size(); }
+  bool StructValid(StructRef s) const { return s.id != 0 && s.id <= structs_.size(); }
   void WarnUnbound(const std::string& type, const std::string& function);
 
   const NativeRegistry* natives_;
@@ -117,6 +126,7 @@ class VirtualMachine : public VmInterface {
   std::unordered_map<u64, Instance> instances_;
   u64 next_handle_ = 1;
   std::vector<std::vector<Value>> arrays_;  // 1-based; index 0 reserved as None
+  std::vector<std::unordered_map<std::string, Value>> structs_;  // 1-based; Fallout structs
   std::vector<std::string> call_stack_;     // executing script type, for parent calls
   std::unordered_set<std::string> warned_;  // unbound natives warned once
 };

@@ -43,6 +43,18 @@ class VmInterface {
   virtual void ArraySet(ArrayRef array, i32 index, Value value) = 0;
   virtual i32 ArrayFind(ArrayRef array, const Value& value, i32 start) = 0;
   virtual i32 ArrayRFind(ArrayRef array, const Value& value, i32 start) = 0;
+
+  // Resizable-array and struct ops are Fallout 4/76 only; Skyrim arrays are
+  // fixed-size and Skyrim has no structs. The Skyrim VM still implements them so
+  // the one interpreter covers every dialect's opcodes.
+  virtual void ArrayAdd(ArrayRef array, const Value& value, i32 count) = 0;
+  virtual void ArrayInsert(ArrayRef array, i32 index, const Value& value) = 0;
+  virtual void ArrayRemove(ArrayRef array, i32 index, i32 count) = 0;
+  virtual void ArrayRemoveLast(ArrayRef array) = 0;
+  virtual void ArrayClear(ArrayRef array) = 0;
+  virtual StructRef StructCreate(const std::string& type_name) = 0;
+  virtual Value StructGet(StructRef instance, const std::string& member) = 0;
+  virtual void StructSet(StructRef instance, const std::string& member, Value value) = 0;
 };
 
 // Executes a single non-native Papyrus function to completion and returns its

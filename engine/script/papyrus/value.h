@@ -20,6 +20,7 @@ enum class ValueType : u8 {
   kString,
   kObject,
   kArray,
+  kStruct,  // Fallout 4/76 user-defined struct instance
 };
 
 // Handle to a script object instance (or engine-bound form). 0 means None. The
@@ -35,6 +36,12 @@ struct ArrayRef {
   bool operator==(const ArrayRef&) const = default;
 };
 
+// Handle to a VM-owned struct instance (Fallout). 0 means None.
+struct StructRef {
+  u32 id = 0;
+  bool operator==(const StructRef&) const = default;
+};
+
 // A dynamically typed Papyrus value. Construct via the static factories;
 // read via type() and the as_*/To* accessors.
 class Value {
@@ -47,6 +54,7 @@ class Value {
   static Value Str(std::string v) { return Value(ValueType::kString, std::move(v)); }
   static Value Object(ObjectRef v) { return Value(ValueType::kObject, v); }
   static Value Array(ArrayRef v) { return Value(ValueType::kArray, v); }
+  static Value Struct(StructRef v) { return Value(ValueType::kStruct, v); }
 
   ValueType type() const { return type_; }
   bool is_none() const { return type_ == ValueType::kNone; }
@@ -63,6 +71,9 @@ class Value {
   ArrayRef as_array() const {
     return type_ == ValueType::kArray ? std::get<ArrayRef>(data_) : ArrayRef{};
   }
+  StructRef as_struct() const {
+    return type_ == ValueType::kStruct ? std::get<StructRef>(data_) : StructRef{};
+  }
 
   // Papyrus coercion rules, used by the cast opcode and arithmetic promotion.
   i32 ToInt() const;
@@ -76,7 +87,8 @@ class Value {
   int Compare(const Value& other) const;
 
  private:
-  using Storage = std::variant<std::monostate, i32, f32, bool, std::string, ObjectRef, ArrayRef>;
+  using Storage =
+      std::variant<std::monostate, i32, f32, bool, std::string, ObjectRef, ArrayRef, StructRef>;
   template <typename T>
   Value(ValueType t, T v) : type_(t), data_(std::move(v)) {}
 

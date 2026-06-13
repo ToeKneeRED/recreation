@@ -336,6 +336,53 @@ i32 VirtualMachine::ArrayRFind(ArrayRef array, const Value& value, i32 start) {
   return -1;
 }
 
+void VirtualMachine::ArrayAdd(ArrayRef array, const Value& value, i32 count) {
+  if (!ArrayValid(array)) return;
+  auto& a = arrays_[array.id - 1];
+  for (i32 i = 0; i < count; ++i) a.push_back(value);
+}
+
+void VirtualMachine::ArrayInsert(ArrayRef array, i32 index, const Value& value) {
+  if (!ArrayValid(array)) return;
+  auto& a = arrays_[array.id - 1];
+  if (index < 0 || index > static_cast<i32>(a.size())) return;
+  a.insert(a.begin() + index, value);
+}
+
+void VirtualMachine::ArrayRemove(ArrayRef array, i32 index, i32 count) {
+  if (!ArrayValid(array) || count <= 0) return;
+  auto& a = arrays_[array.id - 1];
+  if (index < 0 || index >= static_cast<i32>(a.size())) return;
+  i32 end = std::min(index + count, static_cast<i32>(a.size()));
+  a.erase(a.begin() + index, a.begin() + end);
+}
+
+void VirtualMachine::ArrayRemoveLast(ArrayRef array) {
+  if (!ArrayValid(array)) return;
+  auto& a = arrays_[array.id - 1];
+  if (!a.empty()) a.pop_back();
+}
+
+void VirtualMachine::ArrayClear(ArrayRef array) {
+  if (ArrayValid(array)) arrays_[array.id - 1].clear();
+}
+
+StructRef VirtualMachine::StructCreate(const std::string&) {
+  structs_.emplace_back();
+  return StructRef{static_cast<u32>(structs_.size())};
+}
+
+Value VirtualMachine::StructGet(StructRef instance, const std::string& member) {
+  if (!StructValid(instance)) return Value();
+  auto& s = structs_[instance.id - 1];
+  auto it = s.find(member);
+  return it == s.end() ? Value() : it->second;
+}
+
+void VirtualMachine::StructSet(StructRef instance, const std::string& member, Value value) {
+  if (StructValid(instance)) structs_[instance.id - 1][member] = std::move(value);
+}
+
 void VirtualMachine::WarnUnbound(const std::string& type, const std::string& function) {
   std::string key = Lower(type) + "." + Lower(function);
   if (warned_.insert(key).second)
