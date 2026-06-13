@@ -20,6 +20,7 @@
 #include "render/exposure.h"
 #include "render/environment.h"
 #include "render/gpu_profiler.h"
+#include "render/path_tracer.h"
 #include "render/material_system.h"
 #include "render/mesh_pipeline.h"
 #include "render/post.h"
@@ -115,6 +116,7 @@ class Renderer {
     return profiler_.results();
   }
   f32 gpu_frame_ms() const { return profiler_.total_ms(); }
+  u32 path_trace_samples() const { return path_tracer_.accumulated_samples(); }
 
  private:
   static constexpr u32 kFramesInFlight = 2;
@@ -175,6 +177,10 @@ class Renderer {
   BloomPass bloom_;
   ExposurePass exposure_;
   GpuProfiler profiler_;
+  PathTracer path_tracer_;
+  Mat4 pt_prev_view_proj_ = Mat4::Identity();
+  f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation
+  bool pt_was_active_ = false;
 
   // Settings already in effect, diffed against settings_ each frame.
   UpscalerKind applied_upscaler_ = UpscalerKind::kNone;

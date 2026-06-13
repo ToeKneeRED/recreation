@@ -74,6 +74,8 @@ struct RenderSettings {
   bool rt_reflections = true;  // raytraced specular for opaque surfaces (needs ray query)
   f32 reflection_roughness_cutoff = 0.6f;  // above this, fall back to prefiltered ibl
 
+  bool path_trace = false;  // reference progressive path tracer (needs ray query)
+
   Vec3 sun_direction{-0.35f, -0.9f, -0.25f};  // travel direction of the light
   f32 sun_intensity = 4.0f;
   Vec3 sun_color{1.0f, 0.96f, 0.9f};

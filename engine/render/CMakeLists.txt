@@ -16,6 +16,7 @@ recreation_add_module(render
   taa.cc
   raytracing.cc
   gpu_profiler.cc
+  path_tracer.cc
   upscaler.cc
   vulkan/vk_device.cc
   vulkan/vk_swapchain.cc
@@ -76,6 +77,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/ddgi_border.cs.hlsl
   shaders/water.ps.hlsl
   shaders/copy.cs.hlsl
+  shaders/pathtrace.cs.hlsl
 )
 
 # rtao.cs.hlsl and the nrd_* shaders pull in NRD.hlsli. The include dir is added

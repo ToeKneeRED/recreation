@@ -85,9 +85,13 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   applied_vsync_ = settings_.vsync;
 
   profiler_.Initialize(*device_, kFramesInFlight);
+  if (rt_available_ && bindless_) {
+    path_tracer_.Initialize(*device_, bindless_->set_layout());
+  }
 
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
+  path_tracer_.Resize(*device_, {render_width_, render_height_});
   if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
   if (rt_available_ && !nrd_.Initialize(*device_, {render_width_, render_height_})) {
@@ -116,6 +120,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       settings_.exposure = 1.0f;
     }
   }
+  if (const char* pt = std::getenv("REC_PATHTRACE")) settings_.path_trace = std::atoi(pt) != 0;
 
   return true;
 }
@@ -240,6 +245,7 @@ void Renderer::ApplySettings() {
     UpdateRenderResolution();
     transient_pool_->Clear();
     taa_.Resize(*device_, {render_width_, render_height_});
+    path_tracer_.Resize(*device_, {render_width_, render_height_});
     if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
     if (rt_available_ && nrd_.available()) nrd_.Resize(*device_, {render_width_, render_height_});
@@ -257,6 +263,7 @@ void Renderer::ApplySettings() {
       UpdateRenderResolution();
       transient_pool_->Clear();
       taa_.Resize(*device_, {render_width_, render_height_});
+      path_tracer_.Resize(*device_, {render_width_, render_height_});
       if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
       if (rt_available_ && nrd_.available()) nrd_.Resize(*device_, {render_width_, render_height_});
@@ -456,6 +463,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   bool reflections_active = rt_available_ && settings_.rt_reflections && bindless_ != nullptr;
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
+  bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
   time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
@@ -549,21 +557,28 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   ResourceHandle scene_color = graph_.CreateTexture(
       {.name = "scene_color", .format = kSceneColorFormat, .width = render_width_,
        .height = render_height_});
-  ResourceHandle motion = graph_.CreateTexture(
-      {.name = "motion", .format = kMotionFormat, .width = render_width_,
-       .height = render_height_});
-  ResourceHandle depth = graph_.CreateTexture(
-      {.name = "depth", .format = kDepthFormat, .width = render_width_,
-       .height = render_height_});
-  ResourceHandle normals = graph_.CreateTexture(
-      {.name = "normals", .format = kNormalFormat, .width = render_width_,
-       .height = render_height_});
-  // Raw reversed z exported by the prepass; every depth consumer samples
-  // this so the real depth attachment never changes layout mid frame
-  // (sampling round trips corrupt its compression metadata on nvidia).
-  ResourceHandle depth_export = graph_.CreateTexture(
-      {.name = "depth_export", .format = VK_FORMAT_R32_SFLOAT, .width = render_width_,
-       .height = render_height_});
+  // The g-buffer aux targets only exist for the raster path; the path tracer
+  // writes scene_color directly, so leaving them uncreated keeps the transient
+  // pool from allocating images no pass touches.
+  ResourceHandle motion = kInvalidResource, depth = kInvalidResource;
+  ResourceHandle normals = kInvalidResource, depth_export = kInvalidResource;
+  if (!path_trace) {
+    motion = graph_.CreateTexture(
+        {.name = "motion", .format = kMotionFormat, .width = render_width_,
+         .height = render_height_});
+    depth = graph_.CreateTexture(
+        {.name = "depth", .format = kDepthFormat, .width = render_width_,
+         .height = render_height_});
+    normals = graph_.CreateTexture(
+        {.name = "normals", .format = kNormalFormat, .width = render_width_,
+         .height = render_height_});
+    // Raw reversed z exported by the prepass; every depth consumer samples
+    // this so the real depth attachment never changes layout mid frame
+    // (sampling round trips corrupt its compression metadata on nvidia).
+    depth_export = graph_.CreateTexture(
+        {.name = "depth_export", .format = VK_FORMAT_R32_SFLOAT, .width = render_width_,
+         .height = render_height_});
+  }
 
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
@@ -578,7 +593,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   }
 
   u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
-  if (rt_shadows || rtao_active || ddgi_active || water_pipeline_active || reflections_active) {
+  if (rt_shadows || rtao_active || ddgi_active || water_pipeline_active || reflections_active ||
+      path_trace) {
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
@@ -594,6 +610,30 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           raytracing_->BuildTlas(ctx.cmd, tlas_slot, instances);
         });
   }
+
+  // Reference path tracer takes over the whole frame: it writes scene_color
+  // directly and skips the entire raster path (g-buffer, gi, transparency, aa).
+  ResourceHandle lit = scene_color;
+  if (path_trace) {
+    PathTracer::Frame pt;
+    pt.inv_view_proj = globals.inv_view_proj;
+    pt.camera_pos = view.camera.eye;
+    pt.sun_direction = settings_.sun_direction;
+    pt.sun_intensity = settings_.sun_intensity;
+    pt.sun_color = settings_.sun_color;
+    pt.sun_radius = settings_.sun_angular_radius;
+    pt.frame_index = frame_index_;
+    f32 sig = settings_.sun_intensity + settings_.sun_color.x * 3.0f +
+              settings_.sun_color.y * 5.0f + settings_.sun_color.z * 7.0f;
+    bool moved = std::memcmp(&view_proj, &pt_prev_view_proj_, sizeof(Mat4)) != 0;
+    pt.reset = !pt_was_active_ || moved || sig != pt_prev_sig_;
+    pt_prev_view_proj_ = view_proj;
+    pt_prev_sig_ = sig;
+    pt_was_active_ = true;
+    path_tracer_.AddToGraph(graph_, *raytracing_, tlas_slot, bindless_->set(),
+                            environment_->sky_view(), environment_->sampler(), scene_color, pt);
+  } else {
+    pt_was_active_ = false;
 
   graph_.AddPass(
       "prepass",
@@ -834,7 +874,6 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         vkCmdEndRendering(ctx.cmd);
       });
 
-  ResourceHandle lit = scene_color;
   if (!transparent.empty() && water_) {
     std::sort(transparent.begin(), transparent.end(),
               [](const TransparentDraw& a, const TransparentDraw& b) {
@@ -989,8 +1028,12 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           vkCmdEndRendering(ctx.cmd);
         });
   }
+  }  // end raster path
 
+  // The path tracer already resolved antialiasing through accumulation; the
+  // raster path runs its temporal/upscale resolve here.
   ResourceHandle post_input = lit;
+  if (!path_trace) {
   switch (settings_.aa_mode) {
     case AntiAliasingMode::kTaa:
       post_input = taa_.AddToGraph(graph_, lit, motion, frame_index_);
@@ -1013,9 +1056,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     case AntiAliasingMode::kNone:
       break;
   }
+  }
 
   // Dimensions of the aa-resolved image the post stack runs at.
-  bool upscaled = settings_.aa_mode == AntiAliasingMode::kUpscaler && post_input != lit;
+  bool upscaled = !path_trace && settings_.aa_mode == AntiAliasingMode::kUpscaler &&
+                  post_input != lit;
   u32 post_width = upscaled ? output_width_ : render_width_;
   u32 post_height = upscaled ? output_height_ : render_height_;
 
@@ -1199,6 +1244,7 @@ void Renderer::RecreateSwapchain() {
   UpdateRenderResolution();
   transient_pool_->Clear();
   taa_.Resize(*device_, {render_width_, render_height_});
+  path_tracer_.Resize(*device_, {render_width_, render_height_});
   if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
   has_prev_frame_ = false;
 }
@@ -1225,6 +1271,7 @@ void Renderer::Shutdown() {
     bloom_.Destroy(*device_);
     exposure_.Destroy(*device_);
     profiler_.Shutdown();
+    path_tracer_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();
     environment_.reset();

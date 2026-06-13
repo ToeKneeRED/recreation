@@ -196,6 +196,10 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
           ImGui::SliderFloat("Reflection roughness", &settings.reflection_roughness_cutoff, 0.05f,
                              1.0f, "%.2f");
         }
+        ImGui::Checkbox("Path traced reference", &settings.path_trace);
+        if (settings.path_trace) {
+          ImGui::Text("accumulated %u spp", renderer.path_trace_samples());
+        }
         ImGui::EndDisabled();
         ImGui::BeginDisabled(!caps || !caps->fill_mode_non_solid);
         ImGui::Checkbox("Wireframe", &settings.wireframe);
