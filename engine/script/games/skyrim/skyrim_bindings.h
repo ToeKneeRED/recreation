@@ -38,6 +38,10 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   i32 GetFormType(papyrus::ObjectRef form) override;
   std::string GetName(papyrus::ObjectRef form) override;
   bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) override;
+  i32 GetSex(papyrus::ObjectRef actor_base) override;
+  bool IsUnique(papyrus::ObjectRef actor_base) override;
+  bool IsEssential(papyrus::ObjectRef actor_base) override;
+  papyrus::ObjectRef GetRace(papyrus::ObjectRef actor_base) override;
 
   // Spatial state: authored placement from the REFR record, overridable by
   // SetPosition / MoveTo (the override store is the new system).

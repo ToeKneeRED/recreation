@@ -59,6 +59,18 @@ f32 DefaultActorValue(const std::string& av) {
   return 0.0f;
 }
 
+// The NPC_ ACBS flags word (bit 0 Female, bit 1 Essential, bit 5 Unique).
+u32 AcbsFlags(const bethesda::RecordStore* records, bethesda::GlobalFormId id) {
+  if (!records) return 0;
+  bethesda::Record rec;
+  if (!records->Parse(id, &rec)) return 0;
+  const bethesda::Subrecord* acbs = rec.Find(FourCc('A', 'C', 'B', 'S'));
+  if (!acbs || acbs->data.size() < 4) return 0;
+  u32 flags;
+  std::memcpy(&flags, acbs->data.data(), 4);
+  return flags;
+}
+
 }  // namespace
 
 bethesda::GlobalFormId RecordBackedSkyrimBindings::ToFormId(ObjectRef ref) const {
@@ -235,6 +247,33 @@ RecordBackedSkyrimBindings::ActorValue& RecordBackedSkyrimBindings::Av(ObjectRef
   if (it != values.end()) return it->second;
   f32 d = DefaultActorValue(av);
   return values[key] = ActorValue{d, d};
+}
+
+i32 RecordBackedSkyrimBindings::GetSex(ObjectRef actor_base) {
+  return (AcbsFlags(records_, ToFormId(actor_base)) & 0x1) ? 1 : 0;
+}
+
+bool RecordBackedSkyrimBindings::IsUnique(ObjectRef actor_base) {
+  return (AcbsFlags(records_, ToFormId(actor_base)) & 0x20) != 0;
+}
+
+bool RecordBackedSkyrimBindings::IsEssential(ObjectRef actor_base) {
+  return (AcbsFlags(records_, ToFormId(actor_base)) & 0x02) != 0;
+}
+
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetRace(ObjectRef actor_base) {
+  if (!records_) return {};
+  bethesda::GlobalFormId id = ToFormId(actor_base);
+  const bethesda::RecordStore::StoredRecord* stored = records_->Find(id);
+  if (!stored) return {};
+  bethesda::Record rec;
+  if (!records_->Parse(id, &rec)) return {};
+  const bethesda::Subrecord* rnam = rec.Find(FourCc('R', 'N', 'A', 'M'));
+  if (!rnam || rnam->data.size() < 4) return {};
+  u32 raw;
+  std::memcpy(&raw, rnam->data.data(), 4);
+  bethesda::GlobalFormId race = records_->ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin);
+  return papyrus::ObjectRef{race.packed()};
 }
 
 f32 RecordBackedSkyrimBindings::GetActorValue(ObjectRef actor, const std::string& av) {

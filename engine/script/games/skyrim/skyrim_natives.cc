@@ -169,6 +169,22 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Form", "HasKeyword", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     return Value::Bool(Resolve(bindings).HasKeyword(self, ArgO(a, 0)));
   });
+
+  // ActorBase (and Actor, which delegates) read the NPC_ record.
+  for (const char* type : {"ActorBase", "Actor"}) {
+    reg.Register(type, "GetSex", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+      return Value::Int(Resolve(bindings).GetSex(self));
+    });
+    reg.Register(type, "GetRace", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+      return Value::Object(Resolve(bindings).GetRace(self));
+    });
+  }
+  reg.Register("ActorBase", "IsUnique", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(Resolve(bindings).IsUnique(self));
+  });
+  reg.Register("ActorBase", "IsEssential", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(Resolve(bindings).IsEssential(self));
+  });
 }
 
 void RegisterObjectReference(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {

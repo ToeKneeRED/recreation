@@ -100,6 +100,23 @@ int main(int argc, char** argv) {
     std::printf("  (no keyworded weapon found to test form natives)\n");
   }
 
+  // ActorBase data from a real NPC_ record.
+  std::optional<GlobalFormId> npc_base;
+  records.EachOfType(FourCc('N', 'P', 'C', '_'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    if (npc_base) return;
+    Record rec;
+    if (records.Parse(id, &rec) && rec.Find(FourCc('R', 'N', 'A', 'M'))) npc_base = id;
+  });
+  if (npc_base) {
+    ObjectRef base{Handle(*npc_base)};
+    i32 sex = bindings.GetSex(base);
+    check("NPC GetSex is 0 or 1", sex == 0 || sex == 1);
+    check("NPC GetRace returns a form", bindings.GetRace(base).handle != 0);
+    std::printf("  (npc %04x:%06x, sex=%d, race=%llx, essential=%d)\n", npc_base->plugin,
+                npc_base->local_id, sex,
+                (unsigned long long)bindings.GetRace(base).handle, bindings.IsEssential(base));
+  }
+
   // Spatial natives (records-authored placement + override store).
   std::optional<GlobalFormId> ref;
   f32 authored[3] = {0, 0, 0};

@@ -28,6 +28,12 @@ class SkyrimBindings {
   virtual std::string GetName(papyrus::ObjectRef form) { return ""; }
   virtual bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) { return false; }
 
+  // ActorBase (NPC_ record data).
+  virtual i32 GetSex(papyrus::ObjectRef actor_base) { return 0; }  // 0 male, 1 female
+  virtual bool IsUnique(papyrus::ObjectRef actor_base) { return false; }
+  virtual bool IsEssential(papyrus::ObjectRef actor_base) { return false; }
+  virtual papyrus::ObjectRef GetRace(papyrus::ObjectRef actor_base) { return {}; }
+
   // ObjectReference spatial state (engine transform / ECS).
   virtual f32 GetPositionX(papyrus::ObjectRef ref) { return 0; }
   virtual f32 GetPositionY(papyrus::ObjectRef ref) { return 0; }
