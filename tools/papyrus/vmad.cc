@@ -79,7 +79,11 @@ int main(int argc, char** argv) {
     const Subrecord* vmad = rec.Find(FourCc('V', 'M', 'A', 'D'));
     if (!vmad) return;
     ScriptAttachment att;
-    if (!ParseScriptAttachment(vmad->data, &att) || att.scripts.empty()) return;
+    std::vector<QuestStageFragment> fragments;
+    bool is_quest = type == FourCc('Q', 'U', 'S', 'T');
+    bool ok = is_quest ? ParseQuestFragments(vmad->data, &att, &fragments)
+                       : ParseScriptAttachment(vmad->data, &att);
+    if (!ok || att.scripts.empty()) return;
     ++total;
     if (shown >= max) return;
     ++shown;
@@ -90,6 +94,8 @@ int main(int argc, char** argv) {
       for (const ScriptProperty& p : s.properties)
         std::printf("    %-28s %s\n", p.name.c_str(), PropertySummary(p).c_str());
     }
+    for (const QuestStageFragment& f : fragments)
+      std::printf("  stage %-4u -> %s.%s\n", f.stage, f.script_name.c_str(), f.function.c_str());
   });
 
   char type_name[5] = {sig[0], sig[1], sig[2], sig[3], 0};

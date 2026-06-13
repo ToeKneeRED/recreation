@@ -123,10 +123,9 @@ void ReadPropertyValue(Reader& r, i16 object_format, ScriptProperty* p) {
   }
 }
 
-}  // namespace
-
-bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out) {
-  Reader r(vmad);
+// Reads the VMAD header + script list, leaving r positioned at the per-record
+// fragment data that may follow. Returns false on a malformed header/scripts.
+bool ReadScriptsSection(Reader& r, ScriptAttachment* out) {
   out->version = r.I16();
   out->object_format = r.I16();
   if (out->version < 1 || out->version > 5 ||
@@ -159,6 +158,37 @@ bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out) {
     REC_WARN("vmad: truncated near byte {}", r.pos());
     return false;
   }
+  return true;
+}
+
+}  // namespace
+
+bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out) {
+  Reader r(vmad);
+  return ReadScriptsSection(r, out);
+}
+
+bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
+                         std::vector<QuestStageFragment>* fragments) {
+  Reader r(vmad);
+  if (!ReadScriptsSection(r, out)) return false;
+
+  // Quest fragment section (SSE): a flags/version byte, the fragment count, the
+  // QF script file name, then one entry per stage-with-a-fragment.
+  r.U8();                       // flags/version, unused
+  u16 fragment_count = r.U16();
+  r.Str();                      // shared fragment file name, unused (per-entry name below)
+  for (u16 i = 0; i < fragment_count && r.ok(); ++i) {
+    QuestStageFragment f;
+    f.stage = r.U16();
+    r.I16();                    // unknown
+    r.I32();                    // log entry / stage index, unused
+    r.U8();                     // per-fragment flags, unused
+    f.script_name = r.Str();
+    f.function = r.Str();
+    if (r.ok()) fragments->push_back(std::move(f));
+  }
+  // Alias fragments may follow; the engine does not need them.
   return true;
 }
 

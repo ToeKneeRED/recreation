@@ -616,6 +616,13 @@ bool Engine::LoadGameData() {
   script_bindings_ = std::make_unique<rec::script::skyrim::RecordBackedSkyrimBindings>(&records_);
   script_bindings_->set_player(rec::script::papyrus::ObjectRef{0x14});  // Skyrim player ref
   scripts_ = std::make_unique<rec::script::ScriptSystem>(game_, &vfs_, script_bindings_.get());
+  // Hand the bindings the guest VM so quest stage fragments can execute (run on
+  // the guest thread, where the bindings live).
+  {
+    auto* binds = script_bindings_.get();
+    scripts_->guest().Submit(
+        [binds](rec::script::papyrus::VirtualMachine& vm) { binds->set_vm(&vm); });
+  }
   AttachQuestScripts();
 
   // Actor bringup scene: load a Skyrim character and animate it, no streaming.
@@ -717,7 +724,8 @@ void Engine::AttachQuestScripts() {
                         const bethesda::Subrecord* vmad = record.Find(FourCc('V', 'M', 'A', 'D'));
                         if (!vmad) return;
                         bethesda::ScriptAttachment attachment;
-                        if (!bethesda::ParseScriptAttachment(vmad->data, &attachment) ||
+                        std::vector<bethesda::QuestStageFragment> fragments;
+                        if (!bethesda::ParseQuestFragments(vmad->data, &attachment, &fragments) ||
                             attachment.scripts.empty())
                           return;
                         u64 handle = static_cast<u64>(id.plugin) << 32 | id.local_id;
@@ -728,10 +736,36 @@ void Engine::AttachQuestScripts() {
                           std::string name = record.GetString(FourCc('E', 'D', 'I', 'D'));
                           if (name.empty()) name = std::to_string(id.local_id);
                           quest_records_.push_back({handle, std::move(name)});
+                          // Register the stage->fragment map on the guest thread so
+                          // SetStage runs the quest's authored logic.
+                          auto* binds = script_bindings_.get();
+                          scripts_->guest().Submit(
+                              [binds, handle, fragments = std::move(fragments)](
+                                  rec::script::papyrus::VirtualMachine&) {
+                                for (const auto& f : fragments)
+                                  binds->SetStageFragment(handle, f.stage, f.function);
+                              });
                         }
                       });
   REC_INFO("papyrus: instantiated {} scripts across {} quests, {} script types loaded", instances,
            quests, scripts_->loaded_script_count());
+
+  // REC_START_QUEST=<EDID> starts a quest at load (runs its opening stage
+  // fragment) so quest logic can be exercised without the UI.
+  if (const char* want = std::getenv("REC_START_QUEST")) {
+    std::string edid = want;
+    auto* binds = script_bindings_.get();
+    int started = 0;
+    for (const auto& [handle, name] : quest_records_) {
+      if (edid != "all" && name != edid) continue;
+      scripts_->guest().Submit([binds, h = handle](rec::script::papyrus::VirtualMachine&) {
+        binds->StartQuest(rec::script::papyrus::ObjectRef{h});
+      });
+      ++started;
+      if (edid != "all") break;
+    }
+    REC_INFO("debug: started {} quest(s) matching '{}'", started, edid);
+  }
 }
 
 void Engine::RefreshQuestPanel(f32 dt) {

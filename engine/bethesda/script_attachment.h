@@ -49,10 +49,27 @@ struct ScriptAttachment {
   std::vector<ScriptEntry> scripts;
 };
 
+// One quest stage's Papyrus fragment: the function the engine runs when the
+// quest reaches `stage`. It lives on `script_name` (the auto-generated QF_<quest>
+// script) as `function` (e.g. "Fragment_3").
+struct QuestStageFragment {
+  u16 stage = 0;
+  std::string script_name;
+  std::string function;
+};
+
 // Parses a VMAD subrecord body. Only the script list is read (the per-record
 // fragment data that can follow it is record-type specific and skipped).
 // Returns false on a malformed or truncated body.
 bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out);
+
+// Parses a QUST VMAD: the script list (into `out`) plus the quest fragment
+// section that maps each stage to the Papyrus function run when it is set
+// (into `fragments`). Alias fragments are skipped. Returns false if the script
+// section is malformed; a malformed fragment tail leaves the fragments parsed
+// so far.
+bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
+                         std::vector<QuestStageFragment>* fragments);
 
 }  // namespace rec::bethesda
 

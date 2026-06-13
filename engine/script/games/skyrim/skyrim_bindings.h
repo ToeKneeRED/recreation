@@ -10,6 +10,10 @@
 #include "core/types.h"
 #include "script/games/skyrim/skyrim_natives.h"
 
+namespace rec::script::papyrus {
+class VirtualMachine;
+}
+
 namespace rec::script::skyrim {
 
 // A concrete SkyrimBindings that backs the native surface with real state:
@@ -30,6 +34,12 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   void set_records(const bethesda::RecordStore* records) { records_ = records; }
   void set_strings(const bethesda::StringTable* strings) { strings_ = strings; }
   void set_player(papyrus::ObjectRef player) { player_ = player; }
+  // The guest VM, so SetStage can run the quest's stage fragment. Set once on
+  // the guest thread (the only caller of these bindings).
+  void set_vm(papyrus::VirtualMachine* vm) { vm_ = vm; }
+  // Registers the Papyrus function a quest runs when it reaches `stage` (from
+  // the QUST VMAD fragments). Populated at quest attach.
+  void SetStageFragment(u64 quest, i32 stage, std::string function);
 
   papyrus::ObjectRef GetPlayer() override { return player_; }
   papyrus::ObjectRef GetForm(u32 form_id) override;
@@ -149,6 +159,12 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   std::unordered_map<u64, LockState> locks_;
   std::unordered_map<u64, bool> open_;
   std::unordered_map<u64, QuestState> quests_;
+  // quest handle -> stage -> Papyrus fragment function name (from the QUST VMAD).
+  std::unordered_map<u64, std::unordered_map<i32, std::string>> stage_fragments_;
+  papyrus::VirtualMachine* vm_ = nullptr;
+  int fragment_depth_ = 0;  // guards stage->fragment->SetStage recursion
+  // Runs the fragment for a freshly-set stage, if one is registered.
+  void RunStageFragment(papyrus::ObjectRef quest, i32 stage);
   std::unordered_map<u64, std::unordered_map<u64, i32>> faction_ranks_;  // actor -> faction -> rank
   std::unordered_map<u64, std::unordered_map<u64, i32>> reactions_;      // faction -> other
   std::unordered_map<u64, i32> crime_gold_;                             // faction -> gold

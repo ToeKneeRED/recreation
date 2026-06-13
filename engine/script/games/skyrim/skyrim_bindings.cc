@@ -6,6 +6,8 @@
 #include <cstring>
 
 #include "bethesda/record.h"
+#include "core/log.h"
+#include "script/papyrus/vm.h"
 
 namespace rec::script::skyrim {
 namespace {
@@ -410,11 +412,40 @@ void RecordBackedSkyrimBindings::RemoveItem(ObjectRef container, ObjectRef item,
 
 i32 RecordBackedSkyrimBindings::GetStage(ObjectRef quest) { return quests_[quest.handle].stage; }
 
+void RecordBackedSkyrimBindings::SetStageFragment(u64 quest, i32 stage, std::string function) {
+  stage_fragments_[quest][stage] = std::move(function);
+}
+
+void RecordBackedSkyrimBindings::RunStageFragment(ObjectRef quest, i32 stage) {
+  if (!vm_) return;
+  auto qit = stage_fragments_.find(quest.handle);
+  if (qit == stage_fragments_.end()) return;
+  auto fit = qit->second.find(stage);
+  if (fit == qit->second.end() || fit->second.empty()) return;
+  // Stage fragments call SetStage on themselves and other quests; cap the depth
+  // so a cyclic chain in the data cannot blow the guest stack.
+  if (fragment_depth_ >= 32) {
+    REC_WARN("quest fragment recursion too deep at {}.{}", quest.handle, fit->second);
+    return;
+  }
+  ++fragment_depth_;
+  u64 before = vm_->native_call_count();
+  vm_->Call(quest, fit->second, {});
+  REC_DEBUG("quest fragment {} (stage {}) ran, {} native calls", fit->second, stage,
+            vm_->native_call_count() - before);
+  --fragment_depth_;
+}
+
 void RecordBackedSkyrimBindings::SetStage(ObjectRef quest, i32 stage) {
   QuestState& q = quests_[quest.handle];
+  bool already_done = q.stage_done.count(stage) && q.stage_done[stage];
   q.stage = stage;
   q.stage_done[stage] = true;
   q.running = true;  // setting a stage implies the quest is running
+  // Run the stage's Papyrus fragment once (the logic that advances the quest:
+  // sets objectives, enables refs, chains stages). Re-setting a done stage is a
+  // no-op, matching the game.
+  if (!already_done) RunStageFragment(quest, stage);
 }
 
 bool RecordBackedSkyrimBindings::GetStageDone(ObjectRef quest, i32 stage) {
@@ -427,7 +458,16 @@ bool RecordBackedSkyrimBindings::GetStageDone(ObjectRef quest, i32 stage) {
 bool RecordBackedSkyrimBindings::IsRunning(ObjectRef quest) { return quests_[quest.handle].running; }
 
 void RecordBackedSkyrimBindings::StartQuest(ObjectRef quest) {
-  quests_[quest.handle].running = true;
+  QuestState& q = quests_[quest.handle];
+  q.running = true;
+  // Kick the opening stage so the quest's logic actually begins. The start
+  // stage is the lowest one carrying a fragment.
+  auto qit = stage_fragments_.find(quest.handle);
+  if (qit != stage_fragments_.end() && !qit->second.empty()) {
+    i32 lowest = qit->second.begin()->first;
+    for (const auto& [stage, fn] : qit->second) lowest = std::min(lowest, stage);
+    SetStage(quest, lowest);
+  }
 }
 
 void RecordBackedSkyrimBindings::StopQuest(ObjectRef quest) {
