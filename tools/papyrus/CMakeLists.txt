@@ -5,3 +5,7 @@ recreation_set_warnings(pexdump)
 add_executable(pexrun run.cc)
 target_link_libraries(pexrun PRIVATE recreation::script recreation::bethesda recreation::asset)
 recreation_set_warnings(pexrun)
+
+add_executable(vmaddump vmad.cc)
+target_link_libraries(vmaddump PRIVATE recreation::bethesda recreation::asset)
+recreation_set_warnings(vmaddump)
