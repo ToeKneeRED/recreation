@@ -130,6 +130,9 @@ class Engine {
   void CreateMaterialDemoScene();
   // A sphere built from 3D gaussian splats (non-triangle primitive path).
   void CreateGaussianDemoScene();
+  // A receding row of identical multi-lod spheres; the gpu picks coarser
+  // tessellation with distance. Exercises distance-based lod selection.
+  void CreateLodDemoScene();
 
   // A simple cpu particle fountain for the demos. Integrates + spawns each
   // frame and emits the live billboards into the frame view.

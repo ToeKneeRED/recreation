@@ -170,6 +170,20 @@ Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id) {
   return mesh;
 }
 
+Mesh MakeLodSphere(f32 radius, AssetId id) {
+  Mesh mesh;
+  mesh.id = id;
+  // Fine, medium, coarse tessellation. Each MakeSphere produces a one-lod mesh;
+  // move that lod into the shared list so the gpu picks it by distance.
+  const u32 tess[][2] = {{48, 64}, {16, 22}, {6, 8}};
+  for (const auto& t : tess) {
+    Mesh level = MakeSphere(radius, t[0], t[1], id);
+    mesh.lods.push_back(std::move(level.lods[0]));
+  }
+  mesh.bounds_radius = radius;
+  return mesh;
+}
+
 void MakeSkinnedBiped(AssetId mesh_id, Skeleton* out_skeleton, Mesh* out_mesh) {
   u32 count = static_cast<u32>(sizeof(kBiped) / sizeof(kBiped[0]));
 

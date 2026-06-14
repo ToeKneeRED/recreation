@@ -176,6 +176,7 @@ void Engine::ApplyRenderPreset() {
     tuned.exposure = 1.0f;
   }
   if (env.path_trace) tuned.path_trace = true;
+  if (env.wireframe) tuned.wireframe = true;  // honor REC_WIREFRAME over the preset
   tuned.color_grade = env.color_grade;      // presets never set a grade
   tuned.sun_direction = env.sun_direction;  // honor REC_SUN_DIR over the default
 
@@ -462,6 +463,46 @@ void Engine::CreateGaussianDemoScene() {
   REC_INFO("gaussian splat demo: {} splats", demo_gaussians_.size());
 }
 
+void Engine::CreateLodDemoScene() {
+  // A row of identical spheres receding from the camera. Each sphere carries
+  // three tessellation levels; the gpu cull selects a coarser lod with distance,
+  // so the near sphere is smooth and the far ones turn visibly faceted.
+  asset::Mesh ground = asset::MakeCube(8.0f, asset::MakeAssetId("builtin/loddemo/ground"));
+  for (asset::MeshLod& lod : ground.lods) {
+    if (lod.submeshes.empty()) lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), {}});
+  }
+  if (!config_.headless) renderer_.UploadMesh(ground);
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, world::Transform{.position = {0, -8.1f, 0}});  // top at y = -0.1
+  world_.Add(floor, world::Renderable{ground.id});
+
+  asset::Material mat;
+  mat.id = asset::MakeAssetId("builtin/loddemo/mat");
+  mat.base_color_factor[0] = 0.85f;
+  mat.base_color_factor[1] = 0.5f;
+  mat.base_color_factor[2] = 0.2f;
+  mat.roughness_factor = 0.35f;
+  mat.metallic_factor = 0.0f;
+  if (!config_.headless) renderer_.UploadMaterial(mat);
+
+  // Three spheres at increasing distance, landing on lod 0 / 1 / 2 in turn.
+  const Vec3 pos[3] = {{-1.6f, 0.9f, 4.5f}, {1.5f, 0.9f, 2.0f}, {-1.3f, 0.9f, -0.5f}};
+  for (int i = 0; i < 3; ++i) {
+    std::string tag = "builtin/loddemo/" + std::to_string(i);
+    asset::Mesh sphere = asset::MakeLodSphere(1.2f, asset::MakeAssetId(tag + "/mesh"));
+    for (asset::MeshLod& lod : sphere.lods) lod.submeshes[0].material = mat.id;
+    if (!config_.headless) renderer_.UploadMesh(sphere);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, world::Transform{.position = {pos[i].x, pos[i].y, pos[i].z}});
+    world_.Add(e, world::Renderable{sphere.id});
+  }
+
+  camera_.set_position({0.0f, 1.5f, 6.5f});
+  camera_.set_yaw_pitch(0.0f, -0.1f);
+  camera_.speed = 4.0f;
+  REC_INFO("lod demo: distance-based tessellation, near smooth to far faceted");
+}
+
 void Engine::CreateDemoScene() {
   if (config_.demo_scene == "water") {
     CreateWaterDemoScene();
@@ -473,6 +514,10 @@ void Engine::CreateDemoScene() {
   }
   if (config_.demo_scene == "gaussian") {
     CreateGaussianDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "lod") {
+    CreateLodDemoScene();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));

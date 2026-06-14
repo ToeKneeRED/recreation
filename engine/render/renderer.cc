@@ -11,6 +11,19 @@
 #include "core/log.h"
 
 namespace rec::render {
+namespace {
+
+// Distance-based hierarchical lod: coarser geometry the further a mesh is from
+// the camera. Switches roughly every few bounding radii; clamps to the coarsest.
+u32 SelectLod(const GpuMesh& mesh, f32 distance) {
+  u32 lod_count = 1u + static_cast<u32>(mesh.lods.size());
+  if (lod_count <= 1) return 0;
+  f32 unit = std::max(mesh.bounds_radius, 0.25f) * 2.5f;
+  u32 lod = static_cast<u32>(distance / std::max(unit, 0.5f));
+  return lod < lod_count ? lod : lod_count - 1;
+}
+
+}  // namespace
 
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
@@ -118,6 +131,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       value.resize(colon);
     }
     screenshot_path_ = value;
+  }
+
+  if (const char* wf = std::getenv("REC_WIREFRAME")) {
+    settings_.wireframe = std::atoi(wf) != 0;
   }
 
   // REC_DEBUG_VIEW=<n> pins a debug channel at startup for headless capture;
@@ -343,17 +360,29 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh) {
                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
                   : 0;
   GpuMesh gpu;
+
+  // Concatenate every lod into shared vertex/index buffers; each lod keeps its
+  // local indices, rebased onto its vertices through the draw's vertexOffset.
+  base::Vector<asset::Vertex> all_verts;
+  base::Vector<u32> all_indices;
+  base::Vector<u32> vertex_bases, index_bases;
+  for (const asset::MeshLod& l : mesh.lods) {
+    vertex_bases.push_back(static_cast<u32>(all_verts.size()));
+    index_bases.push_back(static_cast<u32>(all_indices.size()));
+    for (const asset::Vertex& v : l.vertices) all_verts.push_back(v);
+    for (u32 idx : l.indices) all_indices.push_back(idx);
+  }
   gpu.vertices = device_->CreateBufferWithData(
-      ByteSpan(reinterpret_cast<const u8*>(lod.vertices.data()),
-               lod.vertices.size() * sizeof(asset::Vertex)),
+      ByteSpan(reinterpret_cast<const u8*>(all_verts.data()),
+               all_verts.size() * sizeof(asset::Vertex)),
       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | rt_usage);
   gpu.indices = device_->CreateBufferWithData(
-      ByteSpan(reinterpret_cast<const u8*>(lod.indices.data()), lod.indices.size() * sizeof(u32)),
+      ByteSpan(reinterpret_cast<const u8*>(all_indices.data()), all_indices.size() * sizeof(u32)),
       VK_BUFFER_USAGE_INDEX_BUFFER_BIT | rt_usage);
-  gpu.index_count = static_cast<u32>(lod.indices.size());
+  gpu.index_count = static_cast<u32>(lod.indices.size());    // lod 0 (rt/shadow/overdraw)
   gpu.vertex_count = static_cast<u32>(lod.vertices.size());
   // Skinned meshes carry a parallel bone index/weight stream, bound as a second
-  // vertex buffer by the skinned pipeline.
+  // vertex buffer by the skinned pipeline. Skinned meshes are not lod'd.
   if (mesh.skinned && lod.skinning.size() == lod.vertices.size()) {
     gpu.skinning = device_->CreateBufferWithData(
         ByteSpan(reinterpret_cast<const u8*>(lod.skinning.data()),
@@ -361,15 +390,25 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh) {
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     gpu.skinned = gpu.skinning.buffer != VK_NULL_HANDLE;
   }
-  if (lod.submeshes.empty()) {
-    gpu.submeshes.push_back({0, gpu.index_count, 0, false});
-  } else {
-    for (const asset::Submesh& submesh : lod.submeshes) {
+  auto build_submeshes = [&](const asset::MeshLod& l, u32 index_base,
+                             base::Vector<GpuSubmesh>& out) {
+    if (l.submeshes.empty()) {
+      out.push_back({index_base, static_cast<u32>(l.indices.size()), 0, false, false});
+      return;
+    }
+    for (const asset::Submesh& submesh : l.submeshes) {
       bool water = material_system_ && material_system_->is_water(submesh.material.hash);
       bool blend = water || (material_system_ && material_system_->is_blend(submesh.material.hash));
-      gpu.submeshes.push_back(
-          {submesh.index_offset, submesh.index_count, submesh.material.hash, blend, water});
+      out.push_back({index_base + submesh.index_offset, submesh.index_count, submesh.material.hash,
+                     blend, water});
     }
+  };
+  build_submeshes(mesh.lods[0], index_bases[0], gpu.submeshes);
+  for (size_t i = 1; i < mesh.lods.size(); ++i) {
+    GpuLod glod;
+    glod.vertex_offset = vertex_bases[i];
+    build_submeshes(mesh.lods[i], index_bases[i], glod.submeshes);
+    gpu.lods.push_back(std::move(glod));
   }
   gpu.all_blend = true;
   for (const GpuSubmesh& submesh : gpu.submeshes) {
@@ -508,6 +547,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Cascaded shadow maps: the raster sun-shadow path, used whenever ray-traced
   // shadows are not. The rt fragment variant traces its own shadow ray instead.
   bool csm_active = settings_.shadow_maps && !rt_shadows && !path_trace;
+  // When the tlas is consulted for shading, the rasterized surface must match the
+  // blas (built at lod 0), or ao/reflection rays self-intersect the finer sphere
+  // and read black. Distance lod then only applies on non-rt (low/mobile) tiers.
+  bool tlas_shaded =
+      rt_shadows || rtao_active || ddgi_active || reflections_active || path_trace;
   time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
@@ -751,13 +795,30 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       inst.first_cmd = cmd_total;
       inst.cull_disabled = (mesh->skinned || mesh->bounds_radius <= 0.0f) ? 1u : 0u;
       inst.pad = 0;
+
+      // Pick the lod by camera distance; emit that lod's index ranges. Skinned
+      // meshes stay on lod 0 (their bounds deform). The submesh count matches
+      // lod 0 so the prepass/scene draw loops issue one indirect per submesh.
+      Vec3 wc = TransformPoint(item.transform, {mesh->bounds_center[0], mesh->bounds_center[1],
+                                                mesh->bounds_center[2]});
+      Vec3 d = view.camera.eye - wc;
+      bool fixed_lod = mesh->skinned || (tlas_shaded && !mesh->no_rt);
+      u32 lod = fixed_lod ? 0 : SelectLod(*mesh, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+      const base::Vector<GpuSubmesh>& src =
+          lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
+      i32 vtx_off = lod == 0 ? 0 : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
+
       u32 mesh_cmds = 0;
+      u32 k = 0;
       for (const GpuSubmesh& submesh : mesh->submeshes) {
-        if (submesh.blend) continue;
-        if (cmd_total >= GpuCull::kMaxCommands) break;
-        cmds[cmd_total] = {submesh.index_count, 1u, submesh.index_offset, 0, 0u};
-        ++cmd_total;
-        ++mesh_cmds;
+        if (!submesh.blend) {
+          if (cmd_total >= GpuCull::kMaxCommands) break;
+          const GpuSubmesh& s = k < src.size() ? src[k] : submesh;
+          cmds[cmd_total] = {s.index_count, 1u, s.index_offset, vtx_off, 0u};
+          ++cmd_total;
+          ++mesh_cmds;
+        }
+        ++k;
       }
       inst.cmd_count = mesh_cmds;
       if (mesh_cmds > 0) ++cull_instance_count;

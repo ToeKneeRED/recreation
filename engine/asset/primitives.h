@@ -14,6 +14,10 @@ Mesh MakeCube(f32 half_extent, AssetId id);
 // material preview scene where clearcoat/sheen/anisotropy read best on a curve.
 Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id);
 
+// A uv sphere with three levels of detail (fine, medium, coarse tessellation)
+// for exercising distance-based lod selection. Each lod has one empty submesh.
+Mesh MakeLodSphere(f32 radius, AssetId id);
+
 // A blocky biped: a skeleton with the standard Skyrim bone names (so the
 // procedural locomotion drives it) and a skinned box-limb mesh bound to it,
 // authored in engine space (meters, Y-up). For bringup of the skinning,
