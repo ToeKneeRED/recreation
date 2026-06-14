@@ -1,5 +1,9 @@
 #include "render/post.h"
 
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+
 #include <base/containers/vector.h>
 
 #include "core/log.h"
@@ -180,10 +184,75 @@ void ApplyGrade(ColorGrade grade, f32 in[3], f32 out[3]) {
       b = (b - 0.5f) * 1.12f + 0.5f;
       break;
     }
+    case ColorGrade::kCustom:  // filled from a loaded .cube, not procedural
+      break;
   }
   out[0] = Clamp01(r);
   out[1] = Clamp01(g);
   out[2] = Clamp01(b);
+}
+
+// A parsed Resolve/Adobe .cube 3D lut: size^3 rgb triples, red varying fastest.
+struct CubeLut {
+  u32 size = 0;
+  base::Vector<f32> rgb;  // size^3 * 3
+};
+
+// Parses LUT_3D_SIZE + the triple list. Ignores comments, TITLE and DOMAIN_*;
+// rejects 1D luts and malformed files. Returns false on any error.
+bool ParseCube(std::istream& in, CubeLut* out) {
+  std::string line;
+  base::Vector<f32> data;
+  u32 size = 0;
+  while (std::getline(in, line)) {
+    size_t s = line.find_first_not_of(" \t\r\n");
+    if (s == std::string::npos || line[s] == '#') continue;
+    std::istringstream ls(line.substr(s));
+    std::string tok;
+    ls >> tok;
+    if (tok == "LUT_3D_SIZE") {
+      ls >> size;
+      if (size < 2 || size > 128) return false;
+    } else if (tok == "LUT_1D_SIZE") {
+      return false;  // 1D luts are not supported by the strip path
+    } else if (tok == "TITLE" || tok == "DOMAIN_MIN" || tok == "DOMAIN_MAX" ||
+               tok == "LUT_3D_INPUT_RANGE") {
+      continue;
+    } else {
+      f32 r, g, b;
+      std::istringstream vs(line.substr(s));
+      if (!(vs >> r >> g >> b)) continue;  // tolerate stray lines
+      data.push_back(r);
+      data.push_back(g);
+      data.push_back(b);
+    }
+  }
+  if (size == 0 || data.size() != static_cast<size_t>(size) * size * size * 3) return false;
+  out->size = size;
+  out->rgb = std::move(data);
+  return true;
+}
+
+// Trilinear sample of the cube at continuous voxel coords (red fastest layout).
+void SampleCube(const CubeLut& lut, f32 fr, f32 fg, f32 fb, f32 out[3]) {
+  const i32 n = static_cast<i32>(lut.size);
+  auto fetch = [&](i32 r, i32 g, i32 b, i32 c) -> f32 {
+    r = r < 0 ? 0 : (r >= n ? n - 1 : r);
+    g = g < 0 ? 0 : (g >= n ? n - 1 : g);
+    b = b < 0 ? 0 : (b >= n ? n - 1 : b);
+    return lut.rgb[(static_cast<size_t>(b) * n * n + static_cast<size_t>(g) * n + r) * 3 + c];
+  };
+  i32 r0 = static_cast<i32>(fr), g0 = static_cast<i32>(fg), b0 = static_cast<i32>(fb);
+  f32 dr = fr - r0, dg = fg - g0, db = fb - b0;
+  for (i32 c = 0; c < 3; ++c) {
+    f32 c00 = fetch(r0, g0, b0, c) * (1 - dr) + fetch(r0 + 1, g0, b0, c) * dr;
+    f32 c10 = fetch(r0, g0 + 1, b0, c) * (1 - dr) + fetch(r0 + 1, g0 + 1, b0, c) * dr;
+    f32 c01 = fetch(r0, g0, b0 + 1, c) * (1 - dr) + fetch(r0 + 1, g0, b0 + 1, c) * dr;
+    f32 c11 = fetch(r0, g0 + 1, b0 + 1, c) * (1 - dr) + fetch(r0 + 1, g0 + 1, b0 + 1, c) * dr;
+    f32 c0 = c00 * (1 - dg) + c10 * dg;
+    f32 c1 = c01 * (1 - dg) + c11 * dg;
+    out[c] = Clamp01(c0 * (1 - db) + c1 * db);
+  }
 }
 
 }  // namespace
@@ -217,7 +286,13 @@ void PostPass::UploadLut(ColorGrade grade) {
       }
     }
   }
+  UploadLutPixels(pixels);
+  lut_grade_ = grade;
+}
 
+void PostPass::UploadLutPixels(base::Vector<u8>& pixels) {
+  const u32 size = kLutSize;
+  const u32 width = size * size;
   GpuBuffer staging = device_.CreateBufferWithData(
       {pixels.data(), pixels.size()}, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
   bool first = !lut_ready_;
@@ -252,7 +327,44 @@ void PostPass::UploadLut(ColorGrade grade) {
   });
   device_.DestroyBuffer(staging);
   lut_ready_ = true;
-  lut_grade_ = grade;
+}
+
+bool PostPass::LoadCubeLut(const std::string& path) {
+  std::ifstream file(path);
+  if (!file) {
+    REC_WARN("cube lut: cannot open {}", path);
+    return false;
+  }
+  CubeLut cube;
+  if (!ParseCube(file, &cube)) {
+    REC_WARN("cube lut: failed to parse {} (need a valid 3D .cube)", path);
+    return false;
+  }
+
+  // Resample the cube into the engine's 32^3 strip (blue slices laid out across).
+  const u32 size = kLutSize;
+  const u32 width = size * size;
+  base::Vector<u8> pixels(static_cast<size_t>(width) * size * 4);
+  f32 scale = static_cast<f32>(cube.size - 1) / static_cast<f32>(size - 1);
+  for (u32 b = 0; b < size; ++b) {
+    for (u32 g = 0; g < size; ++g) {
+      for (u32 r = 0; r < size; ++r) {
+        f32 out[3];
+        SampleCube(cube, r * scale, g * scale, b * scale, out);
+        u8* p = &pixels[(static_cast<size_t>(g) * width + (b * size + r)) * 4];
+        p[0] = static_cast<u8>(out[0] * 255.0f + 0.5f);
+        p[1] = static_cast<u8>(out[1] * 255.0f + 0.5f);
+        p[2] = static_cast<u8>(out[2] * 255.0f + 0.5f);
+        p[3] = 255;
+      }
+    }
+  }
+
+  if (lut_ready_) device_.WaitIdle();  // shared across frames; drain before reupload
+  UploadLutPixels(pixels);
+  lut_grade_ = ColorGrade::kCustom;
+  REC_INFO("cube lut: loaded {} ({}^3)", path, cube.size);
+  return true;
 }
 
 void PostPass::SetGrade(ColorGrade grade) {

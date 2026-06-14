@@ -154,6 +154,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (const char* cg = std::getenv("REC_COLOR_GRADE")) {
     settings_.color_grade = static_cast<ColorGrade>(std::atoi(cg));
   }
+  // REC_LUT=<path> loads an external .cube 3D lut as the active color grade.
+  if (const char* lut = std::getenv("REC_LUT")) {
+    if (post_ && post_->LoadCubeLut(lut)) settings_.color_grade = ColorGrade::kCustom;
+  }
   // REC_SUN_DIR="x,y,z" overrides the sun travel direction, for headless
   // lighting/shadow tests (normalized; y clamped below the horizon).
   if (const char* sd = std::getenv("REC_SUN_DIR")) {

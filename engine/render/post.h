@@ -2,6 +2,9 @@
 #define RECREATION_RENDER_POST_H_
 
 #include <memory>
+#include <string>
+
+#include <base/containers/vector.h>
 
 #include "render/render_graph.h"
 #include "render/rhi/device.h"
@@ -31,6 +34,11 @@ class PostPass {
   // Rebakes the grading strip LUT when the grade changes (no-op otherwise).
   void SetGrade(ColorGrade grade);
 
+  // Loads a Resolve/Adobe .cube 3D lut from disk, resampled into the strip lut.
+  // Leaves the grade marked kCustom so SetGrade does not bake over it. Returns
+  // false (and keeps the current lut) on a parse or read error.
+  bool LoadCubeLut(const std::string& path);
+
   // bloom may be the input view when bloom is off (still bound, not read).
   void Record(PassContext& ctx, VkImageView input, VkImageView bloom, VkBuffer exposure,
               u64 exposure_size, VkImageView output, VkExtent2D output_extent,
@@ -43,6 +51,7 @@ class PostPass {
   static constexpr u32 kLutSize = 32;
   bool CreateLut();
   void UploadLut(ColorGrade grade);
+  void UploadLutPixels(base::Vector<u8>& pixels);  // staging + copy of a 32^3 strip
 
   Device& device_;
   VkSampler sampler_ = VK_NULL_HANDLE;

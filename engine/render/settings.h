@@ -12,7 +12,7 @@ enum class TonemapOperator : u8 { kAces, kReinhard, kNone };
 
 // Built-in display-space color grades, baked into a strip LUT and applied after
 // tonemapping. kNeutral is identity (the LUT is skipped entirely).
-enum class ColorGrade : u8 { kNeutral, kWarm, kCool, kCinematic };
+enum class ColorGrade : u8 { kNeutral, kWarm, kCool, kCinematic, kCustom };
 
 // Debug visualization of an isolated shading channel, written straight to the
 // scene target (still tonemapped). kOff is the normal lit image. Mirrored in
