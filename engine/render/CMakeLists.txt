@@ -11,6 +11,7 @@ recreation_add_module(render
   ambient_occlusion.cc
   ssao.cc
   ssr.cc
+  ssgi.cc
   gpu_cull.cc
   shadow.cc
   particles.cc
@@ -87,6 +88,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/rtao.cs.hlsl
   shaders/ssao.cs.hlsl
   shaders/ssr.cs.hlsl
+  shaders/ssgi.cs.hlsl
   shaders/cull.cs.hlsl
   shaders/bounds.vs.hlsl
   shaders/bounds.ps.hlsl

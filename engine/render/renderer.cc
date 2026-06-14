@@ -75,6 +75,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (rt_available_ && !rtao_.Initialize(*device_)) return false;
   if (!ssao_.Initialize(*device_)) return false;  // raster ao fallback, no rt needed
   if (!ssr_.Initialize(*device_)) return false;   // raster reflection fallback
+  if (!ssgi_.Initialize(*device_)) return false;  // raster diffuse-gi fallback
   if (!shadow_.Initialize(*device_, material_system_->set_layout())) return false;  // raster sun shadows
   if (!particles_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!gaussians_.Initialize(*device_, kSceneColorFormat)) return false;
@@ -115,6 +116,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   taa_.Resize(*device_, {render_width_, render_height_});
   ssao_.Resize(*device_, {render_width_, render_height_});
   ssr_.Resize(*device_, {render_width_, render_height_});
+  ssgi_.Resize(*device_, {render_width_, render_height_});
   path_tracer_.Resize(*device_, {render_width_, render_height_});
   if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
@@ -140,6 +142,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   }
   if (const char* s = std::getenv("REC_SSR")) {
     settings_.ssr = std::atoi(s) != 0;
+  }
+  if (const char* s = std::getenv("REC_SSGI")) {
+    settings_.ssgi = std::atoi(s) != 0;
   }
 
   // REC_DEBUG_VIEW=<n> pins a debug channel at startup for headless capture;
@@ -295,6 +300,7 @@ void Renderer::ApplySettings() {
     taa_.Resize(*device_, {render_width_, render_height_});
     ssao_.Resize(*device_, {render_width_, render_height_});
   ssr_.Resize(*device_, {render_width_, render_height_});
+  ssgi_.Resize(*device_, {render_width_, render_height_});
     path_tracer_.Resize(*device_, {render_width_, render_height_});
     if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
@@ -315,6 +321,7 @@ void Renderer::ApplySettings() {
       taa_.Resize(*device_, {render_width_, render_height_});
       ssao_.Resize(*device_, {render_width_, render_height_});
   ssr_.Resize(*device_, {render_width_, render_height_});
+  ssgi_.Resize(*device_, {render_width_, render_height_});
       path_tracer_.Resize(*device_, {render_width_, render_height_});
       if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
@@ -565,6 +572,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rt_shadows || rtao_active || ddgi_active || reflections_active || path_trace;
   // Screen-space reflections stand in for ray-traced reflections on raster tiers.
   bool ssr_active = settings_.ssr && !path_trace && !reflections_active;
+  // Screen-space gi stands in for the ddgi probe volume on raster tiers.
+  bool ssgi_active = settings_.ssgi && !path_trace && !ddgi_active;
   time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
@@ -1124,6 +1133,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         vkCmdEndRendering(ctx.cmd);
       });
 
+  // Screen-space gi: add a diffuse bounce over the opaque result before
+  // reflections (so reflections pick up the gi-lit color too). Raster tiers only.
+  if (ssgi_active && normals != kInvalidResource) {
+    const f32 proj_scale[2] = {proj.m[0], proj.m[5]};
+    ResourceHandle bounced = ssgi_.AddToGraph(graph_, scene_color, depth_export, normals,
+                                              globals.inv_view_proj, proj_scale, 0.1f, frame_index_);
+    scene_color = bounced;
+    lit = bounced;
+  }
+
   // Screen-space reflections over the opaque result (before transparency, which
   // does not reflect). Replaces scene_color downstream so everything composites
   // onto the reflected image. Only on raster tiers; rt tiers reflect via the tlas.
@@ -1615,6 +1634,7 @@ void Renderer::Shutdown() {
     taa_.Destroy(*device_);
     ssao_.Destroy(*device_);
     ssr_.Destroy(*device_);
+    ssgi_.Destroy(*device_);
     shadow_.Destroy(*device_);
     particles_.Destroy(*device_);
     gaussians_.Destroy(*device_);

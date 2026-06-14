@@ -178,6 +178,7 @@ void Engine::ApplyRenderPreset() {
   if (env.path_trace) tuned.path_trace = true;
   if (env.wireframe) tuned.wireframe = true;  // honor REC_WIREFRAME over the preset
   tuned.ssr = env.ssr;                        // honor REC_SSR over the preset
+  tuned.ssgi = env.ssgi;                       // honor REC_SSGI over the preset
   tuned.color_grade = env.color_grade;      // presets never set a grade
   tuned.sun_direction = env.sun_direction;  // honor REC_SUN_DIR over the default
 
@@ -517,9 +518,60 @@ void Engine::CreateLodDemoScene() {
   REC_INFO("lod demo: distance-based tessellation, near smooth to far faceted");
 }
 
+void Engine::CreateCornellDemoScene() {
+  // The classic global-illumination test: a white room with a red left wall and
+  // a green right wall, open at the top and front so the sun lights the inside.
+  // With gi on, the red and green bounce onto the white floor and inner boxes;
+  // with gi off the white surfaces stay neutral. Reads best under --preset low
+  // (ssgi) but ddgi shows the same bleed under rt.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = 0.95f;  // matte, so the bounce reads without specular
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId white = mat("builtin/cornell/white", 0.8f, 0.8f, 0.8f);
+  asset::AssetId red = mat("builtin/cornell/red", 0.8f, 0.05f, 0.05f);
+  asset::AssetId green = mat("builtin/cornell/green", 0.05f, 0.8f, 0.05f);
+
+  int counter = 0;
+  auto add = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, world::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, world::Renderable{mesh.id});
+  };
+  auto box = [&](f32 hx, f32 hy, f32 hz) {
+    return asset::MakeBox(hx, hy, hz, asset::MakeAssetId("builtin/cornell/" + std::to_string(counter++)));
+  };
+
+  add(box(2.0f, 0.1f, 2.0f), white, {0, -0.1f, 0});   // floor (top at y = 0)
+  add(box(2.0f, 1.6f, 0.1f), white, {0, 1.5f, -2.0f});  // back wall
+  add(box(0.1f, 1.6f, 2.0f), red, {-2.0f, 1.5f, 0});    // left wall (red)
+  add(box(0.1f, 1.6f, 2.0f), green, {2.0f, 1.5f, 0});   // right wall (green)
+  add(box(0.45f, 0.9f, 0.45f), white, {-0.7f, 0.9f, -0.6f});  // tall box
+  add(box(0.45f, 0.45f, 0.45f), white, {0.7f, 0.45f, 0.4f});  // short box
+
+  camera_.set_position({0.0f, 1.5f, 4.7f});
+  camera_.set_yaw_pitch(0.0f, -0.12f);
+  camera_.speed = 3.0f;
+  REC_INFO("cornell box: gi color-bleed test (red/green walls)");
+}
+
 void Engine::CreateDemoScene() {
   if (config_.demo_scene == "water") {
     CreateWaterDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "cornell") {
+    CreateCornellDemoScene();
     return;
   }
   if (config_.demo_scene == "materials") {

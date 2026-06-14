@@ -80,7 +80,7 @@ void AddBox(MeshLod* lod, const Vec3& a, const Vec3& b, f32 thick, u8 bone) {
 
 }  // namespace
 
-Mesh MakeCube(f32 half_extent, AssetId id) {
+Mesh MakeBox(f32 hx, f32 hy, f32 hz, AssetId id) {
   struct Face {
     f32 n[3];  // normal
     f32 u[3];  // tangent axes, cross(u, v) == n so corners wind ccw
@@ -93,6 +93,7 @@ Mesh MakeCube(f32 half_extent, AssetId id) {
   };
   static constexpr f32 kCorners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
   static constexpr f32 kUvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+  const f32 half[3] = {hx, hy, hz};
 
   Mesh mesh;
   mesh.id = id;
@@ -105,8 +106,8 @@ Mesh MakeCube(f32 half_extent, AssetId id) {
     for (int corner = 0; corner < 4; ++corner) {
       Vertex vertex{};
       for (int axis = 0; axis < 3; ++axis) {
-        vertex.position[axis] = half_extent * (face.n[axis] + kCorners[corner][0] * face.u[axis] +
-                                               kCorners[corner][1] * face.v[axis]);
+        vertex.position[axis] = half[axis] * (face.n[axis] + kCorners[corner][0] * face.u[axis] +
+                                              kCorners[corner][1] * face.v[axis]);
         vertex.normal[axis] = face.n[axis];
         vertex.tangent[axis] = face.u[axis];
       }
@@ -118,8 +119,12 @@ Mesh MakeCube(f32 half_extent, AssetId id) {
     for (u32 index : {0u, 1u, 2u, 0u, 2u, 3u}) lod.indices.push_back(base + index);
   }
 
-  mesh.bounds_radius = half_extent * 1.7320508f;
+  mesh.bounds_radius = std::sqrt(hx * hx + hy * hy + hz * hz);
   return mesh;
+}
+
+Mesh MakeCube(f32 half_extent, AssetId id) {
+  return MakeBox(half_extent, half_extent, half_extent, id);
 }
 
 Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id) {

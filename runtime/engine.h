@@ -133,6 +133,9 @@ class Engine {
   // A receding row of identical multi-lod spheres; the gpu picks coarser
   // tessellation with distance. Exercises distance-based lod selection.
   void CreateLodDemoScene();
+  // A Cornell box (red/green side walls): the canonical color-bleed test for
+  // global illumination. Shows ssgi (raster) or ddgi (rt) bouncing wall color.
+  void CreateCornellDemoScene();
 
   // A simple cpu particle fountain for the demos. Integrates + spawns each
   // frame and emits the live billboards into the frame view.

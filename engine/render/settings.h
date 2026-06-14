@@ -98,6 +98,11 @@ struct RenderSettings {
   // specular off the floor and walls.
   bool ssr = true;
 
+  // Screen-space global illumination. The non-rt diffuse-gi fallback: runs
+  // whenever the ddgi probe volume is not, so low-end/mobile tiers still get a
+  // bounce of indirect color.
+  bool ssgi = true;
+
   bool path_trace = false;  // reference progressive path tracer (needs ray query)
 
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)

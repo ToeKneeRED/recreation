@@ -9,6 +9,10 @@ namespace rec::asset {
 // Procedural test shapes for bringup and unit tests.
 Mesh MakeCube(f32 half_extent, AssetId id);
 
+// An axis-aligned box with per-axis half extents (a cube is the uniform case),
+// for wall slabs and rooms. One empty submesh so the caller sets the material.
+Mesh MakeBox(f32 hx, f32 hy, f32 hz, AssetId id);
+
 // A uv sphere with smooth normals, tangents and equirect uvs. One empty
 // submesh is appended so the caller only has to set its material. Used by the
 // material preview scene where clearcoat/sheen/anisotropy read best on a curve.
