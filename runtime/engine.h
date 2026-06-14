@@ -2,11 +2,13 @@
 #define RECREATION_RUNTIME_ENGINE_H_
 
 #include <atomic>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include <base/containers/unordered_map.h>
+#include <base/containers/vector.h>
 
 #include "anim/foot_ik.h"
 #include "anim/locomotion.h"
@@ -170,6 +172,11 @@ class Engine {
   void ThrowPhysicsCube();
   bool LoadGltfScene();
   void UpdateCamera(f32 frame_delta);
+  // Camera record/replay (deterministic playback for benchmarks and capture).
+  // REC_ORBIT turntables the camera, REC_RECORD=<path> writes the path each
+  // frame, REC_REPLAY=<path> drives the camera from a recorded path.
+  void DriveCamera(f32 dt);
+  void LookCameraAt(const Vec3& eye, const Vec3& center);
   // Walk mode step: input -> character move -> entity transform + follow camera.
   void WalkUpdate(f32 dt, bool allow_input);
   // Advances every actor's gait and recomputes its model-space bone matrices.
@@ -209,6 +216,18 @@ class Engine {
 
   render::Renderer renderer_;
   FlyCamera camera_;
+
+  // Camera record/replay state, lazily armed from env on the first frame.
+  struct CamKey {
+    f32 t = 0;
+    Vec3 pos{};
+    Vec3 target{};
+  };
+  bool cam_init_ = false;
+  bool cam_orbit_ = false;
+  f32 cam_time_ = 0;
+  std::FILE* cam_record_ = nullptr;
+  base::Vector<CamKey> cam_replay_;
   DebugUi debug_ui_;
   // Quest console: the (handle, name) of each attached quest, plus the debug
   // overlay's live snapshot/callbacks. Refreshed on a timer off the guest.

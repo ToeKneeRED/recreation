@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -1379,12 +1380,67 @@ void Engine::UpdateCamera(f32 frame_delta) {
     camera_.Update(input, allow_mouse, allow_keyboard, frame_delta);
     window_->SetRelativeMouseMode(!menu && camera_.looking());
   }
+  DriveCamera(frame_delta);  // orbit / replay overrides + record
 
   if (input.key_pressed(Key::kF1) && !kb) debug_ui_.ToggleVisible();
   if (input.key_pressed(Key::kF2) && !kb) debug_ui_.ToggleTrace();
   if (input.key_pressed(Key::kF) && !menu && !kb && !walk_mode_) ThrowPhysicsCube();
   if (input.key_pressed(Key::kEscape) && !kb) game_ui_.ToggleMenu();
   if (game_ui_.quit_requested()) RequestQuit();
+}
+
+void Engine::LookCameraAt(const Vec3& eye, const Vec3& center) {
+  camera_.set_position(eye);
+  Vec3 d = Normalize(center - eye);
+  camera_.set_yaw_pitch(std::atan2(d.x, -d.z),
+                        std::asin(std::clamp(d.y, -1.0f, 1.0f)));  // forward() convention
+}
+
+void Engine::DriveCamera(f32 dt) {
+  if (!cam_init_) {
+    cam_init_ = true;
+    cam_orbit_ = std::getenv("REC_ORBIT") != nullptr;
+    if (const char* r = std::getenv("REC_RECORD")) cam_record_ = std::fopen(r, "wb");
+    if (const char* p = std::getenv("REC_REPLAY")) {
+      if (std::FILE* f = std::fopen(p, "rb")) {
+        f32 rec[7];
+        while (std::fread(rec, sizeof(f32), 7, f) == 7) {
+          cam_replay_.push_back({rec[0], {rec[1], rec[2], rec[3]}, {rec[4], rec[5], rec[6]}});
+        }
+        std::fclose(f);
+        REC_INFO("camera replay: {} keys from {}", cam_replay_.size(), p);
+      }
+    }
+  }
+  cam_time_ += dt;
+
+  if (cam_orbit_) {
+    f32 a = cam_time_ * 0.4f;  // radians/sec
+    Vec3 center{0.0f, 1.0f, 0.0f};
+    LookCameraAt({center.x + std::cos(a) * 6.0f, 2.4f, center.z + std::sin(a) * 6.0f}, center);
+  } else if (!cam_replay_.empty()) {
+    // Linear interpolation between the bracketing keys for the current time.
+    const CamKey* lo = &cam_replay_[0];
+    const CamKey* hi = lo;
+    for (const CamKey& k : cam_replay_) {
+      if (k.t <= cam_time_) lo = &k;
+      if (k.t >= cam_time_) {
+        hi = &k;
+        break;
+      }
+    }
+    f32 span = hi->t - lo->t;
+    f32 u = span > 1e-5f ? std::clamp((cam_time_ - lo->t) / span, 0.0f, 1.0f) : 0.0f;
+    auto mix = [&](const Vec3& a, const Vec3& b) { return a + (b - a) * u; };
+    LookCameraAt(mix(lo->pos, hi->pos), mix(lo->target, hi->target));
+  }
+
+  if (cam_record_) {
+    Vec3 p = camera_.position(), t = camera_.target();
+    f32 rec[7] = {cam_time_, p.x, p.y, p.z, t.x, t.y, t.z};
+    std::fwrite(rec, sizeof(f32), 7, cam_record_);
+    std::fflush(cam_record_);  // survive a timeout kill
+  }
 }
 
 void Engine::WalkUpdate(f32 dt, bool allow) {
