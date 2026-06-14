@@ -17,6 +17,12 @@ jobs:
           ref: develop
           path: zetanet
           submodules: recursive
+      - name: libultragui
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/libultragui
+          path: libultragui
+          submodules: recursive
       - name: deps
         run: |
           sudo apt-get update
@@ -30,8 +36,17 @@ jobs:
             | sudo tar -xz -C /usr/local
           sudo chmod +x /usr/local/bin/dxc
           sudo ldconfig
+      - name: third-party deps
+        run: |
+          bash tools/get_fidelityfx.sh
+          bash tools/get_dlss.sh
+          bash tools/get_nrd.sh
+          bash tools/get_jolt.sh
       - name: configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
+        run: >
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON
+          -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
+          -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
       - name: build
         run: cmake --build build
       - uses: actions/upload-artifact@v4
@@ -52,13 +67,29 @@ jobs:
           ref: develop
           path: zetanet
           submodules: recursive
+      - name: libultragui
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/libultragui
+          path: libultragui
+          submodules: recursive
       - name: dxc
         run: |
           curl.exe -fsSL -o dxc.zip https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602.24/dxc_2026_05_27.zip
           Expand-Archive dxc.zip -DestinationPath $env:GITHUB_WORKSPACE\dxc
           Add-Content -Path $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE\dxc\bin\x64"
+      - name: third-party deps
+        shell: bash
+        run: |
+          bash tools/get_fidelityfx.sh
+          bash tools/get_nrd.sh
+          bash tools/get_jolt.sh
       - name: configure
-        run: cmake -B build -DRECREATION_FETCH_SDL3=ON -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
+        run: >
+          cmake -B build -DRECREATION_FETCH_SDL3=ON
+          -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
+          -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
+          -DRECREATION_DLSS=OFF
       - name: build
         run: cmake --build build --config Release
       - uses: actions/upload-artifact@v4

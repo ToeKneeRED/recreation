@@ -1,7 +1,21 @@
 // Ray traced ambient occlusion: cosine hemisphere rays through the scene TLAS,
 // producing a raw normalized hit distance for NRD's REBLUR_DIFFUSE_OCCLUSION
 // denoiser (no temporal/spatial filtering here, NRD owns that).
+//
+// NRD.hlsli supplies the hit-distance packing. NRD is an optional dependency, so
+// when it isn't vendored (e.g. CI, mobile) fall back to a self-contained copy of
+// REBLUR_FrontEnd_GetNormHitDist; this pass runs undenoised in that case but must
+// still compile.
+#if __has_include("NRD.hlsli")
 #include "NRD.hlsli"
+#else
+float REBLUR_FrontEnd_GetNormHitDist(float hit_dist, float view_z, float3 params,
+                                     float roughness) {
+  float smc = (1.0 - exp2(-200.0 * roughness * roughness)) * pow(saturate(roughness), 0.5);
+  float f = (params.x + abs(view_z) * params.y) * lerp(params.z, 1.0, smc);
+  return max(saturate(hit_dist / f), 1e-6);
+}
+#endif
 
 [[vk::image_format("r8")]] [[vk::binding(0, 0)]] RWTexture2D<float> hitdist_out;
 [[vk::binding(1, 0)]] Texture2D<float> depth_map;
