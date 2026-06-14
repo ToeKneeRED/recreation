@@ -3,14 +3,32 @@
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D bloom;
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState bloom_sampler;
 [[vk::binding(2, 0)]] StructuredBuffer<float> exposure_buffer;  // [0] resolved exposure
+[[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D color_lut;  // 1024x32 strip lut
+[[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState color_lut_sampler;
 
 struct PushData {
   uint tonemap;  // 0 aces, 1 reinhard, 2 none
   float bloom_intensity;
   uint bloom_enabled;
-  float pad;
+  uint lut_enabled;
 };
 [[vk::push_constant]] PushData push;
+
+// Strip color lut: 32 blue slices laid out horizontally (1024x32). Hardware
+// bilinear covers red/green within a slice; blue is a manual lerp across slices.
+float3 ApplyColorLut(float3 c) {
+  const float size = 32.0;
+  c = saturate(c);
+  float blue = c.b * (size - 1.0);
+  float slice = floor(blue);
+  float frac_b = blue - slice;
+  float u = (c.r * (size - 1.0) + 0.5) / (size * size);
+  float v = (c.g * (size - 1.0) + 0.5) / size;
+  float3 a = color_lut.SampleLevel(color_lut_sampler, float2(u + slice / size, v), 0.0).rgb;
+  float3 b = color_lut.SampleLevel(color_lut_sampler,
+                                   float2(u + min(slice + 1.0, size - 1.0) / size, v), 0.0).rgb;
+  return lerp(a, b, frac_b);
+}
 
 // Narkowicz ACES fit. Cheap, no LUT, good enough until a proper grading
 // stage with white balance lands.
@@ -39,5 +57,6 @@ float4 main(float4 sv_position : SV_Position,
   } else {
     ldr = saturate(hdr);
   }
+  if (push.lut_enabled != 0u) ldr = ApplyColorLut(ldr);
   return float4(SrgbEncode(ldr), 1.0);
 }

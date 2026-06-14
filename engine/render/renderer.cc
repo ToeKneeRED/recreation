@@ -124,6 +124,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       settings_.exposure = 1.0f;
     }
   }
+  if (const char* cg = std::getenv("REC_COLOR_GRADE")) {
+    settings_.color_grade = static_cast<ColorGrade>(std::atoi(cg));
+  }
   if (const char* pt = std::getenv("REC_PATHTRACE")) settings_.path_trace = std::atoi(pt) != 0;
   if (const char* fg = std::getenv("REC_FOG")) settings_.fog = std::atoi(fg) != 0;
 
@@ -1175,8 +1178,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   backbuffer_image.extent = swapchain_->extent();
   ResourceHandle backbuffer = graph_.ImportBackbuffer(backbuffer_image);
 
+  post_->SetGrade(settings_.color_grade);  // rebakes the lut only when it changes
   PostPass::Params post_params{static_cast<u32>(settings_.tonemap), settings_.bloom_intensity,
-                               bloom != kInvalidResource ? 1u : 0u, 0};
+                               bloom != kInvalidResource ? 1u : 0u,
+                               settings_.color_grade != ColorGrade::kNeutral ? 1u : 0u};
   graph_.AddPass(
       "post",
       [&](RenderGraph::PassBuilder& builder) {

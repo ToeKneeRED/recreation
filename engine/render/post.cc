@@ -1,5 +1,7 @@
 #include "render/post.h"
 
+#include <base/containers/vector.h>
+
 #include "core/log.h"
 #include "render/shader_util.h"
 #include "shaders/fullscreen_vs_hlsl.h"
@@ -18,7 +20,7 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, VkFormat output_forma
   sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   vkCreateSampler(device.device(), &sampler_info, nullptr, &pass->sampler_);
 
-  VkDescriptorSetLayoutBinding bindings[3]{};
+  VkDescriptorSetLayoutBinding bindings[4]{};
   bindings[0].binding = 0;
   bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   bindings[0].descriptorCount = 1;
@@ -29,10 +31,12 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, VkFormat output_forma
   bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   bindings[2].descriptorCount = 1;
   bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  bindings[3] = bindings[0];
+  bindings[3].binding = 3;  // grading strip lut
 
   VkDescriptorSetLayoutCreateInfo set_info{
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_info.bindingCount = 3;
+  set_info.bindingCount = 4;
   set_info.pBindings = bindings;
   if (vkCreateDescriptorSetLayout(device.device(), &set_info, nullptr, &pass->set_layout_) !=
       VK_SUCCESS) {
@@ -138,7 +142,123 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, VkFormat output_forma
     REC_ERROR("post pipeline creation failed");
     return nullptr;
   }
+  if (!pass->CreateLut()) return nullptr;
   return pass;
+}
+
+namespace {
+
+f32 Clamp01(f32 x) { return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x); }
+
+// Applies a built-in grade to a neutral display-space color (tonemapped,
+// pre-srgb). kNeutral is identity. Authored to read clearly: warm/cool shift
+// white balance, cinematic does a teal-shadow / orange-highlight split with a
+// touch of contrast.
+void ApplyGrade(ColorGrade grade, f32 in[3], f32 out[3]) {
+  f32 r = in[0], g = in[1], b = in[2];
+  switch (grade) {
+    case ColorGrade::kNeutral:
+      break;
+    case ColorGrade::kWarm:
+      r *= 1.10f;
+      g *= 1.02f;
+      b *= 0.88f;
+      break;
+    case ColorGrade::kCool:
+      r *= 0.88f;
+      g *= 1.0f;
+      b *= 1.12f;
+      break;
+    case ColorGrade::kCinematic: {
+      f32 luma = 0.299f * r + 0.587f * g + 0.114f * b;
+      // Teal in shadows, orange in highlights, lerped by luma.
+      r += (1.0f - luma) * -0.04f + luma * 0.10f;
+      g += (1.0f - luma) * 0.03f + luma * 0.04f;
+      b += (1.0f - luma) * 0.10f + luma * -0.07f;
+      r = (r - 0.5f) * 1.12f + 0.5f;  // gentle contrast
+      g = (g - 0.5f) * 1.12f + 0.5f;
+      b = (b - 0.5f) * 1.12f + 0.5f;
+      break;
+    }
+  }
+  out[0] = Clamp01(r);
+  out[1] = Clamp01(g);
+  out[2] = Clamp01(b);
+}
+
+}  // namespace
+
+bool PostPass::CreateLut() {
+  const u32 width = kLutSize * kLutSize;
+  lut_ = device_.CreateImage2D(
+      VK_FORMAT_R8G8B8A8_UNORM, {width, kLutSize},
+      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+  if (!lut_.image) return false;
+  UploadLut(ColorGrade::kNeutral);
+  return true;
+}
+
+void PostPass::UploadLut(ColorGrade grade) {
+  const u32 size = kLutSize;
+  const u32 width = size * size;
+  base::Vector<u8> pixels(static_cast<size_t>(width) * size * 4);
+  for (u32 b = 0; b < size; ++b) {
+    for (u32 g = 0; g < size; ++g) {
+      for (u32 r = 0; r < size; ++r) {
+        f32 in[3] = {static_cast<f32>(r) / (size - 1), static_cast<f32>(g) / (size - 1),
+                     static_cast<f32>(b) / (size - 1)};
+        f32 out[3];
+        ApplyGrade(grade, in, out);
+        u8* p = &pixels[(static_cast<size_t>(g) * width + (b * size + r)) * 4];
+        p[0] = static_cast<u8>(out[0] * 255.0f + 0.5f);
+        p[1] = static_cast<u8>(out[1] * 255.0f + 0.5f);
+        p[2] = static_cast<u8>(out[2] * 255.0f + 0.5f);
+        p[3] = 255;
+      }
+    }
+  }
+
+  GpuBuffer staging = device_.CreateBufferWithData(
+      {pixels.data(), pixels.size()}, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+  bool first = !lut_ready_;
+  device_.ImmediateSubmit([&](VkCommandBuffer cmd) {
+    VkImageMemoryBarrier2 to_dst{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    to_dst.srcStageMask = first ? VK_PIPELINE_STAGE_2_NONE : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    to_dst.srcAccessMask = first ? 0 : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    to_dst.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    to_dst.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    to_dst.oldLayout = first ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_dst.image = lut_.image;
+    to_dst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &to_dst;
+    vkCmdPipelineBarrier2(cmd, &dep);
+
+    VkBufferImageCopy copy{};
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.imageExtent = {width, size, 1};
+    vkCmdCopyBufferToImage(cmd, staging.buffer, lut_.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    to_dst.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    to_dst.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    to_dst.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    to_dst.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    to_dst.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_dst.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier2(cmd, &dep);
+  });
+  device_.DestroyBuffer(staging);
+  lut_ready_ = true;
+  lut_grade_ = grade;
+}
+
+void PostPass::SetGrade(ColorGrade grade) {
+  if (grade == lut_grade_) return;
+  device_.WaitIdle();  // the lut is shared across frames; drain before reupload
+  UploadLut(grade);
 }
 
 PostPass::~PostPass() {
@@ -146,17 +266,19 @@ PostPass::~PostPass() {
   if (layout_) vkDestroyPipelineLayout(device_.device(), layout_, nullptr);
   if (set_layout_) vkDestroyDescriptorSetLayout(device_.device(), set_layout_, nullptr);
   if (sampler_) vkDestroySampler(device_.device(), sampler_, nullptr);
+  device_.DestroyImage(lut_);
 }
 
 void PostPass::Record(PassContext& ctx, VkImageView input, VkImageView bloom, VkBuffer exposure,
                       u64 exposure_size, VkImageView output, VkExtent2D output_extent,
                       const Params& params) {
   VkDescriptorSet set = ctx.allocate_set(set_layout_);
-  VkDescriptorImageInfo images[2]{};
+  VkDescriptorImageInfo images[3]{};
   images[0] = {sampler_, input, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[1] = {sampler_, bloom, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  images[2] = {sampler_, lut_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   VkDescriptorBufferInfo exposure_info{exposure, 0, exposure_size};
-  VkWriteDescriptorSet writes[3];
+  VkWriteDescriptorSet writes[4];
   for (u32 i = 0; i < 2; ++i) {
     writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     writes[i].dstSet = set;
@@ -171,7 +293,13 @@ void PostPass::Record(PassContext& ctx, VkImageView input, VkImageView bloom, Vk
   writes[2].descriptorCount = 1;
   writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   writes[2].pBufferInfo = &exposure_info;
-  vkUpdateDescriptorSets(device_.device(), 3, writes, 0, nullptr);
+  writes[3] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  writes[3].dstSet = set;
+  writes[3].dstBinding = 3;
+  writes[3].descriptorCount = 1;
+  writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[3].pImageInfo = &images[2];
+  vkUpdateDescriptorSets(device_.device(), 4, writes, 0, nullptr);
 
   VkRenderingAttachmentInfo color{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
   color.imageView = output;

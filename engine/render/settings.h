@@ -10,6 +10,10 @@ namespace rec::render {
 
 enum class TonemapOperator : u8 { kAces, kReinhard, kNone };
 
+// Built-in display-space color grades, baked into a strip LUT and applied after
+// tonemapping. kNeutral is identity (the LUT is skipped entirely).
+enum class ColorGrade : u8 { kNeutral, kWarm, kCool, kCinematic };
+
 // Debug visualization of an isolated shading channel, written straight to the
 // scene target (still tonemapped). kOff is the normal lit image. Mirrored in
 // mesh.ps.hlsl as the debug_view field of FrameGlobals.
@@ -106,6 +110,7 @@ struct RenderSettings {
   // Compensation multiplier under auto exposure, absolute exposure without.
   f32 exposure = 1.0f;
   TonemapOperator tonemap = TonemapOperator::kAces;
+  ColorGrade color_grade = ColorGrade::kNeutral;  // post-tonemap lut grade
 };
 
 }  // namespace rec::render

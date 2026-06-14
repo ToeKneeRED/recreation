@@ -176,6 +176,7 @@ void Engine::ApplyRenderPreset() {
     tuned.exposure = 1.0f;
   }
   if (env.path_trace) tuned.path_trace = true;
+  tuned.color_grade = env.color_grade;  // presets never set a grade
 
   renderer_.settings() = tuned;
   REC_INFO("render preset: {} ({})", render::PresetName(resolved),

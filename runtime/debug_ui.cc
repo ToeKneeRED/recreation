@@ -21,6 +21,7 @@ const char* kAaModes[] = {"None", "TAA", "FSR3 Upscaler", "DLSS Upscaler"};
 const char* kQualities[] = {"Native AA (1.0x)", "Quality (1.5x)", "Balanced (1.7x)",
                             "Performance (2.0x)"};
 const char* kTonemaps[] = {"ACES", "Reinhard", "None"};
+const char* kColorGrades[] = {"Neutral", "Warm", "Cool", "Cinematic"};
 const char* kDebugViews[] = {"Off",         "Base color",   "World normal",
                              "Roughness",   "Metallic",     "Ambient occlusion",
                              "Indirect GI", "Direct light", "Emissive", "Reflection"};
@@ -335,6 +336,10 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
         int tonemap = static_cast<int>(settings.tonemap);
         if (ImGui::Combo("Tonemap", &tonemap, kTonemaps, IM_ARRAYSIZE(kTonemaps))) {
           settings.tonemap = static_cast<render::TonemapOperator>(tonemap);
+        }
+        int grade = static_cast<int>(settings.color_grade);
+        if (ImGui::Combo("Color grade", &grade, kColorGrades, IM_ARRAYSIZE(kColorGrades))) {
+          settings.color_grade = static_cast<render::ColorGrade>(grade);
         }
         ImGui::Checkbox("Bloom", &settings.bloom);
         if (settings.bloom) {
