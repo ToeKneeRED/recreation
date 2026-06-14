@@ -4,7 +4,10 @@ recreation_add_module(render
   mesh_pipeline.cc
   material_system.cc
   environment.cc
+  ambient_occlusion.cc
+  bloom.cc
   ddgi.cc
+  exposure.cc
   post.cc
   shader_util.cc
   taa.cc
@@ -41,6 +44,13 @@ recreation_embed_shaders(recreation_render
   shaders/irradiance.cs.hlsl
   shaders/prefilter.cs.hlsl
   shaders/brdf_lut.cs.hlsl
+  shaders/prepass.ps.hlsl
+  shaders/rtao.cs.hlsl
+  shaders/rtao_blur.cs.hlsl
+  shaders/bloom_down.cs.hlsl
+  shaders/bloom_up.cs.hlsl
+  shaders/histogram.cs.hlsl
+  shaders/exposure_resolve.cs.hlsl
   shaders/ddgi_rays.cs.hlsl
   shaders/ddgi_blend.cs.hlsl
   shaders/ddgi_border.cs.hlsl

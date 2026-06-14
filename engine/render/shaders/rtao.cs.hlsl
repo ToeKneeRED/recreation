@@ -1,0 +1,102 @@
+// Ray traced ambient occlusion with temporal accumulation. Cosine
+// distributed hemisphere rays through the scene TLAS; history reprojects
+// through the motion target and accumulates a running mean.
+
+[[vk::image_format("rg16f")]] [[vk::binding(0, 0)]] RWTexture2D<float2> accum_out;
+[[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D depth_map;
+[[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState depth_sampler;
+[[vk::combinedImageSampler]] [[vk::binding(2, 0)]] Texture2D normal_map;
+[[vk::combinedImageSampler]] [[vk::binding(2, 0)]] SamplerState normal_sampler;
+[[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D motion_map;
+[[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState motion_sampler;
+[[vk::combinedImageSampler]] [[vk::binding(4, 0)]] Texture2D history_map;
+[[vk::combinedImageSampler]] [[vk::binding(4, 0)]] SamplerState history_sampler;
+[[vk::binding(5, 0)]] RaytracingAccelerationStructure tlas;
+
+struct PushData {
+  column_major float4x4 inv_view_proj;  // unjittered
+  float2 inv_size;
+  float radius;
+  float frame_index;
+  uint ray_count;
+  uint reset_history;
+  float2 pad;
+};
+[[vk::push_constant]] PushData push;
+
+static const float kMaxHistory = 32.0;
+
+float3 OctDecode(float2 o) {
+  float3 d = float3(o.x, 1.0 - abs(o.x) - abs(o.y), o.y);
+  if (d.y < 0.0) {
+    float2 sign_xz = float2(d.x >= 0.0 ? 1.0 : -1.0, d.z >= 0.0 ? 1.0 : -1.0);
+    d.xz = (1.0 - abs(d.zx)) * sign_xz;
+  }
+  return normalize(d);
+}
+
+float Ign(float2 pixel, float offset) {
+  float ign = frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
+  return frac(ign + offset * 0.61803398875);
+}
+
+[numthreads(8, 8, 1)]
+void main(uint3 id : SV_DispatchThreadID) {
+  uint width, height;
+  accum_out.GetDimensions(width, height);
+  if (id.x >= width || id.y >= height) return;
+  int3 p = int3(id.xy, 0);
+
+  float depth = depth_map.Load(p).r;
+  if (depth <= 0.0) {  // reversed z far plane: sky
+    accum_out[id.xy] = float2(1.0, kMaxHistory);
+    return;
+  }
+
+  float2 uv = (float2(id.xy) + 0.5) * push.inv_size;
+  float2 ndc = uv * 2.0 - 1.0;
+  float4 world = mul(push.inv_view_proj, float4(ndc, depth, 1.0));
+  float3 world_pos = world.xyz / world.w;
+  float3 n = OctDecode(normal_map.Load(p).rg);
+
+  // Cosine hemisphere around the normal, rotated per pixel and per frame.
+  float3 up = abs(n.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0);
+  float3 t = normalize(cross(up, n));
+  float3 b = cross(n, t);
+
+  float occlusion = 0.0;
+  for (uint ray_index = 0; ray_index < push.ray_count; ++ray_index) {
+    float u1 = Ign(float2(id.xy), push.frame_index + ray_index * 13.0);
+    float u2 = Ign(float2(id.yx) + 31.0, push.frame_index * 1.7 + ray_index * 7.0);
+    float cos_theta = sqrt(1.0 - u1);
+    float sin_theta = sqrt(u1);
+    float phi = 6.2831853 * u2;
+    float3 dir = t * (cos(phi) * sin_theta) + b * (sin(phi) * sin_theta) + n * cos_theta;
+
+    RayDesc ray;
+    ray.Origin = world_pos + n * 0.02;
+    ray.TMin = 0.001;
+    ray.Direction = dir;
+    ray.TMax = push.radius;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> rq;
+    rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+    rq.Proceed();
+    if (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+      // Distant blockers occlude less.
+      float falloff = saturate(rq.CommittedRayT() / push.radius);
+      occlusion += 1.0 - falloff * falloff;
+    }
+  }
+  float ao = 1.0 - occlusion / push.ray_count;
+
+  float count = 1.0;
+  if (push.reset_history == 0u) {
+    float2 history_uv = uv + motion_map.Load(p).rg;
+    if (all(history_uv >= 0.0) && all(history_uv <= 1.0)) {
+      float2 history = history_map.SampleLevel(history_sampler, history_uv, 0).rg;
+      count = min(history.y + 1.0, kMaxHistory);
+      ao = lerp(history.x, ao, 1.0 / count);
+    }
+  }
+  accum_out[id.xy] = float2(ao, count);
+}

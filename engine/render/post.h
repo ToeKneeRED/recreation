@@ -22,11 +22,15 @@ class PostPass {
   PostPass& operator=(const PostPass&) = delete;
 
   struct Params {
-    f32 exposure = 1.0f;
     u32 tonemap = 0;  // TonemapOperator
+    f32 bloom_intensity = 0.04f;
+    u32 bloom_enabled = 0;
+    f32 pad = 0;
   };
 
-  void Record(PassContext& ctx, VkImageView input, VkImageView output, VkExtent2D output_extent,
+  // bloom may be the input view when bloom is off (still bound, not read).
+  void Record(PassContext& ctx, VkImageView input, VkImageView bloom, VkBuffer exposure,
+              u64 exposure_size, VkImageView output, VkExtent2D output_extent,
               const Params& params);
 
  private:

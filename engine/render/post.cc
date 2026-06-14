@@ -18,16 +18,22 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, VkFormat output_forma
   sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   vkCreateSampler(device.device(), &sampler_info, nullptr, &pass->sampler_);
 
-  VkDescriptorSetLayoutBinding input_binding{};
-  input_binding.binding = 0;
-  input_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  input_binding.descriptorCount = 1;
-  input_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutBinding bindings[3]{};
+  bindings[0].binding = 0;
+  bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  bindings[0].descriptorCount = 1;
+  bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  bindings[1] = bindings[0];
+  bindings[1].binding = 1;
+  bindings[2].binding = 2;
+  bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bindings[2].descriptorCount = 1;
+  bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
   VkDescriptorSetLayoutCreateInfo set_info{
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_info.bindingCount = 1;
-  set_info.pBindings = &input_binding;
+  set_info.bindingCount = 3;
+  set_info.pBindings = bindings;
   if (vkCreateDescriptorSetLayout(device.device(), &set_info, nullptr, &pass->set_layout_) !=
       VK_SUCCESS) {
     return nullptr;
@@ -142,20 +148,30 @@ PostPass::~PostPass() {
   if (sampler_) vkDestroySampler(device_.device(), sampler_, nullptr);
 }
 
-void PostPass::Record(PassContext& ctx, VkImageView input, VkImageView output,
-                      VkExtent2D output_extent, const Params& params) {
+void PostPass::Record(PassContext& ctx, VkImageView input, VkImageView bloom, VkBuffer exposure,
+                      u64 exposure_size, VkImageView output, VkExtent2D output_extent,
+                      const Params& params) {
   VkDescriptorSet set = ctx.allocate_set(set_layout_);
-  VkDescriptorImageInfo image_info{};
-  image_info.sampler = sampler_;
-  image_info.imageView = input;
-  image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-  write.dstSet = set;
-  write.dstBinding = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  write.pImageInfo = &image_info;
-  vkUpdateDescriptorSets(device_.device(), 1, &write, 0, nullptr);
+  VkDescriptorImageInfo images[2]{};
+  images[0] = {sampler_, input, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  images[1] = {sampler_, bloom, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  VkDescriptorBufferInfo exposure_info{exposure, 0, exposure_size};
+  VkWriteDescriptorSet writes[3];
+  for (u32 i = 0; i < 2; ++i) {
+    writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    writes[i].dstSet = set;
+    writes[i].dstBinding = i;
+    writes[i].descriptorCount = 1;
+    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[i].pImageInfo = &images[i];
+  }
+  writes[2] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  writes[2].dstSet = set;
+  writes[2].dstBinding = 2;
+  writes[2].descriptorCount = 1;
+  writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  writes[2].pBufferInfo = &exposure_info;
+  vkUpdateDescriptorSets(device_.device(), 3, writes, 0, nullptr);
 
   VkRenderingAttachmentInfo color{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
   color.imageView = output;

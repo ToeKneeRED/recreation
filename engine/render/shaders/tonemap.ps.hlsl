@@ -1,9 +1,14 @@
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] Texture2D scene;
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] SamplerState scene_sampler;
+[[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D bloom;
+[[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState bloom_sampler;
+[[vk::binding(2, 0)]] StructuredBuffer<float> exposure_buffer;  // [0] resolved exposure
 
 struct PushData {
-  float exposure;
   uint tonemap;  // 0 aces, 1 reinhard, 2 none
+  float bloom_intensity;
+  uint bloom_enabled;
+  float pad;
 };
 [[vk::push_constant]] PushData push;
 
@@ -20,7 +25,12 @@ float3 SrgbEncode(float3 c) {
 
 float4 main(float4 sv_position : SV_Position,
             [[vk::location(0)]] float2 uv : TEXCOORD0) : SV_Target0 {
-  float3 hdr = scene.Sample(scene_sampler, uv).rgb * push.exposure;
+  float3 hdr = scene.Sample(scene_sampler, uv).rgb;
+  if (push.bloom_enabled != 0u) {
+    hdr = lerp(hdr, bloom.Sample(bloom_sampler, uv).rgb, push.bloom_intensity);
+  }
+  hdr *= exposure_buffer[0];
+
   float3 ldr;
   if (push.tonemap == 0u) {
     ldr = TonemapAces(hdr);
