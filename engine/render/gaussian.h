@@ -1,6 +1,8 @@
 #ifndef RECREATION_RENDER_GAUSSIAN_H_
 #define RECREATION_RENDER_GAUSSIAN_H_
 
+#include <string>
+
 #include <base/containers/vector.h>
 
 #include "core/math.h"
@@ -57,6 +59,12 @@ class GaussianSplat {
   VkPipeline pipeline_ = VK_NULL_HANDLE;
   GpuBuffer buffers_[kFramesInFlight];
 };
+
+// Loads an INRIA 3D Gaussian Splatting .ply (ascii or binary little-endian) into
+// GaussianInstances, applying the standard activations: sigmoid opacity, exp
+// scale, sh band-0 dc color, normalized wxyz->xyzw rotation. Returns false on a
+// read/parse error. Caps at the renderer's gaussian budget (logs if truncated).
+bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* out);
 
 }  // namespace rec::render
 

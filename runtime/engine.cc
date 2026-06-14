@@ -435,6 +435,19 @@ void Engine::CreateGaussianDemoScene() {
   world_.Add(floor, world::Transform{.position = {0, -8.0f, 0}});  // top at y = 0
   world_.Add(floor, world::Renderable{ground.id});
 
+  // REC_PLY=<path> loads a real captured splat scene instead of the procedural
+  // sphere. The renderer sorts and projects them exactly the same way.
+  if (const char* ply = std::getenv("REC_PLY")) {
+    if (render::LoadGaussianPly(ply, &demo_gaussians_)) {
+      camera_.set_position({0.0f, 1.0f, 4.0f});
+      camera_.set_yaw_pitch(0.0f, 0.0f);
+      camera_.speed = 3.0f;
+      REC_INFO("gaussian splat demo: {} splats from {}", demo_gaussians_.size(), ply);
+      return;
+    }
+    REC_WARN("gaussian splat demo: ply load failed, using the procedural sphere");
+  }
+
   const u32 kCount = 12000;
   const f32 radius = 1.6f;
   const f32 golden = 2.39996323f;
