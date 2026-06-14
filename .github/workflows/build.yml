@@ -10,6 +10,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: zetanet
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/zetanet
+          ref: develop
+          path: zetanet
+          submodules: recursive
       - name: deps
         run: |
           sudo apt-get update
@@ -24,7 +31,7 @@ jobs:
           sudo chmod +x /usr/local/bin/dxc
           sudo ldconfig
       - name: configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
       - name: build
         run: cmake --build build
       - uses: actions/upload-artifact@v4
@@ -38,13 +45,20 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - name: zetanet
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/zetanet
+          ref: develop
+          path: zetanet
+          submodules: recursive
       - name: dxc
         run: |
           curl.exe -fsSL -o dxc.zip https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602.24/dxc_2026_05_27.zip
           Expand-Archive dxc.zip -DestinationPath $env:GITHUB_WORKSPACE\dxc
           Add-Content -Path $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE\dxc\bin\x64"
       - name: configure
-        run: cmake -B build -DRECREATION_FETCH_SDL3=ON
+        run: cmake -B build -DRECREATION_FETCH_SDL3=ON -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
       - name: build
         run: cmake --build build --config Release
       - uses: actions/upload-artifact@v4
@@ -58,6 +72,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: zetanet
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/zetanet
+          ref: develop
+          path: zetanet
+          submodules: recursive
       - name: deps
         run: |
           sudo apt-get update
@@ -74,6 +95,7 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake
           -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29
           -DCMAKE_BUILD_TYPE=Release -DRECREATION_BUILD_TOOLS=OFF
+          -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
       - name: build
         run: cmake --build build-android
       - uses: actions/upload-artifact@v4
