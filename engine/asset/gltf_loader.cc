@@ -230,6 +230,7 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
     }
     if (src.has_anisotropy) material.anisotropy = src.anisotropy.anisotropy_strength;
     if (src.has_ior) material.ior = src.ior.ior;
+    if (src.has_transmission) material.transmission = src.transmission.transmission_factor;
     if (src.has_sheen) {
       std::memcpy(material.sheen_color, src.sheen.sheen_color_factor, sizeof(f32) * 3);
       material.sheen_roughness = src.sheen.sheen_roughness_factor;

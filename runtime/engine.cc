@@ -325,7 +325,16 @@ void Engine::CreateMaterialDemoScene() {
     cloth.sheen_roughness = 0.3f;
     spawn({xs[i], 0.0f, -3.4f}, cloth);
 
-    // Row 4: subsurface scattering 0..1 over pale waxy skin.
+    // Row 0 (front): transmission 0..1 glass, refracting the rows behind it.
+    asset::Material glass;
+    glass.base_color_factor[0] = 0.85f; glass.base_color_factor[1] = 0.95f;
+    glass.base_color_factor[2] = 0.92f;
+    glass.roughness_factor = 0.05f;
+    glass.transmission = t;
+    glass.ior = 1.5f;
+    spawn({xs[i], 0.0f, 2.2f}, glass);
+
+    // Row 4: subsurface scattering 0..1 over pale waxy skin (moved to the back).
     asset::Material skin;
     skin.base_color_factor[0] = 0.85f; skin.base_color_factor[1] = 0.6f;
     skin.base_color_factor[2] = 0.5f;
@@ -333,7 +342,7 @@ void Engine::CreateMaterialDemoScene() {
     skin.subsurface = t;
     skin.subsurface_color[0] = 0.9f; skin.subsurface_color[1] = 0.2f;
     skin.subsurface_color[2] = 0.12f;
-    spawn({xs[i], 0.0f, 2.2f}, skin);
+    spawn({xs[i], 0.0f, -7.2f}, skin);
 
     // Row 5: thin-film iridescence, film thickness sweep over a dark dielectric.
     asset::Material irid;
@@ -345,8 +354,8 @@ void Engine::CreateMaterialDemoScene() {
     spawn({xs[i], 0.0f, -5.6f}, irid);
   }
 
-  camera_.set_position({0.0f, 1.25f, 3.4f});
-  camera_.set_yaw_pitch(0.0f, -0.12f);
+  camera_.set_position({0.0f, 1.8f, 5.4f});
+  camera_.set_yaw_pitch(0.0f, -0.16f);
   camera_.speed = 4.0f;
   REC_INFO("material preview: clearcoat, anisotropy, sheen and roughness sweeps");
 }

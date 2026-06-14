@@ -38,7 +38,8 @@ struct MaterialParams {
   float subsurface;
   float iridescence;
   float iridescence_thickness;
-  float2 irid_pad;
+  float transmission;
+  float irid_pad;
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material;
 
@@ -71,6 +72,8 @@ struct DdgiVolume {
                           // z max ray distance, w energy scale
 };
 [[vk::binding(6, 2)]] ConstantBuffer<DdgiVolume> ddgi;
+[[vk::combinedImageSampler]] [[vk::binding(9, 2)]] Texture2D opaque_scene;  // for transmission
+[[vk::combinedImageSampler]] [[vk::binding(9, 2)]] SamplerState opaque_scene_sampler;
 
 // Scene tables for reflection hit shading (set 3), matching water.ps.hlsl.
 struct MeshRecord {
@@ -496,6 +499,24 @@ float SunShadow(PsIn input, float3 n) {
   return rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
 }
 
+// Transmission: refract the opaque scene behind the surface (screen-space),
+// tint it by the base color and add a fresnel rim reflection, for glass.
+float3 ApplyTransmission(float3 shaded, PsIn input, float3 n, float3 base_color) {
+  float3 v = normalize(frame.camera_position.xyz - input.world_pos);
+  float ndv = max(dot(n, v), 1e-4);
+  float2 screen = input.sv_position.xy / frame.misc.xy;
+  float2 refr = n.xy * 0.06 * material.transmission;
+  float3 bg = opaque_scene.SampleLevel(opaque_scene_sampler, saturate(screen + refr), 0.0).rgb;
+  float3 transmitted = bg * lerp(1.0.xxx, base_color, 0.6);
+  float fres = 0.04 + 0.96 * pow(saturate(1.0 - ndv), 5.0);
+  float3 refl = transmitted;
+  if ((frame.flags & kFrameIbl) != 0u) {
+    refl = prefiltered_cube.SampleLevel(prefiltered_sampler, reflect(-v, n), 0.0).rgb *
+           frame.camera_position.w;
+  }
+  return lerp(shaded, lerp(transmitted, refl, fres), material.transmission);
+}
+
 PsOut main(PsIn input) {
   float4 base = base_color_map.Sample(base_color_sampler, input.uv) *
                 material.base_color_factor * input.color;
@@ -504,9 +525,16 @@ PsOut main(PsIn input) {
   float3 n = SurfaceNormal(input);
   float shadow = SunShadow(input, n);
 
+  float3 shaded = ShadeSurface(input, base.rgb, n, shadow);
+  float alpha = base.a;
+  if (material.transmission > 0.001 && frame.debug_view == 0u) {
+    shaded = ApplyTransmission(shaded, input, n, base.rgb);
+    alpha = 1.0;
+  }
+
   PsOut output;
   // Alpha carries through for the blend pass; opaque targets ignore it.
-  output.color = float4(ShadeSurface(input, base.rgb, n, shadow), base.a);
+  output.color = float4(shaded, alpha);
   // Uv offset from this pixel to where the surface was last frame.
   float2 curr = input.curr_clip.xy / input.curr_clip.w;
   float2 prev = input.prev_clip.xy / input.prev_clip.w;

@@ -36,6 +36,9 @@ struct Material {
   // rainbow on the specular, for soap bubbles, oil, beetle shells.
   f32 iridescence = 0.0f;
   f32 iridescence_thickness = 400.0f;  // film thickness in nm
+  // Transmission (KHR_materials_transmission): refract the scene behind the
+  // surface instead of diffusing, for glass. Routed to the transparent pass.
+  f32 transmission = 0.0f;
   AlphaMode alpha_mode = AlphaMode::kOpaque;
   bool two_sided = false;
   // Routed to the dedicated water pipeline: animated waves, raytraced

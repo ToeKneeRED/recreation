@@ -307,9 +307,10 @@ bool EnvironmentSystem::CreatePipelines() {
   brdf_gen_.set = allocate(brdf_gen_.set_layout);
   write_set(brdf_gen_.set, brdf_lut_.view, VK_NULL_HANDLE);
 
-  // Set 2 of the mesh pipeline: ibl inputs, per frame ao, ddgi atlases, then the
-  // cascade shadow atlas (7, comparison sampler) and the cascade ubo (8).
-  VkDescriptorSetLayoutBinding env_bindings[9]{};
+  // Set 2 of the mesh pipeline: ibl inputs, per frame ao, ddgi atlases, the
+  // cascade shadow atlas (7) + cascade ubo (8), and the opaque scene color (9,
+  // sampled by transmissive materials for refraction).
+  VkDescriptorSetLayoutBinding env_bindings[10]{};
   for (u32 i = 0; i < 6; ++i) {
     env_bindings[i].binding = i;
     env_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -328,9 +329,13 @@ bool EnvironmentSystem::CreatePipelines() {
   env_bindings[8].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   env_bindings[8].descriptorCount = 1;
   env_bindings[8].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  env_bindings[9].binding = 9;
+  env_bindings[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  env_bindings[9].descriptorCount = 1;
+  env_bindings[9].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
   VkDescriptorSetLayoutCreateInfo env_info{
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  env_info.bindingCount = 9;
+  env_info.bindingCount = 10;
   env_info.pBindings = env_bindings;
   if (vkCreateDescriptorSetLayout(device_.device(), &env_info, nullptr, &env_set_layout_) !=
       VK_SUCCESS) {
@@ -585,8 +590,9 @@ void EnvironmentSystem::DrawSky(VkCommandBuffer cmd, VkDescriptorSet globals) {
 
 void EnvironmentSystem::WriteEnvSet(VkDescriptorSet set, VkImageView ao_view,
                                     const DdgiBinding* ddgi, VkImageView shadow_view,
-                                    VkBuffer cascade_buffer, u64 cascade_size) const {
-  VkDescriptorImageInfo images[7]{};
+                                    VkBuffer cascade_buffer, u64 cascade_size,
+                                    VkImageView opaque_color) const {
+  VkDescriptorImageInfo images[8]{};
   images[0] = {sampler_, irradiance_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[1] = {sampler_, prefiltered_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[2] = {sampler_, brdf_lut_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -598,12 +604,14 @@ void EnvironmentSystem::WriteEnvSet(VkDescriptorSet set, VkImageView ao_view,
                ddgi ? ddgi->layout : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[6] = {shadow_sampler_, shadow_view ? shadow_view : shadow_dummy_.view,
                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  images[7] = {sampler_, opaque_color ? opaque_color : white_.view,
+               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   VkDescriptorBufferInfo volume{ddgi ? ddgi->volume : dummy_volume_.buffer, 0,
                                 ddgi ? ddgi->volume_size : 256};
   VkDescriptorBufferInfo cascades{cascade_buffer ? cascade_buffer : dummy_volume_.buffer, 0,
                                   cascade_buffer ? cascade_size : 512};
 
-  VkWriteDescriptorSet writes[9];
+  VkWriteDescriptorSet writes[10];
   for (u32 i = 0; i < 6; ++i) {
     writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     writes[i].dstSet = set;
@@ -630,7 +638,13 @@ void EnvironmentSystem::WriteEnvSet(VkDescriptorSet set, VkImageView ao_view,
   writes[8].descriptorCount = 1;
   writes[8].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   writes[8].pBufferInfo = &cascades;
-  vkUpdateDescriptorSets(device_.device(), 9, writes, 0, nullptr);
+  writes[9] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  writes[9].dstSet = set;
+  writes[9].dstBinding = 9;
+  writes[9].descriptorCount = 1;
+  writes[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[9].pImageInfo = &images[7];
+  vkUpdateDescriptorSets(device_.device(), 10, writes, 0, nullptr);
 }
 
 void EnvironmentSystem::DestroyComputePass(ComputePass& pass) {

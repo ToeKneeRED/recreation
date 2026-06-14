@@ -1078,7 +1078,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               env_set, VK_NULL_HANDLE, ddgi_active ? &ddgi_binding : nullptr,
               csm_active ? ctx.graph->image(shadow_atlas).view : VK_NULL_HANDLE,
               csm_active ? shadow_.cascade_buffer(shadow_slot) : VK_NULL_HANDLE,
-              shadow_.cascade_buffer_size());
+              shadow_.cascade_buffer_size(), ctx.graph->image(opaque_color).view);
 
           enum class Mode { kNone, kWater, kBlend };
           Mode mode = Mode::kNone;

@@ -45,7 +45,8 @@ class MaterialSystem {
     f32 subsurface = 0;
     f32 iridescence = 0;
     f32 iridescence_thickness = 400.0f;
-    f32 irid_pad[2] = {0, 0};
+    f32 transmission = 0;
+    f32 irid_pad = 0;
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;

@@ -323,6 +323,7 @@ bool MaterialSystem::WriteSet(VkDescriptorSet set, u32 param_index,
   params.subsurface = material.subsurface;
   params.iridescence = material.iridescence;
   params.iridescence_thickness = material.iridescence_thickness;
+  params.transmission = material.transmission;
   // Blend materials draw without the cutout test; mask materials cut.
   if (material.alpha_mode == asset::AlphaMode::kMask) params.flags |= kFlagAlphaMask;
   if (material.normal && textures_.find(material.normal.hash)) {
@@ -367,7 +368,11 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material) {
   if (set == VK_NULL_HANDLE) return false;
   if (!WriteSet(set, sets_in_last_pool_ - 1, material)) return false;
   sets_.insert(material.id.hash, set);
-  blend_modes_.insert(material.id.hash, static_cast<u8>(material.alpha_mode));
+  // Transmissive (glass) materials route to the transparent pass so they can
+  // sample the opaque scene behind them, regardless of their declared alpha.
+  asset::AlphaMode mode =
+      material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
+  blend_modes_.insert(material.id.hash, static_cast<u8>(mode));
   if (material.is_water) water_.insert(material.id.hash, 1);
   if (registry_) {
     BindlessRegistry::MaterialRecord record;

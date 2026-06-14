@@ -60,7 +60,8 @@ class EnvironmentSystem {
   // fall back to the neutral dummies (white ao, black ddgi, lit shadow).
   void WriteEnvSet(VkDescriptorSet set, VkImageView ao_view, const DdgiBinding* ddgi,
                    VkImageView shadow_view = VK_NULL_HANDLE,
-                   VkBuffer cascade_buffer = VK_NULL_HANDLE, u64 cascade_size = 0) const;
+                   VkBuffer cascade_buffer = VK_NULL_HANDLE, u64 cascade_size = 0,
+                   VkImageView opaque_color = VK_NULL_HANDLE) const;
 
  private:
   struct ComputePass {
