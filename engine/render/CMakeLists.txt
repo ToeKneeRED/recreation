@@ -9,6 +9,7 @@ recreation_add_module(render
   stb_impl.cc
   environment.cc
   ambient_occlusion.cc
+  ssao.cc
   bloom.cc
   ddgi.cc
   exposure.cc
@@ -70,6 +71,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/brdf_lut.cs.hlsl
   shaders/prepass.ps.hlsl
   shaders/rtao.cs.hlsl
+  shaders/ssao.cs.hlsl
   shaders/bloom_down.cs.hlsl
   shaders/bloom_up.cs.hlsl
   shaders/histogram.cs.hlsl

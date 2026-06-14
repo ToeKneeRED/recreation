@@ -40,12 +40,14 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
 
   switch (ResolvePreset(preset, caps)) {
     case QualityPreset::kAndroid:
-      // Bandwidth-starved tile gpus: raster only, no post that costs a pass.
+      // Bandwidth-starved tile gpus: raster only, cheap screen-space ao.
       s.aa_mode = AntiAliasingMode::kTaa;
       s.upscaler = UpscalerKind::kNone;
       s.rt_shadows = s.rtao = s.ddgi = s.rt_reflections = false;
       s.water_reflections = s.fog = false;
       s.bloom = false;
+      s.ssao = true;
+      s.ao_rays = 1;  // 8 screen-space taps
       s.sun_angular_radius = 0.0f;
       break;
 
@@ -58,6 +60,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.sun_angular_radius = Degrees(0.25f);
       s.rtao = true;
       s.ao_rays = 1;
+      s.ssao = true;  // fallback when ray-traced ao is unavailable
       s.ddgi = true;
       s.ddgi_spacing = 2.5f;
       s.rt_reflections = false;
@@ -66,12 +69,14 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       break;
 
     case QualityPreset::kLowEnd:
-      // Weak/old discrete or rt-less desktops: upscale hard, skip ray tracing.
+      // Weak/old discrete or rt-less desktops: upscale hard, screen-space ao.
       s.aa_mode = AntiAliasingMode::kUpscaler;
       s.upscaler = UpscalerKind::kFsr3;
       s.upscaler_quality = UpscalerQuality::kPerformance;
       s.rt_shadows = s.rtao = s.ddgi = s.rt_reflections = false;
       s.water_reflections = s.fog = false;
+      s.ssao = true;
+      s.ao_rays = 2;  // 16 screen-space taps
       break;
 
     case QualityPreset::kConsole:
@@ -144,6 +149,10 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
     case QualityPreset::kAuto:  // already resolved above
       break;
   }
+
+  // Every ray-traced-ao tier keeps the screen-space fallback armed; it only
+  // runs when ray-traced ao is actually unavailable (no ray query or no nrd).
+  if (s.rtao) s.ssao = true;
 
   // Clamp to what the device can actually run so a forced preset never hangs.
   if (!caps.ray_query) {

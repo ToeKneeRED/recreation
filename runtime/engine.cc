@@ -167,6 +167,16 @@ void Engine::ApplyRenderPreset() {
     tuned.aa_mode = render::AntiAliasingMode::kUpscaler;
   }
 
+  // Initialize() applied the REC_DEBUG_VIEW / REC_PATHTRACE debug env overrides;
+  // carry them through so a preset never silently disables headless captures.
+  const render::RenderSettings& env = renderer_.settings();
+  tuned.debug_view = env.debug_view;
+  if (env.debug_view != render::DebugView::kOff) {
+    tuned.auto_exposure = false;
+    tuned.exposure = 1.0f;
+  }
+  if (env.path_trace) tuned.path_trace = true;
+
   renderer_.settings() = tuned;
   REC_INFO("render preset: {} ({})", render::PresetName(resolved),
            config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");

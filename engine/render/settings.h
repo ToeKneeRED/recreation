@@ -65,6 +65,11 @@ struct RenderSettings {
   f32 ao_intensity = 1.0f;
   u32 ao_rays = 2;
 
+  // Screen-space ambient occlusion. The renderer uses ray-traced ao when it is
+  // available and enabled; this is the fallback that runs otherwise (no ray
+  // query, or a tier that forces raster ao), so low-end presets still get ao.
+  bool ssao = false;
+
   bool ddgi = true;  // probe based diffuse gi (needs ray query)
   f32 ddgi_spacing = 1.5f;
   f32 ddgi_intensity = 1.0f;

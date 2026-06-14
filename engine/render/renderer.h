@@ -30,6 +30,7 @@
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
 #include "render/settings.h"
+#include "render/ssao.h"
 #include "render/upscaler.h"
 #include "render/water.h"
 
@@ -172,6 +173,7 @@ class Renderer {
   RenderGraph graph_;
   TaaPass taa_;
   RtaoPass rtao_;
+  SsaoPass ssao_;
 #if defined(RECREATION_HAS_NRD)
   NrdDenoiser nrd_;
 #endif

@@ -59,6 +59,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   post_ = PostPass::Create(*device_, swapchain_->format());
   if (!mesh_pipeline_ || !post_ || !taa_.Initialize(*device_)) return false;
   if (rt_available_ && !rtao_.Initialize(*device_)) return false;
+  if (!ssao_.Initialize(*device_)) return false;  // raster ao fallback, no rt needed
   if (!bloom_.Initialize(*device_) || !exposure_.Initialize(*device_)) return false;
   if (rt_available_) {
     ddgi_ = DdgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
@@ -92,6 +93,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
 
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
+  ssao_.Resize(*device_, {render_width_, render_height_});
   path_tracer_.Resize(*device_, {render_width_, render_height_});
   if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
@@ -247,6 +249,7 @@ void Renderer::ApplySettings() {
     UpdateRenderResolution();
     transient_pool_->Clear();
     taa_.Resize(*device_, {render_width_, render_height_});
+    ssao_.Resize(*device_, {render_width_, render_height_});
     path_tracer_.Resize(*device_, {render_width_, render_height_});
     if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
@@ -265,6 +268,7 @@ void Renderer::ApplySettings() {
       UpdateRenderResolution();
       transient_pool_->Clear();
       taa_.Resize(*device_, {render_width_, render_height_});
+      ssao_.Resize(*device_, {render_width_, render_height_});
       path_tracer_.Resize(*device_, {render_width_, render_height_});
       if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
@@ -279,6 +283,10 @@ void Renderer::ApplySettings() {
                   .jitter_sample_count = taa_.settings().jitter_sample_count});
   rtao_.Configure({.radius = settings_.ao_radius,
                    .ray_count = settings_.ao_rays == 0 ? 1 : settings_.ao_rays});
+  ssao_.Configure({.radius = settings_.ao_radius,
+                   .intensity = settings_.ao_intensity * 1.8f,
+                   .power = 1.5f,
+                   .sample_count = std::clamp(settings_.ao_rays * 8u, 4u, 32u)});
   exposure_.Configure({.automatic = settings_.auto_exposure,
                        .compensation = settings_.exposure,
                        .adaptation_speed = settings_.adaptation_speed,
@@ -467,6 +475,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
   bool fog_active = rt_available_ && settings_.fog && !path_trace;
+  // Ambient occlusion technique: ray-traced + NRD-denoised when available, else
+  // the screen-space fallback so non-rt tiers (and forced low presets) keep ao.
+  bool nrd_ao = false;
+#if defined(RECREATION_HAS_NRD)
+  nrd_ao = rtao_active && nrd_.available();
+#endif
+  bool ss_ao = settings_.ssao && !nrd_ao && !path_trace;
   time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
@@ -539,7 +554,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   globals.misc[2] = settings_.sun_angular_radius;
   globals.misc[3] = static_cast<f32>(frame_index_ % 4096);
   if (settings_.ibl) globals.flags |= kFrameFlagIbl;
-  if (rtao_active) globals.flags |= kFrameFlagAoValid;
+  if (nrd_ao || ss_ao) globals.flags |= kFrameFlagAoValid;
   if (ddgi_active) globals.flags |= kFrameFlagDdgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows) globals.flags |= kFrameFlagRtShadows;
@@ -734,7 +749,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   ResourceHandle ao = kInvalidResource;
 #if defined(RECREATION_HAS_NRD)
-  if (rtao_active && nrd_.available()) {
+  if (nrd_ao) {
     // RTAO traces a raw hit distance; NRD's REBLUR denoises it. The normal +
     // viewZ guides are shared with the (later) shadow denoiser.
     NrdDenoiser::Inputs nrd_inputs = nrd_.PrepareInputs(graph_, depth_export, normals, 0.1f);
@@ -761,6 +776,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     prev_jitter_[1] = jitter_y;
   }
 #endif
+  if (ss_ao) {
+    const f32 proj_scale[2] = {proj.m[0], proj.m[5]};
+    ao = ssao_.AddToGraph(graph_, depth_export, normals, globals.inv_view_proj, proj_scale, 0.1f,
+                          frame_index_);
+  }
 
   graph_.AddPass(
       "scene",
@@ -1285,6 +1305,7 @@ void Renderer::Shutdown() {
     }
     meshes_.clear();
     taa_.Destroy(*device_);
+    ssao_.Destroy(*device_);
     if (rt_available_) rtao_.Destroy(*device_);
 #if defined(RECREATION_HAS_NRD)
     if (rt_available_) nrd_.Destroy(*device_);

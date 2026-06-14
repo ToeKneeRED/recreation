@@ -254,13 +254,14 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
         ImGui::EndDisabled();
         ImGui::BeginDisabled(!ray_query);
         ImGui::Checkbox("RT ambient occlusion", &settings.rtao);
-        if (settings.rtao) {
+        ImGui::EndDisabled();
+        ImGui::Checkbox("Screen-space AO (fallback)", &settings.ssao);
+        if (settings.rtao || settings.ssao) {
           ImGui::SliderFloat("AO radius", &settings.ao_radius, 0.2f, 5.0f);
           ImGui::SliderFloat("AO intensity", &settings.ao_intensity, 0.2f, 3.0f);
           int rays = static_cast<int>(settings.ao_rays);
-          if (ImGui::SliderInt("AO rays", &rays, 1, 8)) settings.ao_rays = rays;
+          if (ImGui::SliderInt("AO rays/taps", &rays, 1, 8)) settings.ao_rays = rays;
         }
-        ImGui::EndDisabled();
       }
 
       if (ImGui::CollapsingHeader("Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
