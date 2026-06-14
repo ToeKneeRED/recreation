@@ -140,6 +140,9 @@ class Engine {
   void CreateGpuParticleDemoScene();
   // A shell-fur ball: the hair/fur rendering technique on a sphere.
   void CreateFurDemoScene();
+  // A high-poly sphere with auto-generated (decimated) lods, instanced at
+  // increasing distance so the simplifier's coarser lods read with range.
+  void CreateAutoLodDemoScene();
 
   // A simple cpu particle fountain for the demos. Integrates + spawns each
   // frame and emits the live billboards into the frame view.

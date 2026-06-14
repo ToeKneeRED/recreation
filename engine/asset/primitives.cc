@@ -1,11 +1,100 @@
 #include "asset/primitives.h"
 
 #include <algorithm>
+#include <cmath>
+#include <unordered_map>
 
 #include "core/math.h"
 
 namespace rec::asset {
 namespace {
+
+// One coarser lod by vertex clustering: snap each vertex to a g x g x g grid
+// cell over the mesh bounds, average the vertices that land in a cell into one
+// representative, and keep only the triangles whose three corners fall in three
+// distinct cells (the rest have folded up). Lower quality than edge collapse but
+// robust and fine for the distant lods the selector reaches for.
+MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u32 g) {
+  f32 cell[3] = {std::max(ext.x, 1e-5f) / g, std::max(ext.y, 1e-5f) / g,
+                 std::max(ext.z, 1e-5f) / g};
+  auto cell_of = [&](const Vertex& v) -> u64 {
+    u32 cx = std::min(static_cast<u32>((v.position[0] - bmin.x) / cell[0]), g - 1);
+    u32 cy = std::min(static_cast<u32>((v.position[1] - bmin.y) / cell[1]), g - 1);
+    u32 cz = std::min(static_cast<u32>((v.position[2] - bmin.z) / cell[2]), g - 1);
+    return (static_cast<u64>(cz) * g + cy) * g + cx;
+  };
+
+  struct Accum {
+    f64 p[3] = {0, 0, 0};
+    f64 n[3] = {0, 0, 0};
+    f64 t[3] = {0, 0, 0};
+    f64 uv[2] = {0, 0};
+    u32 count = 0;
+    u32 color = 0xffffffff;
+  };
+  std::unordered_map<u64, u32> cell_to_new;
+  base::Vector<Accum> accum;
+  base::Vector<u32> remap(src.vertices.size());
+  for (size_t i = 0; i < src.vertices.size(); ++i) {
+    const Vertex& v = src.vertices[i];
+    u64 c = cell_of(v);
+    auto it = cell_to_new.find(c);
+    u32 ni;
+    if (it == cell_to_new.end()) {
+      ni = static_cast<u32>(accum.size());
+      cell_to_new.emplace(c, ni);
+      Accum a;
+      a.color = v.color;
+      accum.push_back(a);
+    } else {
+      ni = it->second;
+    }
+    remap[i] = ni;
+    Accum& a = accum[ni];
+    for (int k = 0; k < 3; ++k) {
+      a.p[k] += v.position[k];
+      a.n[k] += v.normal[k];
+      a.t[k] += v.tangent[k];
+    }
+    a.uv[0] += v.uv[0];
+    a.uv[1] += v.uv[1];
+    ++a.count;
+  }
+
+  MeshLod out;
+  out.vertices.reserve(accum.size());
+  for (const Accum& a : accum) {
+    Vertex v{};
+    f64 inv = a.count ? 1.0 / a.count : 1.0;
+    for (int k = 0; k < 3; ++k) v.position[k] = static_cast<f32>(a.p[k] * inv);
+    Vec3 n = Normalize(
+        Vec3{static_cast<f32>(a.n[0]), static_cast<f32>(a.n[1]), static_cast<f32>(a.n[2])});
+    v.normal[0] = n.x;
+    v.normal[1] = n.y;
+    v.normal[2] = n.z;
+    Vec3 t = Normalize(
+        Vec3{static_cast<f32>(a.t[0]), static_cast<f32>(a.t[1]), static_cast<f32>(a.t[2])});
+    v.tangent[0] = t.x;
+    v.tangent[1] = t.y;
+    v.tangent[2] = t.z;
+    v.tangent[3] = 1.0f;
+    v.uv[0] = static_cast<f32>(a.uv[0] * inv);
+    v.uv[1] = static_cast<f32>(a.uv[1] * inv);
+    v.color = a.color;
+    out.vertices.push_back(v);
+  }
+  for (size_t i = 0; i + 2 < src.indices.size(); i += 3) {
+    u32 a = remap[src.indices[i]], b = remap[src.indices[i + 1]], c = remap[src.indices[i + 2]];
+    if (a != b && b != c && a != c) {
+      out.indices.push_back(a);
+      out.indices.push_back(b);
+      out.indices.push_back(c);
+    }
+  }
+  AssetId material = src.submeshes.empty() ? AssetId{} : src.submeshes[0].material;
+  out.submeshes.push_back({0, static_cast<u32>(out.indices.size()), material});
+  return out;
+}
 
 // One bone of the test biped: name, parent index, offset from the parent joint
 // in engine space. Identity bind rotation keeps local axes world-aligned so the
@@ -187,6 +276,34 @@ Mesh MakeLodSphere(f32 radius, AssetId id) {
   }
   mesh.bounds_radius = radius;
   return mesh;
+}
+
+void GenerateLods(Mesh* mesh) {
+  if (mesh->skinned || mesh->lods.size() != 1) return;
+  if (mesh->lods[0].submeshes.size() > 1) return;  // single material only
+  if (mesh->lods[0].indices.size() < 3000) return;  // not worth lod'ing small meshes
+  // Copy: push_back below reallocates mesh->lods, so we must not hold a reference
+  // into it across the loop.
+  const MeshLod base = mesh->lods[0];
+
+  Vec3 bmin{1e30f, 1e30f, 1e30f}, bmax{-1e30f, -1e30f, -1e30f};
+  for (const Vertex& v : base.vertices) {
+    bmin.x = std::min(bmin.x, v.position[0]);
+    bmin.y = std::min(bmin.y, v.position[1]);
+    bmin.z = std::min(bmin.z, v.position[2]);
+    bmax.x = std::max(bmax.x, v.position[0]);
+    bmax.y = std::max(bmax.y, v.position[1]);
+    bmax.z = std::max(bmax.z, v.position[2]);
+  }
+  Vec3 ext{bmax.x - bmin.x, bmax.y - bmin.y, bmax.z - bmin.z};
+
+  const u32 grids[2] = {24, 9};  // medium then coarse cell counts per axis
+  for (u32 g : grids) {
+    MeshLod lod = ClusterDecimate(base, bmin, ext, g);
+    if (lod.indices.size() >= 3 && lod.indices.size() < mesh->lods.back().indices.size()) {
+      mesh->lods.push_back(std::move(lod));
+    }
+  }
 }
 
 void MakeSkinnedBiped(AssetId mesh_id, Skeleton* out_skeleton, Mesh* out_mesh) {

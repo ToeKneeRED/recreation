@@ -22,6 +22,12 @@ Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id);
 // for exercising distance-based lod selection. Each lod has one empty submesh.
 Mesh MakeLodSphere(f32 radius, AssetId id);
 
+// Appends decimated lods to a single-lod static mesh via vertex clustering
+// (snap vertices to a coarse grid, collapse the triangles that fold up), so the
+// distance-lod path applies to authored meshes that ship one lod. No-op for
+// skinned, multi-submesh, or already-multi-lod meshes, or tiny meshes.
+void GenerateLods(Mesh* mesh);
+
 // A blocky biped: a skeleton with the standard Skyrim bone names (so the
 // procedural locomotion drives it) and a skinned box-limb mesh bound to it,
 // authored in engine space (meters, Y-up). For bringup of the skinning,
