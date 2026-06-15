@@ -1,5 +1,4 @@
 #include <android/native_window.h>
-
 #include <volk.h>
 
 #include "core/log.h"

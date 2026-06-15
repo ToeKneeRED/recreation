@@ -211,7 +211,8 @@ int32_t HandleInput(android_app* app, AInputEvent* event) {
   rec::InputState& input = state->window->mutable_input();
   // Touch x arrives in the activity's (landscape) space; the larger dimension is
   // the horizontal extent, so split the zones at half of it.
-  const float mid_x = 0.5f * static_cast<float>(std::max(state->window->width(), state->window->height()));
+  const float mid_x =
+      0.5f * static_cast<float>(std::max(state->window->width(), state->window->height()));
 
   const int32_t action = AMotionEvent_getAction(event);
   const int32_t masked = action & AMOTION_EVENT_ACTION_MASK;
