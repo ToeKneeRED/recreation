@@ -902,6 +902,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // cull instance per opaque mesh, in the exact order the prepass/scene draw
   // loops walk view.draws, then let a compute pass zero the culled instanceCounts.
   u32 cull_slot = frame_index_ % 2;
+  gpu_cull_.ResizeDepth(*device_, render_width_, render_height_);
   VkBuffer cull_commands = gpu_cull_.command_buffer(cull_slot);
   u32 cull_instance_count = 0;
   {
@@ -954,7 +955,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     // count is valid; read it before AddToGraph resets the buffer.
     cull_visible_ = settings_.gpu_culling ? gpu_cull_.last_visible(cull_slot) : cmd_total;
   }
-  gpu_cull_.AddToGraph(graph_, view_proj, cull_instance_count, settings_.gpu_culling, cull_slot);
+  bool cull_occlusion = settings_.gpu_culling && settings_.gpu_occlusion && has_prev_frame_;
+  ResourceHandle cull_hiz =
+      cull_occlusion ? gpu_cull_.BuildHiZ(graph_, cull_slot) : kInvalidResource;
+  const f32 cull_proj_scale[2] = {proj.m[0], proj.m[5]};
+  gpu_cull_.AddToGraph(graph_, view_proj, globals.prev_view_proj, cull_proj_scale, view.camera.eye,
+                       cull_instance_count, settings_.gpu_culling, cull_occlusion, cull_hiz,
+                       cull_slot);
 
   graph_.AddPass(
       "prepass",
@@ -1047,6 +1054,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         }
         vkCmdEndRendering(ctx.cmd);
       });
+
+  // Snapshot this frame's depth for next frame's occlusion test.
+  if (settings_.gpu_culling && settings_.gpu_occlusion) {
+    gpu_cull_.CopyDepth(graph_, depth_export, cull_slot);
+  }
 
   if (ddgi_active) {
     ddgi_->AddToGraph(graph_, *raytracing_, tlas_slot, view.camera.eye,

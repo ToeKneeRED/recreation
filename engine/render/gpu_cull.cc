@@ -4,18 +4,27 @@
 #include <cstring>
 
 #include "core/log.h"
+#include "render/rhi/device.h"
 #include "render/shader_util.h"
 #include "shaders/bounds_ps_hlsl.h"
 #include "shaders/bounds_vs_hlsl.h"
 #include "shaders/cull_cs_hlsl.h"
+#include "shaders/hiz_reduce_cs_hlsl.h"
 
 namespace rec::render {
 namespace {
 
 struct CullPush {
-  f32 planes[5][4];
-  u32 instance_count;
-  u32 cull_enabled;
+  f32 planes[5][4];   // 80
+  Mat4 prev_view_proj;
+  f32 eye_pad[4];     // xyz eye
+  f32 proj_hiz[4];    // proj.m00, proj.m11, hiz w, hiz h
+  u32 misc[4];        // instance_count, frustum_enabled, occlusion_enabled, pad
+};
+
+struct HizPush {
+  u32 dst_size[2];
+  u32 block;
 };
 
 // Gribb-Hartmann frustum planes from a column-major view_proj (clip = vp*world).
@@ -42,16 +51,20 @@ void ExtractPlanes(const Mat4& vp, f32 out[5][4]) {
 }  // namespace
 
 bool GpuCull::Initialize(Device& device, VkFormat color_format) {
-  VkDescriptorSetLayoutBinding bindings[3]{};
+  VkDescriptorSetLayoutBinding bindings[4]{};
   for (u32 i = 0; i < 3; ++i) {
     bindings[i].binding = i;
     bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[i].descriptorCount = 1;
     bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
   }
+  bindings[3].binding = 3;  // hi-z (occlusion)
+  bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  bindings[3].descriptorCount = 1;
+  bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
   VkDescriptorSetLayoutCreateInfo set_info{
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  set_info.bindingCount = 3;
+  set_info.bindingCount = 4;
   set_info.pBindings = bindings;
   if (vkCreateDescriptorSetLayout(device.device(), &set_info, nullptr, &set_layout_) != VK_SUCCESS) {
     return false;
@@ -92,7 +105,141 @@ bool GpuCull::Initialize(Device& device, VkFormat color_format) {
     counts_[i] = device.CreateBuffer(16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
     if (!instances_[i].mapped || !commands_[i].mapped || !counts_[i].mapped) return false;
   }
+
+  // Hi-z reduce pipeline: storage dst + sampled src.
+  VkDescriptorSetLayoutBinding hb[2]{};
+  hb[0] = {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1,
+           .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT};
+  hb[1] = {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = 1,
+           .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT};
+  VkDescriptorSetLayoutCreateInfo hsi{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  hsi.bindingCount = 2;
+  hsi.pBindings = hb;
+  if (vkCreateDescriptorSetLayout(device.device(), &hsi, nullptr, &hiz_set_layout_) != VK_SUCCESS)
+    return false;
+  VkPushConstantRange hpr{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(HizPush)};
+  VkPipelineLayoutCreateInfo hli{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  hli.setLayoutCount = 1;
+  hli.pSetLayouts = &hiz_set_layout_;
+  hli.pushConstantRangeCount = 1;
+  hli.pPushConstantRanges = &hpr;
+  if (vkCreatePipelineLayout(device.device(), &hli, nullptr, &hiz_layout_) != VK_SUCCESS)
+    return false;
+  VkShaderModule hm =
+      CreateShaderModule(device.device(), k_hiz_reduce_cs_hlsl, sizeof(k_hiz_reduce_cs_hlsl));
+  if (hm == VK_NULL_HANDLE) return false;
+  VkComputePipelineCreateInfo hci{.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+  hci.stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+  hci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+  hci.stage.module = hm;
+  hci.stage.pName = "main";
+  hci.layout = hiz_layout_;
+  VkResult hr =
+      vkCreateComputePipelines(device.device(), VK_NULL_HANDLE, 1, &hci, nullptr, &hiz_pipeline_);
+  vkDestroyShaderModule(device.device(), hm, nullptr);
+  if (hr != VK_SUCCESS) return false;
+
   return CreateBoundsPipeline(device, color_format);
+}
+
+void GpuCull::ResizeDepth(Device& device, u32 width, u32 height) {
+  if (width == depth_w_ && height == depth_h_) return;
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    device.DestroyImage(prev_depth_[i]);
+    prev_depth_[i] = device.CreateImage2D(
+        VK_FORMAT_R32_SFLOAT, {width, height},
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+    prev_depth_layout_[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+  }
+  depth_w_ = width;
+  depth_h_ = height;
+  hiz_w_ = (width + kHizDownsample - 1) / kHizDownsample;
+  hiz_h_ = (height + kHizDownsample - 1) / kHizDownsample;
+}
+
+ResourceHandle GpuCull::BuildHiZ(RenderGraph& graph, u32 slot) {
+  if (depth_w_ == 0) return kInvalidResource;
+  u32 read = (slot + 1) % kFramesInFlight;  // last frame's snapshot
+  ResourceHandle prev = graph.ImportImage("cull_prev_depth", prev_depth_[read],
+                                          &prev_depth_layout_[read]);
+  ResourceHandle hiz =
+      graph.CreateTexture({.name = "cull_hiz", .format = VK_FORMAT_R32_SFLOAT,
+                           .width = hiz_w_, .height = hiz_h_});
+  graph.AddPass(
+      "cull_hiz",
+      [&](RenderGraph::PassBuilder& builder) {
+        builder.Read(prev, ResourceUsage::kSampledCompute);
+        builder.Write(hiz, ResourceUsage::kStorageWrite);
+      },
+      [this, prev, hiz](PassContext& ctx) {
+        VkDescriptorSet set = ctx.allocate_set(hiz_set_layout_);
+        VkDescriptorImageInfo imgs[2] = {
+            {VK_NULL_HANDLE, ctx.graph->image(hiz).view, VK_IMAGE_LAYOUT_GENERAL},
+            {VK_NULL_HANDLE, ctx.graph->image(prev).view,
+             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+        VkWriteDescriptorSet w[2];
+        w[0] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w[0].dstSet = set;
+        w[0].dstBinding = 0;
+        w[0].descriptorCount = 1;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        w[0].pImageInfo = &imgs[0];
+        w[1] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w[1].dstSet = set;
+        w[1].dstBinding = 1;
+        w[1].descriptorCount = 1;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        w[1].pImageInfo = &imgs[1];
+        vkUpdateDescriptorSets(ctx.device->device(), 2, w, 0, nullptr);
+        HizPush push{{hiz_w_, hiz_h_}, kHizDownsample};
+        vkCmdBindPipeline(ctx.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, hiz_pipeline_);
+        vkCmdBindDescriptorSets(ctx.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, hiz_layout_, 0, 1, &set, 0,
+                                nullptr);
+        vkCmdPushConstants(ctx.cmd, hiz_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                           &push);
+        vkCmdDispatch(ctx.cmd, (hiz_w_ + 7) / 8, (hiz_h_ + 7) / 8, 1);
+      });
+  return hiz;
+}
+
+void GpuCull::CopyDepth(RenderGraph& graph, ResourceHandle depth_export, u32 slot) {
+  if (depth_w_ == 0) return;
+  ResourceHandle dst =
+      graph.ImportImage("cull_depth_snapshot", prev_depth_[slot], &prev_depth_layout_[slot]);
+  graph.AddPass(
+      "cull_depth_copy",
+      [&](RenderGraph::PassBuilder& builder) {
+        builder.Read(depth_export, ResourceUsage::kSampledCompute);
+        builder.Write(dst, ResourceUsage::kStorageWrite);
+      },
+      [this, depth_export, dst](PassContext& ctx) {
+        VkDescriptorSet set = ctx.allocate_set(hiz_set_layout_);
+        VkDescriptorImageInfo imgs[2] = {
+            {VK_NULL_HANDLE, ctx.graph->image(dst).view, VK_IMAGE_LAYOUT_GENERAL},
+            {VK_NULL_HANDLE, ctx.graph->image(depth_export).view,
+             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+        VkWriteDescriptorSet w[2];
+        w[0] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w[0].dstSet = set;
+        w[0].dstBinding = 0;
+        w[0].descriptorCount = 1;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        w[0].pImageInfo = &imgs[0];
+        w[1] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w[1].dstSet = set;
+        w[1].dstBinding = 1;
+        w[1].descriptorCount = 1;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        w[1].pImageInfo = &imgs[1];
+        vkUpdateDescriptorSets(ctx.device->device(), 2, w, 0, nullptr);
+        HizPush push{{depth_w_, depth_h_}, 1};  // 1:1 snapshot
+        vkCmdBindPipeline(ctx.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, hiz_pipeline_);
+        vkCmdBindDescriptorSets(ctx.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, hiz_layout_, 0, 1, &set, 0,
+                                nullptr);
+        vkCmdPushConstants(ctx.cmd, hiz_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                           &push);
+        vkCmdDispatch(ctx.cmd, (depth_w_ + 7) / 8, (depth_h_ + 7) / 8, 1);
+      });
 }
 
 bool GpuCull::CreateBoundsPipeline(Device& device, VkFormat color_format) {
@@ -252,27 +399,42 @@ u32 GpuCull::last_visible(u32 slot) const {
   return *static_cast<const u32*>(counts_[slot].mapped);
 }
 
-void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, u32 instance_count, bool enabled,
-                         u32 slot) {
+void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& prev_view_proj,
+                         const f32 proj_scale[2], const Vec3& eye, u32 instance_count, bool frustum,
+                         bool occlusion, ResourceHandle hiz, u32 slot) {
   if (instance_count == 0) return;
   *static_cast<u32*>(counts_[slot].mapped) = 0;  // reset the visible counter
 
+  bool occ = occlusion && hiz != kInvalidResource;
   CullPush push{};
   ExtractPlanes(view_proj, push.planes);
-  push.instance_count = instance_count;
-  push.cull_enabled = enabled ? 1u : 0u;
+  push.prev_view_proj = prev_view_proj;
+  push.eye_pad[0] = eye.x;
+  push.eye_pad[1] = eye.y;
+  push.eye_pad[2] = eye.z;
+  push.proj_hiz[0] = proj_scale[0];
+  push.proj_hiz[1] = proj_scale[1];
+  push.proj_hiz[2] = static_cast<f32>(hiz_w_);
+  push.proj_hiz[3] = static_cast<f32>(hiz_h_);
+  push.misc[0] = instance_count;
+  push.misc[1] = frustum ? 1u : 0u;
+  push.misc[2] = occ ? 1u : 0u;
   VkBuffer instances = instances_[slot].buffer;
   VkBuffer commands = commands_[slot].buffer;
   VkBuffer counts = counts_[slot].buffer;
 
+  bool has_hiz = hiz != kInvalidResource;
   graph.AddPass(
-      "cull", [](RenderGraph::PassBuilder&) {},
-      [this, push, instances, commands, counts, instance_count](PassContext& ctx) {
+      "cull",
+      [&](RenderGraph::PassBuilder& builder) {
+        if (has_hiz) builder.Read(hiz, ResourceUsage::kSampledCompute);
+      },
+      [this, push, instances, commands, counts, instance_count, has_hiz, hiz](PassContext& ctx) {
         VkDescriptorSet set = ctx.allocate_set(set_layout_);
         VkDescriptorBufferInfo infos[3] = {{instances, 0, VK_WHOLE_SIZE},
                                            {commands, 0, VK_WHOLE_SIZE},
                                            {counts, 0, VK_WHOLE_SIZE}};
-        VkWriteDescriptorSet writes[3];
+        VkWriteDescriptorSet writes[4];
         for (u32 i = 0; i < 3; ++i) {
           writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
           writes[i].dstSet = set;
@@ -281,7 +443,20 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, u32 instance
           writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           writes[i].pBufferInfo = &infos[i];
         }
-        vkUpdateDescriptorSets(ctx.device->device(), 3, writes, 0, nullptr);
+        VkDescriptorImageInfo hiz_info{VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        u32 write_count = 3;
+        if (has_hiz) {
+          hiz_info.imageView = ctx.graph->image(hiz).view;
+          writes[3] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+          writes[3].dstSet = set;
+          writes[3].dstBinding = 3;
+          writes[3].descriptorCount = 1;
+          writes[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+          writes[3].pImageInfo = &hiz_info;
+          write_count = 4;
+        }
+        vkUpdateDescriptorSets(ctx.device->device(), write_count, writes, 0, nullptr);
 
         vkCmdBindPipeline(ctx.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
         vkCmdBindDescriptorSets(ctx.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &set, 0,
@@ -309,10 +484,14 @@ void GpuCull::Destroy(Device& device) {
   if (bounds_pipeline_) vkDestroyPipeline(device.device(), bounds_pipeline_, nullptr);
   if (bounds_layout_) vkDestroyPipelineLayout(device.device(), bounds_layout_, nullptr);
   if (bounds_set_layout_) vkDestroyDescriptorSetLayout(device.device(), bounds_set_layout_, nullptr);
+  if (hiz_pipeline_) vkDestroyPipeline(device.device(), hiz_pipeline_, nullptr);
+  if (hiz_layout_) vkDestroyPipelineLayout(device.device(), hiz_layout_, nullptr);
+  if (hiz_set_layout_) vkDestroyDescriptorSetLayout(device.device(), hiz_set_layout_, nullptr);
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     device.DestroyBuffer(instances_[i]);
     device.DestroyBuffer(commands_[i]);
     device.DestroyBuffer(counts_[i]);
+    device.DestroyImage(prev_depth_[i]);
   }
 }
 

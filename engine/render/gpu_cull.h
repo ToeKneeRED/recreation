@@ -49,10 +49,22 @@ class GpuCull {
   VkBuffer command_buffer(u32 slot) const { return commands_[slot].buffer; }
   static constexpr u32 kCommandStride = sizeof(Command);
 
+  // (Re)creates the ping-pong depth snapshots and the hi-z reduce; call on init
+  // and resize with the render resolution.
+  void ResizeDepth(Device& device, u32 width, u32 height);
+  // Reduces last frame's depth snapshot into a coarse farthest-depth hi-z that
+  // the cull tests against this frame. Returns the hi-z handle (kInvalidResource
+  // until ResizeDepth has run).
+  ResourceHandle BuildHiZ(RenderGraph& graph, u32 slot);
+  // Snapshots this frame's depth for next frame's occlusion test.
+  void CopyDepth(RenderGraph& graph, ResourceHandle depth_export, u32 slot);
+
   // Records the cull dispatch + a barrier so the commands are ready for the
-  // indirect draws. enabled=false keeps every instanceCount at 1 (no culling).
-  void AddToGraph(RenderGraph& graph, const Mat4& view_proj, u32 instance_count, bool enabled,
-                  u32 slot);
+  // indirect draws. frustum=false keeps every instanceCount at 1 (no culling);
+  // occlusion=false skips the hi-z test. hiz comes from BuildHiZ.
+  void AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& prev_view_proj,
+                  const f32 proj_scale[2], const Vec3& eye, u32 instance_count, bool frustum,
+                  bool occlusion, ResourceHandle hiz, u32 slot);
 
   // Debug view: wireframe boxes around each instance's world bounding sphere
   // (the cull / acceleration-structure bounds), overlaid on color.
@@ -75,6 +87,16 @@ class GpuCull {
   GpuBuffer instances_[kFramesInFlight];
   GpuBuffer commands_[kFramesInFlight];
   GpuBuffer counts_[kFramesInFlight];
+
+  // Occlusion culling: ping-pong full-res depth snapshots + a coarse hi-z reduce.
+  static constexpr u32 kHizDownsample = 8;
+  GpuImage prev_depth_[kFramesInFlight];
+  VkImageLayout prev_depth_layout_[kFramesInFlight] = {VK_IMAGE_LAYOUT_UNDEFINED,
+                                                       VK_IMAGE_LAYOUT_UNDEFINED};
+  u32 depth_w_ = 0, depth_h_ = 0, hiz_w_ = 0, hiz_h_ = 0;
+  VkDescriptorSetLayout hiz_set_layout_ = VK_NULL_HANDLE;
+  VkPipelineLayout hiz_layout_ = VK_NULL_HANDLE;
+  VkPipeline hiz_pipeline_ = VK_NULL_HANDLE;
 };
 
 }  // namespace rec::render

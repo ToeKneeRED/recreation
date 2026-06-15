@@ -149,6 +149,9 @@ class Engine {
   void CreateMaterialXDemoScene();
   // Overlapping transparent spheres rendered with weighted-blended OIT.
   void CreateOitDemoScene();
+  // A wall hiding a dense grid of small cubes: the gpu hi-z occlusion cull drops
+  // the hidden draws (watch "opaque draws: N / M visible" in the debug overlay).
+  void CreateOcclusionDemoScene();
 
   // A simple cpu particle fountain for the demos. Integrates + spawns each
   // frame and emits the live billboards into the frame view.

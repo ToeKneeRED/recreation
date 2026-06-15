@@ -183,6 +183,7 @@ void Engine::ApplyRenderPreset() {
   tuned.ssgi = env.ssgi;                       // honor REC_SSGI over the preset
   tuned.color_grade = env.color_grade;      // presets never set a grade
   tuned.sun_direction = env.sun_direction;  // honor REC_SUN_DIR over the default
+  if (std::getenv("REC_NO_OCCLUSION")) tuned.gpu_occlusion = false;  // a/b baseline
 
   renderer_.settings() = tuned;
   REC_INFO("render preset: {} ({})", render::PresetName(resolved),
@@ -717,6 +718,62 @@ void Engine::CreateOitDemoScene() {
            reverse ? " (reversed order)" : "");
 }
 
+void Engine::CreateOcclusionDemoScene() {
+  // A large wall directly in front of the camera hides a dense grid of small
+  // cubes behind it. The gpu hi-z pass culls the hidden cubes against last
+  // frame's depth, so the visible-draw count drops to roughly the wall + floor
+  // even though every cube is still submitted. Strafe sideways and the cubes
+  // reappear as they leave the wall's shadow. Verified via the debug overlay
+  // ("opaque draws: N / M visible") and REC_NO_OCCLUSION for the A/B baseline.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = 0.6f;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId floor_mat = mat("builtin/occl/floor", 0.5f, 0.5f, 0.55f);
+  asset::AssetId wall_mat = mat("builtin/occl/wall", 0.7f, 0.3f, 0.2f);
+  asset::AssetId cube_mat = mat("builtin/occl/cube", 0.2f, 0.6f, 0.8f);
+
+  auto add_box = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, world::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, world::Renderable{mesh.id});
+  };
+
+  add_box(asset::MakeBox(8.0f, 0.1f, 8.0f, asset::MakeAssetId("builtin/occl/ground")), floor_mat,
+          {0, -0.1f, 0});
+  // The occluder: tall and wide enough to fully cover the cube grid's silhouette.
+  add_box(asset::MakeBox(3.0f, 2.2f, 0.1f, asset::MakeAssetId("builtin/occl/wall")), wall_mat,
+          {0, 1.6f, 2.0f});
+
+  // Grid of small cubes (half-extent 0.04, so the screen footprint stays inside
+  // the coarse hi-z's small-object window) clustered behind the wall.
+  int idx = 0;
+  for (int gx = 0; gx < 12; ++gx) {
+    for (int gy = 0; gy < 10; ++gy) {
+      f32 x = -1.1f + gx * 0.2f;
+      f32 y = 0.7f + gy * 0.2f;
+      f32 z = -2.0f - (gx % 3) * 0.6f;
+      std::string tag = "builtin/occl/c" + std::to_string(idx++);
+      add_box(asset::MakeCube(0.04f, asset::MakeAssetId(tag)), cube_mat, {x, y, z});
+    }
+  }
+
+  camera_.set_position({0.0f, 1.6f, 6.0f});
+  camera_.set_yaw_pitch(0.0f, 0.0f);
+  camera_.speed = 3.0f;
+  REC_INFO("occlusion demo: {} small cubes hidden behind a wall (gpu hi-z cull)", idx);
+}
+
 void Engine::CreateMaterialXDemoScene() {
   // One sphere per MaterialX file listed (comma separated) in REC_MTLX, so the
   // imported standard_surface lobes can be eyeballed against the source.
@@ -805,6 +862,10 @@ void Engine::CreateDemoScene() {
   }
   if (config_.demo_scene == "lod") {
     CreateLodDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "occlusion") {
+    CreateOcclusionDemoScene();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));

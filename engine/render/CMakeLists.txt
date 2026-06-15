@@ -98,6 +98,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/ssr.cs.hlsl
   shaders/ssgi.cs.hlsl
   shaders/cull.cs.hlsl
+  shaders/hiz_reduce.cs.hlsl
   shaders/bounds.vs.hlsl
   shaders/bounds.ps.hlsl
   shaders/bloom_down.cs.hlsl
