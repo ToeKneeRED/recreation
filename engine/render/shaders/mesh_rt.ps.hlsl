@@ -424,6 +424,21 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float pndl = max(dot(n, pl_l), 0.0);
     if (pndl <= 0.0) continue;
     ++light_hits;
+    // Ray-traced shadow toward the light (rt variant only, where the tlas is
+    // bound). Each light gets a hard shadow ray; the sun's soft path is separate.
+    float pvis = 1.0;
+    if ((frame.flags & kFrameRtShadows) != 0u) {
+      RayDesc sray;
+      sray.Origin = input.world_pos + n * 0.02;
+      sray.TMin = 0.001;
+      sray.Direction = pl_l;
+      sray.TMax = dist - 0.04;
+      RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> srq;
+      srq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, sray);
+      srq.Proceed();
+      if (srq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) pvis = 0.0;
+    }
+    if (pvis <= 0.0) continue;
     float falloff = saturate(1.0 - dist2 / (lr * lr));
     falloff *= falloff;
     float3 pl_h = normalize(pl_l + v);
