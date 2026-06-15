@@ -363,4 +363,28 @@ void Device::WaitIdle() {
   if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
 }
 
+bool Device::RecreateSurface(Window& window) {
+  if (is_stub()) return false;
+  WaitIdle();
+  if (surface_ != VK_NULL_HANDLE) {
+    vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    surface_ = VK_NULL_HANDLE;
+  }
+  // Same physical device and queue family; the window is on the same display,
+  // so present support carries over. Only the surface handle is rebound.
+  if (!window.CreateVulkanSurface(instance_, &surface_)) {
+    REC_ERROR("surface recreation failed");
+    return false;
+  }
+  return true;
+}
+
+void Device::DestroySurface() {
+  if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
+  if (surface_ != VK_NULL_HANDLE) {
+    vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    surface_ = VK_NULL_HANDLE;
+  }
+}
+
 }  // namespace rec::render

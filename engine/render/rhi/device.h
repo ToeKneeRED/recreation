@@ -61,6 +61,16 @@ class Device {
 
   void WaitIdle();
 
+  // Rebinds the presentation surface to a (possibly new) window after it was
+  // lost, for platforms that destroy and recreate the surface across the app
+  // lifecycle (Android background/foreground). Physical device and queues are
+  // unchanged. Returns false if the new surface could not be created.
+  bool RecreateSurface(Window& window);
+
+  // Destroys the presentation surface (its swapchain must already be gone).
+  // Used on Android when the activity window is torn down.
+  void DestroySurface();
+
   // Live gpu memory usage from VMA, summed over the device-local heaps, for the
   // debug overlay. budget is the driver's estimate of what the app may use.
   struct MemoryBudget {

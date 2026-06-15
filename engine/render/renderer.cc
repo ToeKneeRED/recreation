@@ -1910,6 +1910,20 @@ void Renderer::RecreateSwapchain() {
   has_prev_frame_ = false;
 }
 
+void Renderer::DestroySurface() {
+  if (!device_ || device_->is_stub()) return;
+  device_->WaitIdle();
+  swapchain_.reset();
+  DestroyRenderFinishedSemaphores();
+  device_->DestroySurface();
+}
+
+void Renderer::RecreateSurface() {
+  if (!device_ || device_->is_stub() || !window_) return;
+  if (!device_->RecreateSurface(*window_)) return;
+  RecreateSwapchain();  // rebuilds the swapchain, semaphores and sized targets
+}
+
 void Renderer::WaitIdle() {
   if (device_ && !device_->is_stub()) device_->WaitIdle();
 }

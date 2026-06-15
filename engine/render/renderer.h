@@ -115,6 +115,14 @@ class Renderer {
   void Shutdown();
   void WaitIdle();
 
+  // Android lifecycle: the surface is lost when the activity's window goes away
+  // (background) and rebound when it returns. DestroySurface tears down the
+  // swapchain + surface; RecreateSurface rebinds to the current window and
+  // rebuilds the swapchain. RenderFrame is a no-op while the surface is gone.
+  void DestroySurface();
+  void RecreateSurface();
+  bool has_surface() const { return swapchain_ != nullptr; }
+
   // Saves the next presented frame as png. Also armed by the
   // REC_SCREENSHOT env var ("path.png:seconds") for headless captures.
   void CaptureScreenshot(const std::string& path);
