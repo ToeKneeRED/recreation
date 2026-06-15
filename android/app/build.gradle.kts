@@ -15,7 +15,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk {
-            abiFilters += "arm64-v8a"
+            // arm64-v8a for phones; x86_64 so the engine also runs under the
+            // emulator (host-GPU Vulkan via gfxstream).
+            abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
 
