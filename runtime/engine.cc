@@ -58,8 +58,7 @@ bool Engine::Initialize(const EngineConfig& config) {
 
   scheduler_.AddSystem(ecs::Stage::kPostSim, "cell_streaming", [this](ecs::World& world, f32) {
     if (!streamer_) return;
-    f32 player_position[3] = {0, 0, 0};  // TODO: from the player entity
-    streamer_->Update(world, player_position);
+    streamer_->Update(world, camera_.position());
   });
 
   return true;
@@ -176,6 +175,37 @@ bool Engine::LoadGameData() {
   REC_INFO("{} plugins, {} records", order.plugins().size(), records_.record_count());
 
   streamer_ = std::make_unique<world::CellStreamer>(records_, *assets_);
+  streamer_->Configure({});
+  if (!config_.headless) {
+    world::CellStreamer::Uploads uploads;
+    uploads.mesh = [this](const asset::Mesh& mesh) { return renderer_.UploadMesh(mesh); };
+    uploads.texture = [this](const asset::Texture& texture) {
+      return renderer_.UploadTexture(texture);
+    };
+    uploads.material = [this](const asset::Material& material) {
+      return renderer_.UploadMaterial(material);
+    };
+    streamer_->SetUploads(std::move(uploads));
+  }
+  if (!streamer_->SelectWorldspace(profile.exterior_worldspace)) return false;
+
+  // Drop the camera a bit above the terrain at the middle of the start cell.
+  constexpr f32 kUnitsToMeters = 0.01428f;
+  constexpr f32 kCellSize = 4096.0f;
+  f32 beth_x = (static_cast<f32>(config_.start_cell_x) + 0.5f) * kCellSize;
+  f32 beth_y = (static_cast<f32>(config_.start_cell_y) + 0.5f) * kCellSize;
+  Vec3 start{beth_x * kUnitsToMeters, 0.0f, -beth_y * kUnitsToMeters};
+  f32 ground = 0;
+  if (streamer_->GroundHeight(start.x, start.z, &ground)) {
+    start.y = ground + 10.0f;  // a little above the terrain for a view
+  } else {
+    REC_WARN("no terrain at start cell {},{}", config_.start_cell_x, config_.start_cell_y);
+  }
+  camera_.set_position(start);
+  camera_.set_yaw_pitch(0.0f, -0.1f);
+  camera_.speed = 30.0f;
+  REC_INFO("camera start: cell {},{} at ({:.1f}, {:.1f}, {:.1f})", config_.start_cell_x,
+           config_.start_cell_y, start.x, start.y, start.z);
   return true;
 }
 

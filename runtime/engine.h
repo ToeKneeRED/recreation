@@ -29,6 +29,9 @@ struct EngineConfig {
   std::string plugins_txt;
   std::string gltf_path;  // standalone gltf/glb scene (e.g. sponza)
   bethesda::Game game = bethesda::Game::kUnknown;  // kUnknown = autodetect
+  // Exterior cell the camera starts in. The default is the Whiterun plains.
+  i32 start_cell_x = 5;
+  i32 start_cell_y = -3;
   render::RendererDesc renderer;
   bool headless = false;
   bool host_server = false;
