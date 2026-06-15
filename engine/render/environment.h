@@ -56,12 +56,14 @@ class EnvironmentSystem {
     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   };
 
-  // Fills a freshly allocated set 2. Null ao view, ddgi binding or shadow view
-  // fall back to the neutral dummies (white ao, black ddgi, lit shadow).
+  // Fills a freshly allocated set 2. Null ao view, ddgi binding, shadow view or
+  // sun-shadow view fall back to the neutral dummies (white ao, black ddgi, lit
+  // cascade shadow, fully-lit sun shadow).
   void WriteEnvSet(VkDescriptorSet set, VkImageView ao_view, const DdgiBinding* ddgi,
                    VkImageView shadow_view = VK_NULL_HANDLE,
                    VkBuffer cascade_buffer = VK_NULL_HANDLE, u64 cascade_size = 0,
-                   VkImageView opaque_color = VK_NULL_HANDLE) const;
+                   VkImageView opaque_color = VK_NULL_HANDLE,
+                   VkImageView sun_shadow_view = VK_NULL_HANDLE) const;
 
  private:
   struct ComputePass {

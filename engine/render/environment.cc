@@ -308,9 +308,10 @@ bool EnvironmentSystem::CreatePipelines() {
   write_set(brdf_gen_.set, brdf_lut_.view, VK_NULL_HANDLE);
 
   // Set 2 of the mesh pipeline: ibl inputs, per frame ao, ddgi atlases, the
-  // cascade shadow atlas (7) + cascade ubo (8), and the opaque scene color (9,
-  // sampled by transmissive materials for refraction).
-  VkDescriptorSetLayoutBinding env_bindings[10]{};
+  // cascade shadow atlas (7) + cascade ubo (8), the opaque scene color (9,
+  // sampled by transmissive materials for refraction), and the SIGMA-denoised
+  // sun shadow (10, screen-space R8 sampled by the rt lighting variant).
+  VkDescriptorSetLayoutBinding env_bindings[11]{};
   for (u32 i = 0; i < 6; ++i) {
     env_bindings[i].binding = i;
     env_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -333,9 +334,13 @@ bool EnvironmentSystem::CreatePipelines() {
   env_bindings[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   env_bindings[9].descriptorCount = 1;
   env_bindings[9].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  env_bindings[10].binding = 10;
+  env_bindings[10].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  env_bindings[10].descriptorCount = 1;
+  env_bindings[10].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
   VkDescriptorSetLayoutCreateInfo env_info{
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  env_info.bindingCount = 10;
+  env_info.bindingCount = 11;
   env_info.pBindings = env_bindings;
   if (vkCreateDescriptorSetLayout(device_.device(), &env_info, nullptr, &env_set_layout_) !=
       VK_SUCCESS) {
@@ -591,8 +596,8 @@ void EnvironmentSystem::DrawSky(VkCommandBuffer cmd, VkDescriptorSet globals) {
 void EnvironmentSystem::WriteEnvSet(VkDescriptorSet set, VkImageView ao_view,
                                     const DdgiBinding* ddgi, VkImageView shadow_view,
                                     VkBuffer cascade_buffer, u64 cascade_size,
-                                    VkImageView opaque_color) const {
-  VkDescriptorImageInfo images[8]{};
+                                    VkImageView opaque_color, VkImageView sun_shadow_view) const {
+  VkDescriptorImageInfo images[9]{};
   images[0] = {sampler_, irradiance_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[1] = {sampler_, prefiltered_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[2] = {sampler_, brdf_lut_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -606,12 +611,14 @@ void EnvironmentSystem::WriteEnvSet(VkDescriptorSet set, VkImageView ao_view,
                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
   images[7] = {sampler_, opaque_color ? opaque_color : white_.view,
                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  images[8] = {sampler_, sun_shadow_view ? sun_shadow_view : white_.view,
+               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};  // white = fully lit
   VkDescriptorBufferInfo volume{ddgi ? ddgi->volume : dummy_volume_.buffer, 0,
                                 ddgi ? ddgi->volume_size : 256};
   VkDescriptorBufferInfo cascades{cascade_buffer ? cascade_buffer : dummy_volume_.buffer, 0,
                                   cascade_buffer ? cascade_size : 512};
 
-  VkWriteDescriptorSet writes[10];
+  VkWriteDescriptorSet writes[11];
   for (u32 i = 0; i < 6; ++i) {
     writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     writes[i].dstSet = set;
@@ -644,7 +651,13 @@ void EnvironmentSystem::WriteEnvSet(VkDescriptorSet set, VkImageView ao_view,
   writes[9].descriptorCount = 1;
   writes[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   writes[9].pImageInfo = &images[7];
-  vkUpdateDescriptorSets(device_.device(), 10, writes, 0, nullptr);
+  writes[10] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+  writes[10].dstSet = set;
+  writes[10].dstBinding = 10;
+  writes[10].descriptorCount = 1;
+  writes[10].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[10].pImageInfo = &images[8];
+  vkUpdateDescriptorSets(device_.device(), 11, writes, 0, nullptr);
 }
 
 void EnvironmentSystem::DestroyComputePass(ComputePass& pass) {

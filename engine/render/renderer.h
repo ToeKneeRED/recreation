@@ -36,6 +36,7 @@
 #include "render/settings.h"
 #include "render/fur.h"
 #include "render/shadow.h"
+#include "render/shadow_trace.h"
 #include "render/wboit.h"
 #include "render/ssao.h"
 #include "render/ssgi.h"
@@ -212,6 +213,7 @@ class Renderer {
   ShadowPass shadow_;
 #if defined(RECREATION_HAS_NRD)
   NrdDenoiser nrd_;
+  ShadowTracePass shadow_trace_;
 #endif
   BloomPass bloom_;
   ExposurePass exposure_;

@@ -14,6 +14,7 @@ recreation_add_module(render
   ssgi.cc
   gpu_cull.cc
   shadow.cc
+  shadow_trace.cc
   particles.cc
   fur.cc
   wboit.cc

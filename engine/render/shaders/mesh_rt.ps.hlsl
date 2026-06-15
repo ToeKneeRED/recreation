@@ -74,6 +74,8 @@ struct DdgiVolume {
 [[vk::binding(6, 2)]] ConstantBuffer<DdgiVolume> ddgi;
 [[vk::combinedImageSampler]] [[vk::binding(9, 2)]] Texture2D opaque_scene;  // for transmission
 [[vk::combinedImageSampler]] [[vk::binding(9, 2)]] SamplerState opaque_scene_sampler;
+[[vk::combinedImageSampler]] [[vk::binding(10, 2)]] Texture2D sun_shadow_map;  // SIGMA-denoised
+[[vk::combinedImageSampler]] [[vk::binding(10, 2)]] SamplerState sun_shadow_sampler;
 
 // Scene tables for reflection hit shading (set 3), matching water.ps.hlsl.
 struct MeshRecord {
@@ -106,6 +108,7 @@ static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
 static const uint kFrameReflections = 16u;
 static const uint kFrameRtShadows = 32u;
+static const uint kFrameSigmaShadow = 128u;  // sample the denoised sun shadow
 static const float kPi = 3.14159265359;
 static const float kPrefilterMips = 6.0;
 static const uint kVertexStride = 52;
@@ -473,6 +476,16 @@ float SunShadow(PsIn input, float3 n) {
   if ((frame.flags & kFrameRtShadows) == 0u) return 1.0;  // reflections-only rt frame
   float3 l = normalize(-frame.sun_direction.xyz);
   if (dot(n, l) <= 0.0) return 1.0;  // ndl already zeroes the contribution
+
+  // When SIGMA denoised the sun shadow this frame, sample the screen-space
+  // result instead of tracing inline (R8 stores sqrt(visibility), decode by
+  // squaring). The dedicated trace + denoiser gives a cleaner penumbra than the
+  // 1-spp inline cone the temporal pass would otherwise have to integrate.
+  if ((frame.flags & kFrameSigmaShadow) != 0u) {
+    float2 screen = input.sv_position.xy / frame.misc.xy;
+    float s = sun_shadow_map.SampleLevel(sun_shadow_sampler, screen, 0.0).r;
+    return s * s;
+  }
 
   // Jitter the ray inside the sun's angular radius for soft penumbras; the
   // temporal pass integrates the cone.

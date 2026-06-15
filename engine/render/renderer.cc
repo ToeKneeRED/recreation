@@ -166,6 +166,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (rt_available_ && !nrd_.Initialize(*device_, {render_width_, render_height_})) {
     REC_WARN("nrd denoiser unavailable, rtao/shadow denoising disabled");
   }
+  if (rt_available_ && !shadow_trace_.Initialize(*device_)) {
+    REC_WARN("shadow trace unavailable, sigma sun-shadow denoising disabled");
+  }
+  if (rt_available_) shadow_trace_.Resize(*device_, {render_width_, render_height_});
 #endif
 
   // Debug captures without window manager screenshots:
@@ -381,6 +385,7 @@ void Renderer::ApplySettings() {
     if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
     if (rt_available_ && nrd_.available()) nrd_.Resize(*device_, {render_width_, render_height_});
+    if (rt_available_) shadow_trace_.Resize(*device_, {render_width_, render_height_});
 #endif
     taa_.Reset();
     has_prev_frame_ = false;
@@ -402,6 +407,7 @@ void Renderer::ApplySettings() {
       if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
 #if defined(RECREATION_HAS_NRD)
       if (rt_available_ && nrd_.available()) nrd_.Resize(*device_, {render_width_, render_height_});
+      if (rt_available_) shadow_trace_.Resize(*device_, {render_width_, render_height_});
 #endif
     }
     taa_.Reset();
@@ -638,8 +644,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Ambient occlusion technique: ray-traced + NRD-denoised when available, else
   // the screen-space fallback so non-rt tiers (and forced low presets) keep ao.
   bool nrd_ao = false;
+  bool nrd_shadow = false;
 #if defined(RECREATION_HAS_NRD)
   nrd_ao = rtao_active && nrd_.available();
+  nrd_shadow = rt_shadows && nrd_.available();
 #endif
   bool ss_ao = settings_.ssao && !nrd_ao && !path_trace;
   // Cascaded shadow maps: the raster sun-shadow path, used whenever ray-traced
@@ -731,6 +739,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (ddgi_active) globals.flags |= kFrameFlagDdgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows) globals.flags |= kFrameFlagRtShadows;
+  if (nrd_shadow) globals.flags |= kFrameFlagSigmaShadow;
   if (reflections_active) globals.flags |= kFrameFlagReflections;
   globals.time = static_cast<f32>(time_seconds_);
   globals.debug_view = static_cast<u32>(settings_.debug_view);
@@ -1067,14 +1076,12 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   }
 
   ResourceHandle ao = kInvalidResource;
+  ResourceHandle sun_shadow = kInvalidResource;
 #if defined(RECREATION_HAS_NRD)
-  if (nrd_ao) {
-    // RTAO traces a raw hit distance; NRD's REBLUR denoises it. The normal +
-    // viewZ guides are shared with the (later) shadow denoiser.
+  if (nrd_ao || nrd_shadow) {
+    // Shared NRD guides (normal+roughness, viewZ) and per-frame camera state for
+    // the REBLUR ao and SIGMA sun-shadow denoisers.
     NrdDenoiser::Inputs nrd_inputs = nrd_.PrepareInputs(graph_, depth_export, normals, 0.1f);
-    ResourceHandle hitdist =
-        rtao_.AddToGraph(graph_, *raytracing_, tlas_slot, depth_export, normals,
-                         globals.inv_view_proj, frame_index_, 0.1f, NrdDenoiser::kHitDistParams);
     NrdDenoiser::FrameSettings fs;
     fs.view_to_clip = proj;
     fs.view_to_clip_prev = prev_proj_;
@@ -1088,7 +1095,23 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     fs.frame_index = frame_index_;
     fs.reset = first_frame;
     nrd_.SetFrame(fs);
-    ao = nrd_.DenoiseAo(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z, motion, hitdist);
+    if (nrd_ao) {
+      // RTAO traces a raw hit distance; REBLUR denoises it.
+      ResourceHandle hitdist =
+          rtao_.AddToGraph(graph_, *raytracing_, tlas_slot, depth_export, normals,
+                           globals.inv_view_proj, frame_index_, 0.1f, NrdDenoiser::kHitDistParams);
+      ao = nrd_.DenoiseAo(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z, motion, hitdist);
+    }
+    if (nrd_shadow) {
+      // Trace a 1-spp cone-jittered sun visibility into SIGMA's penumbra input,
+      // then denoise it into a clean screen-space sun shadow the lighting samples
+      // (instead of the noisier inline trace the temporal pass had to integrate).
+      ResourceHandle penumbra =
+          shadow_trace_.AddToGraph(graph_, *raytracing_, tlas_slot, depth_export,
+                                   globals.inv_view_proj, sun, 0.1f, settings_.sun_angular_radius);
+      sun_shadow = nrd_.DenoiseShadow(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z, motion,
+                                      penumbra);
+    }
     prev_proj_ = proj;
     prev_view_ = view_mat;
     prev_jitter_[0] = jitter_x;
@@ -1108,10 +1131,12 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         builder.Write(motion, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
         if (ao != kInvalidResource) builder.Read(ao, ResourceUsage::kSampledFragment);
+        if (sun_shadow != kInvalidResource) builder.Read(sun_shadow, ResourceUsage::kSampledFragment);
         if (csm_active) builder.Read(shadow_atlas, ResourceUsage::kSampledFragment);
       },
-      [this, scene_color, motion, depth, ao, tlas_slot, rt_shadows, use_rt_frag, ddgi_active,
-       csm_active, shadow_slot, shadow_atlas, cull_commands, &frame, &view](PassContext& ctx) {
+      [this, scene_color, motion, depth, ao, sun_shadow, tlas_slot, rt_shadows, use_rt_frag,
+       ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands, &frame,
+       &view](PassContext& ctx) {
         VkRenderingAttachmentInfo colors[2];
         colors[0] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         colors[0].imageView = ctx.graph->image(scene_color).view;
@@ -1177,13 +1202,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         VkDescriptorSet env_set = ctx.allocate_set(environment_->env_set_layout());
         VkImageView ao_view =
             ao != kInvalidResource ? ctx.graph->image(ao).view : VK_NULL_HANDLE;
+        VkImageView sun_shadow_view =
+            sun_shadow != kInvalidResource ? ctx.graph->image(sun_shadow).view : VK_NULL_HANDLE;
         EnvironmentSystem::DdgiBinding ddgi_binding;
         if (ddgi_active) ddgi_binding = ddgi_->binding(frame_index_);
         environment_->WriteEnvSet(
             env_set, ao_view, ddgi_active ? &ddgi_binding : nullptr,
             csm_active ? ctx.graph->image(shadow_atlas).view : VK_NULL_HANDLE,
             csm_active ? shadow_.cascade_buffer(shadow_slot) : VK_NULL_HANDLE,
-            shadow_.cascade_buffer_size());
+            shadow_.cascade_buffer_size(), VK_NULL_HANDLE, sun_shadow_view);
 
         VkDescriptorSet bindless_set = bindless_ ? bindless_->set() : VK_NULL_HANDLE;
         mesh_pipeline_->Bind(ctx.cmd, globals_set, env_set, bindless_set, use_rt_frag,
@@ -1280,11 +1307,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           builder.Write(depth, ResourceUsage::kDepthAttachment);
           builder.Read(opaque_color, ResourceUsage::kSampledFragment);
           builder.Read(opaque_depth, ResourceUsage::kSampledFragment);
+          if (sun_shadow != kInvalidResource)
+            builder.Read(sun_shadow, ResourceUsage::kSampledFragment);
           if (csm_active) builder.Read(shadow_atlas, ResourceUsage::kSampledFragment);
         },
-        [this, composite, motion, depth, opaque_color, opaque_depth, tlas_slot, rt_shadows,
-         use_rt_frag, ddgi_active, water_pipeline_active, csm_active, shadow_slot, shadow_atlas,
-         transparent = std::move(transparent), &frame, &view](PassContext& ctx) {
+        [this, composite, motion, depth, opaque_color, opaque_depth, sun_shadow, tlas_slot,
+         rt_shadows, use_rt_frag, ddgi_active, water_pipeline_active, csm_active, shadow_slot,
+         shadow_atlas, transparent = std::move(transparent), &frame, &view](PassContext& ctx) {
           VkRenderingAttachmentInfo colors[2];
           colors[0] = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
           colors[0].imageView = ctx.graph->image(composite).view;
@@ -1347,11 +1376,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           VkDescriptorSet env_set = ctx.allocate_set(environment_->env_set_layout());
           EnvironmentSystem::DdgiBinding ddgi_binding;
           if (ddgi_active) ddgi_binding = ddgi_->binding(frame_index_);
+          VkImageView sun_shadow_view =
+              sun_shadow != kInvalidResource ? ctx.graph->image(sun_shadow).view : VK_NULL_HANDLE;
           environment_->WriteEnvSet(
               env_set, VK_NULL_HANDLE, ddgi_active ? &ddgi_binding : nullptr,
               csm_active ? ctx.graph->image(shadow_atlas).view : VK_NULL_HANDLE,
               csm_active ? shadow_.cascade_buffer(shadow_slot) : VK_NULL_HANDLE,
-              shadow_.cascade_buffer_size(), ctx.graph->image(opaque_color).view);
+              shadow_.cascade_buffer_size(), ctx.graph->image(opaque_color).view, sun_shadow_view);
 
           enum class Mode { kNone, kWater, kBlend };
           Mode mode = Mode::kNone;
@@ -1800,6 +1831,9 @@ void Renderer::RecreateSwapchain() {
   taa_.Resize(*device_, {render_width_, render_height_});
   path_tracer_.Resize(*device_, {render_width_, render_height_});
   if (rt_available_) rtao_.Resize(*device_, {render_width_, render_height_});
+#if defined(RECREATION_HAS_NRD)
+  if (rt_available_) shadow_trace_.Resize(*device_, {render_width_, render_height_});
+#endif
   has_prev_frame_ = false;
 }
 
@@ -1835,6 +1869,7 @@ void Renderer::Shutdown() {
     if (rt_available_) rtao_.Destroy(*device_);
 #if defined(RECREATION_HAS_NRD)
     if (rt_available_) nrd_.Destroy(*device_);
+    if (rt_available_) shadow_trace_.Destroy(*device_);
 #endif
     bloom_.Destroy(*device_);
     exposure_.Destroy(*device_);
