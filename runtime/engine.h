@@ -68,8 +68,13 @@ struct EngineConfig {
 
 class Engine {
  public:
+  Engine() = default;
+  ~Engine();
+
   // `window` lets a platform supply its own surface (Android hands the engine
-  // the activity's ANativeWindow); when null the engine creates one itself.
+  // the activity's ANativeWindow); when null the engine creates one itself. A
+  // failed Initialize tears down whatever it had brought up (the destructor
+  // calls Shutdown), so callers need not Shutdown after a failure.
   bool Initialize(const EngineConfig& config, std::unique_ptr<Window> window = nullptr);
   int Run();
   // One iteration of the main loop. Returns false when the engine wants to
@@ -304,6 +309,7 @@ class Engine {
   f32 demo_input_time_ = 0;
 
   std::atomic<bool> quit_ = false;
+  bool shut_down_ = false;
 };
 
 }  // namespace rec

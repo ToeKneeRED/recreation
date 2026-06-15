@@ -1860,7 +1860,11 @@ void Engine::OnSurfaceCreated() {
   if (!config_.headless) renderer_.RecreateSurface();
 }
 
+Engine::~Engine() { Shutdown(); }
+
 void Engine::Shutdown() {
+  if (shut_down_) return;  // idempotent: explicit Shutdown then destructor
+  shut_down_ = true;
   // Stop the guest thread before tearing down the systems its bindings touch.
   scripts_.reset();
   if (!config_.headless) {
@@ -1869,7 +1873,7 @@ void Engine::Shutdown() {
     debug_ui_.Shutdown();
     renderer_.Shutdown();
   }
-  jobs_->WaitIdle();
+  if (jobs_) jobs_->WaitIdle();
 }
 
 }  // namespace rec
