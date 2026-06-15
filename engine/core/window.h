@@ -75,6 +75,9 @@ class AndroidWindowBase : public Window {
   virtual InputState& mutable_input() = 0;
   virtual void RequestQuit() = 0;
   virtual ::ANativeWindow* native_window() const = 0;
+  // Rebinds to a new ANativeWindow across the activity lifecycle (the old one
+  // is released, the new one acquired). null marks the window as gone.
+  virtual void SetNativeWindow(::ANativeWindow* window) = 0;
 };
 
 std::unique_ptr<AndroidWindowBase> CreateAndroidWindow(::ANativeWindow* window);

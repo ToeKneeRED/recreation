@@ -102,6 +102,7 @@ struct AppState {
   rec::EngineConfig config;
   bool initialized = false;
   bool finished = false;
+  bool has_surface = false;  // window present and surface bound (between INIT/TERM)
   // Touch controls: a pointer that goes down in the left half drives a virtual
   // movement stick (mapped to WASD), one in the right half looks around (mapped
   // to a mouse-look drag). Each control is owned by a single pointer id.
@@ -138,9 +139,9 @@ void HandleCmd(android_app* app, int32_t cmd) {
   auto* state = static_cast<AppState*>(app->userData);
   switch (cmd) {
     case APP_CMD_INIT_WINDOW:
-      if (app->window != nullptr && !state->initialized) {
-        ANativeWindow_acquire(app->window);
-        auto window = rec::CreateAndroidWindow(app->window);
+      if (app->window == nullptr) break;
+      if (!state->initialized) {
+        auto window = rec::CreateAndroidWindow(app->window);  // acquires the window
         state->window = window.get();
         if (!state->engine.Initialize(state->config, std::move(window))) {
           __android_log_print(ANDROID_LOG_ERROR, kTag, "engine initialization failed");
@@ -149,13 +150,24 @@ void HandleCmd(android_app* app, int32_t cmd) {
           return;
         }
         state->initialized = true;
+        state->has_surface = true;
         __android_log_print(ANDROID_LOG_INFO, kTag, "engine initialized");
+      } else {
+        // Foregrounded: rebind the renderer to the new activity window.
+        state->window->SetNativeWindow(app->window);
+        state->engine.OnSurfaceCreated();
+        state->has_surface = true;
+        __android_log_print(ANDROID_LOG_INFO, kTag, "surface recreated");
       }
       break;
     case APP_CMD_TERM_WINDOW:
-      // The surface is being destroyed (app backgrounded or rotated). Surface
-      // recreation on resume is a follow-up; for now end the frame loop.
-      if (state->initialized) state->window->RequestQuit();
+      // Backgrounded or rotated: drop the surface but keep the engine alive so
+      // it resumes on the next INIT_WINDOW.
+      if (state->initialized) {
+        state->engine.OnSurfaceDestroyed();
+        state->window->SetNativeWindow(nullptr);
+        state->has_surface = false;
+      }
       break;
     case APP_CMD_DESTROY:
       state->finished = true;
@@ -257,10 +269,11 @@ void android_main(android_app* app) {
   state.config = LoadConfig(app);
 
   while (!state.finished) {
+    const bool active = state.initialized && state.has_surface;
     // Look deltas are per-frame; the window backend never resets them, so clear
     // them here before this frame's motion events accumulate. Movement keys are
     // held state and persist until the stick pointer lifts.
-    if (state.initialized) {
+    if (active) {
       rec::InputState& input = state.window->mutable_input();
       input.mouse_dx = 0;
       input.mouse_dy = 0;
@@ -269,9 +282,9 @@ void android_main(android_app* app) {
 
     int events = 0;
     android_poll_source* source = nullptr;
-    // Block for events until the engine is up; once rendering, drain without
+    // Block for events while paused (no surface); once rendering, drain without
     // blocking so we render every frame.
-    int timeout = state.initialized ? 0 : -1;
+    int timeout = active ? 0 : -1;
     while (ALooper_pollOnce(timeout, nullptr, &events, reinterpret_cast<void**>(&source)) >= 0) {
       if (source != nullptr) source->process(app, source);
       if (app->destroyRequested) {
@@ -281,7 +294,7 @@ void android_main(android_app* app) {
       timeout = 0;
     }
     if (state.finished) break;
-    if (state.initialized) {
+    if (state.initialized && state.has_surface) {
       if (!state.engine.RunFrame()) break;
     }
   }

@@ -78,6 +78,13 @@ class Engine {
   bool RunFrame();
   void Shutdown();
 
+  // Android lifecycle: the activity's presentation surface is lost when its
+  // window goes away (background) and rebound when it returns. The platform
+  // entry drives these around RunFrame; the window must already point at the
+  // new ANativeWindow before OnSurfaceCreated.
+  void OnSurfaceDestroyed();
+  void OnSurfaceCreated();
+
   // Safe to call from a signal handler; Run() returns after the current
   // frame.
   void RequestQuit() { quit_.store(true, std::memory_order_relaxed); }

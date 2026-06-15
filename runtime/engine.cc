@@ -1852,6 +1852,14 @@ int Engine::Run() {
   return 0;
 }
 
+void Engine::OnSurfaceDestroyed() {
+  if (!config_.headless) renderer_.DestroySurface();
+}
+
+void Engine::OnSurfaceCreated() {
+  if (!config_.headless) renderer_.RecreateSurface();
+}
+
 void Engine::Shutdown() {
   // Stop the guest thread before tearing down the systems its bindings touch.
   scripts_.reset();

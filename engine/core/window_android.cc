@@ -15,7 +15,9 @@ namespace {
 // backbuffer extent.
 class AndroidWindow final : public AndroidWindowBase {
  public:
-  explicit AndroidWindow(ANativeWindow* window) : window_(window) {}
+  explicit AndroidWindow(ANativeWindow* window) : window_(window) {
+    if (window_) ANativeWindow_acquire(window_);
+  }
 
   ~AndroidWindow() override {
     if (window_) ANativeWindow_release(window_);
@@ -59,6 +61,13 @@ class AndroidWindow final : public AndroidWindowBase {
   InputState& mutable_input() override { return input_; }
   void RequestQuit() override { quit_ = true; }
   ANativeWindow* native_window() const override { return window_; }
+
+  void SetNativeWindow(ANativeWindow* window) override {
+    if (window_ == window) return;
+    if (window_) ANativeWindow_release(window_);
+    window_ = window;
+    if (window_) ANativeWindow_acquire(window_);
+  }
 
  private:
   ANativeWindow* window_;
