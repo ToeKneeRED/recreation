@@ -143,12 +143,37 @@ bool Engine::StartNetworking() {
     if (!server->Start()) return false;
     server_session_ = server.get();
     session_ = std::move(server);
+    // Replicate the authoritative quest journal. The source is only called when
+    // clients are connected, so the guest round-trip costs nothing while idle.
+    // Quest state lives on the guest thread, so we marshal the read onto it.
+    if (scripts_ && script_bindings_) {
+      server_session_->SetQuestSource([this]() -> std::vector<quest::QuestStatus> {
+        if (!scripts_) return {};
+        auto* binds = script_bindings_.get();
+        return scripts_->guest()
+            .SubmitFor([binds](script::papyrus::VirtualMachine&) {
+              return binds->quest_system().AllStatuses();
+            })
+            .get();
+      });
+    }
   } else if (!config_.connect_address.empty()) {
     net_config.address = base::String(config_.connect_address.c_str());
     auto client = std::make_unique<net::ClientSession>(std::move(net_config));
     if (!client->Start()) return false;
     client_session_ = client.get();
     session_ = std::move(client);
+    // Mirror the server's journal onto our quest system. ApplyStatus mutates
+    // quest state, so it has to run on the guest thread like every other write.
+    if (scripts_ && script_bindings_) {
+      client_session_->SetQuestSink([this](const quest::QuestStatus& status) {
+        if (!scripts_) return;
+        auto* binds = script_bindings_.get();
+        scripts_->guest().Submit([binds, status](script::papyrus::VirtualMachine&) {
+          binds->quest_system().ApplyStatus(status);
+        });
+      });
+    }
   } else {
     return true;
   }
