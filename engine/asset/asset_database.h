@@ -44,9 +44,10 @@ class AssetDatabase {
 
   // Side channel for converters that synthesize assets while converting
   // another (NIF shader properties become materials) and for procedurally
-  // built meshes (terrain). Keyed by their id.
+  // built meshes/textures (terrain). Keyed by their id.
   void AddMaterial(const Material& material);
   const Mesh* AddMesh(Mesh mesh);
+  const Texture* AddTexture(Texture texture);
   const Material* FindMaterial(AssetId id) const;
   const Texture* FindTexture(AssetId id) const;
   const Mesh* FindMesh(AssetId id) const;

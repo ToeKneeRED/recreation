@@ -139,6 +139,7 @@ struct Shape {
   i32 shader = -1;
   i32 alpha = -1;
   i32 data = -1;        // NiTriShape only
+  i32 skin = -1;        // NiSkinInstance/BSDismemberSkinInstance
   Geometry geometry;    // BSTriShape only
   bool hidden = false;
   bool skipped = false;
@@ -146,6 +147,7 @@ struct Shape {
 
 struct ShaderInfo {
   i32 texture_set = -1;
+  u32 shader_type = 0;  // BSLightingShaderProperty type enum
   u32 flags1 = 0;
   u32 flags2 = 0;
   f32 emissive[3] = {0, 0, 0};
@@ -154,6 +156,36 @@ struct ShaderInfo {
   bool effect = false;
   std::string effect_texture;
 };
+
+// Refraction shapes (heat haze, glass distortion) carry a normal map in the
+// diffuse slot for the distortion effect; without refraction support they
+// must not render at all.
+constexpr u32 kShaderFlag1Refraction = 1u << 15;
+constexpr u32 kShaderFlag1FireRefraction = 1u << 16;
+
+// Skyrim shader types whose texture set holds diffuse/normal in slots 0/1.
+// The others (landscape multitexture, LOD, world map) repurpose the slots
+// and would bind garbage as a diffuse.
+bool ShaderTypeUsesDiffuseSlot(u32 type) {
+  switch (type) {
+    case 0:   // default
+    case 1:   // environment map
+    case 2:   // glow
+    case 3:   // parallax
+    case 4:   // face tint
+    case 5:   // skin tint
+    case 6:   // hair tint
+    case 7:   // parallax occlusion
+    case 10:  // snow
+    case 11:  // multilayer parallax
+    case 12:  // tree anim
+    case 14:  // sparkle snow
+    case 16:  // eye envmap
+      return true;
+    default:
+      return false;
+  }
+}
 
 struct AlphaInfo {
   u16 flags = 0;
@@ -192,25 +224,22 @@ struct VertexLayout {
   }
 };
 
-bool ReadBsTriShapeGeometry(Reader& r, Geometry* out) {
-  u64 desc = r.Read<u64>();
-  u32 triangle_count = r.Read<u16>();
-  u32 vertex_count = r.Read<u16>();
-  u32 data_size = r.Read<u32>();
-  if (!r.ok || data_size == 0 || vertex_count == 0) return false;
+// Per vertex skinning attributes pulled out of a packed vertex buffer.
+struct SkinVertexData {
+  base::Vector<u8> bone_indices;  // 4 per vertex
+  base::Vector<f32> weights;      // 4 per vertex
+};
 
-  VertexLayout layout(desc);
-  if (layout.flags & VertexLayout::kSkinned) return false;
-  if (!(layout.flags & VertexLayout::kHasVertex) || layout.stride == 0) return false;
-  if (data_size != layout.stride * vertex_count + 6 * triangle_count) return false;
-
-  const u8* base = r.Bytes(data_size);
-  if (!base) return false;
-
-  out->vertices.resize(vertex_count);
+void DecodePackedVertices(const VertexLayout& layout, const u8* base, u32 vertex_count,
+                          base::Vector<asset::Vertex>* vertices, SkinVertexData* skin) {
+  vertices->resize(vertex_count);
+  if (skin) {
+    skin->bone_indices.resize(vertex_count * 4);
+    skin->weights.resize(vertex_count * 4);
+  }
   for (u32 i = 0; i < vertex_count; ++i) {
     const u8* v = base + i * layout.stride;
-    asset::Vertex& vertex = out->vertices[i];
+    asset::Vertex& vertex = (*vertices)[i];
     if (layout.full_precision) {
       std::memcpy(vertex.position, v, 12);
     } else {
@@ -248,7 +277,33 @@ bool ReadBsTriShapeGeometry(Reader& r, Geometry* out) {
       // feed the alpha test.
       vertex.color |= 0xff000000u;
     }
+    if (skin && (layout.flags & VertexLayout::kSkinned) && layout.skin != 0) {
+      u16 w[4];
+      std::memcpy(w, v + layout.skin, 8);
+      for (int k = 0; k < 4; ++k) {
+        skin->weights[i * 4 + k] = HalfToFloat(w[k]);
+        skin->bone_indices[i * 4 + k] = v[layout.skin + 8 + k];
+      }
+    }
   }
+}
+
+bool ReadBsTriShapeGeometry(Reader& r, Geometry* out) {
+  u64 desc = r.Read<u64>();
+  u32 triangle_count = r.Read<u16>();
+  u32 vertex_count = r.Read<u16>();
+  u32 data_size = r.Read<u32>();
+  if (!r.ok || data_size == 0 || vertex_count == 0) return false;
+
+  VertexLayout layout(desc);
+  if (layout.flags & VertexLayout::kSkinned) return false;
+  if (!(layout.flags & VertexLayout::kHasVertex) || layout.stride == 0) return false;
+  if (data_size != layout.stride * vertex_count + 6 * triangle_count) return false;
+
+  const u8* base = r.Bytes(data_size);
+  if (!base) return false;
+
+  DecodePackedVertices(layout, base, vertex_count, &out->vertices, nullptr);
 
   const u8* tris = base + layout.stride * vertex_count;
   out->indices.resize(triangle_count * 3);
@@ -257,6 +312,119 @@ bool ReadBsTriShapeGeometry(Reader& r, Geometry* out) {
     std::memcpy(&index, tris + i * 2, 2);
     if (index >= vertex_count) return false;
     out->indices[i] = index;
+  }
+  return true;
+}
+
+// NiSkinInstance / BSDismemberSkinInstance shared prefix.
+struct SkinInstanceBlock {
+  i32 data = -1;       // NiSkinData
+  i32 partition = -1;  // NiSkinPartition
+  base::Vector<i32> bones;
+};
+
+bool ReadSkinInstance(Reader& r, SkinInstanceBlock* out) {
+  out->data = r.Read<i32>();
+  out->partition = r.Read<i32>();
+  r.Skip(4);  // skeleton root
+  u32 bone_count = r.Read<u32>();
+  if (!r.ok || bone_count > 4096) return false;
+  out->bones.reserve(bone_count);
+  for (u32 i = 0; i < bone_count; ++i) out->bones.push_back(r.Read<i32>());
+  return r.ok;
+}
+
+// Rotation-first NiTransform as used by NiSkinData, unlike the AV object
+// order (translation first).
+Transform ReadSkinTransform(Reader& r) {
+  Transform t;
+  for (f32& v : t.r) v = r.Read<f32>();
+  for (f32& v : t.t) v = r.Read<f32>();
+  t.s = r.Read<f32>();
+  return t;
+}
+
+// NiSkinData: per bone skin-to-bone bind transforms. The per bone vertex
+// weight lists are skipped; SSE keeps the authoritative weights in the
+// partition vertex data.
+bool ReadSkinData(Reader& r, base::Vector<Transform>* skin_to_bone) {
+  r.Skip(52);  // overall skin transform, folded into the per bone transforms
+  u32 bone_count = r.Read<u32>();
+  bool has_weights = r.Read<u8>() != 0;
+  if (!r.ok || bone_count > 4096) return false;
+  skin_to_bone->reserve(bone_count);
+  for (u32 i = 0; i < bone_count; ++i) {
+    skin_to_bone->push_back(ReadSkinTransform(r));
+    r.Skip(16);  // bounding sphere
+    u32 vertex_count = r.Read<u16>();
+    if (has_weights) r.Skip(6 * vertex_count);
+    if (!r.ok) return false;
+  }
+  return true;
+}
+
+// SSE NiSkinPartition (BS stream 100): one shared packed vertex buffer plus
+// partitions with their own bone palettes and triangles in global vertex
+// indices.
+struct SkinPartitionBlock {
+  base::Vector<asset::Vertex> vertices;
+  SkinVertexData skin;
+  base::Vector<u32> indices;
+  struct Span {
+    base::Vector<u16> bones;
+    u32 first_index = 0;
+    u32 index_count = 0;
+  };
+  base::Vector<Span> spans;
+};
+
+bool ReadSkinPartition(Reader& r, u32 bs_version, SkinPartitionBlock* out) {
+  if (bs_version != 100) return false;
+  u32 partition_count = r.Read<u32>();
+  u32 data_size = r.Read<u32>();
+  u32 vertex_size = r.Read<u32>();
+  u64 desc = r.Read<u64>();
+  if (!r.ok || partition_count > 4096 || vertex_size == 0 || data_size % vertex_size != 0) {
+    return false;
+  }
+  u32 vertex_count = data_size / vertex_size;
+  VertexLayout layout(desc);
+  if (!(layout.flags & VertexLayout::kHasVertex) || layout.stride != vertex_size) return false;
+  const u8* base = r.Bytes(data_size);
+  if (!base || vertex_count == 0) return false;
+  DecodePackedVertices(layout, base, vertex_count, &out->vertices, &out->skin);
+
+  for (u32 p = 0; p < partition_count; ++p) {
+    u32 part_vertices = r.Read<u16>();
+    u32 part_triangles = r.Read<u16>();
+    u32 part_bones = r.Read<u16>();
+    u32 part_strips = r.Read<u16>();
+    u32 weights_per_vertex = r.Read<u16>();
+    if (!r.ok) return false;
+    SkinPartitionBlock::Span span;
+    span.bones.reserve(part_bones);
+    for (u32 b = 0; b < part_bones; ++b) span.bones.push_back(r.Read<u16>());
+    if (r.Read<u8>() != 0) r.Skip(2 * part_vertices);                       // vertex map
+    if (r.Read<u8>() != 0) r.Skip(4 * part_vertices * weights_per_vertex);  // weights
+    u32 strip_total = 0;
+    for (u32 s = 0; s < part_strips; ++s) strip_total += r.Read<u16>();
+    if (r.Read<u8>() != 0) {  // has faces
+      r.Skip(part_strips == 0 ? 6 * part_triangles : 2 * strip_total);
+    }
+    if (r.Read<u8>() != 0) r.Skip(part_vertices * weights_per_vertex);  // bone indices
+    r.Skip(2 + 8);  // unknown short, per partition vertex desc
+    if (!r.ok) return false;
+    span.first_index = static_cast<u32>(out->indices.size());
+    span.index_count = part_triangles * 3;
+    const u8* tris = r.Bytes(6 * part_triangles);
+    if (!tris) return false;
+    for (u32 i = 0; i < part_triangles * 3; ++i) {
+      u16 index;
+      std::memcpy(&index, tris + i * 2, 2);
+      if (index >= vertex_count) return false;
+      out->indices.push_back(index);
+    }
+    out->spans.push_back(std::move(span));
   }
   return true;
 }
@@ -417,6 +585,9 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
   base::UnorderedMap<u32, ShaderInfo> shaders;
   base::UnorderedMap<u32, AlphaInfo> alphas;
   base::UnorderedMap<u32, base::Vector<std::string>> texture_sets;
+  base::UnorderedMap<u32, SkinInstanceBlock> skin_instances;
+  base::UnorderedMap<u32, base::Vector<Transform>> skin_datas;
+  base::UnorderedMap<u32, SkinPartitionBlock> skin_partitions;
 
   for (u32 i = 0; i < block_count; ++i) {
     const std::string& type = header->block_types[header->block_type_index[i]];
@@ -429,16 +600,29 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
       if (!r.ok || child_count > 65536) continue;
       node.children.reserve(child_count);
       for (u32 c = 0; c < child_count; ++c) node.children.push_back(r.Read<i32>());
+      if (type == "NiSwitchNode" && !node.children.empty()) {
+        // Only the active child renders (trees keep an animated and a static
+        // variant side by side).
+        u32 effect_count = r.Read<u32>();
+        if (effect_count > 4096) effect_count = 0;
+        r.Skip(4 * effect_count + 2);  // effect refs, switch flags
+        u32 index = r.Read<u32>();
+        if (!r.ok || index >= node.children.size()) index = 0;
+        i32 active = node.children[index];
+        node.children.clear();
+        node.children.push_back(active);
+        r.ok = true;
+      }
       if (r.ok) nodes.emplace(i, std::move(node));
     } else if (type == "BSTriShape" || type == "BSMeshLODTriShape") {
       Shape shape;
       shape.local = ReadAvObject(r, &shape.hidden);
       r.Skip(16);  // bounding sphere
-      r.Skip(4);   // skin ref
+      shape.skin = r.Read<i32>();
       shape.shader = r.Read<i32>();
       shape.alpha = r.Read<i32>();
       if (!r.ok) continue;
-      if (!ReadBsTriShapeGeometry(r, &shape.geometry)) shape.skipped = true;
+      if (!ReadBsTriShapeGeometry(r, &shape.geometry) && shape.skin < 0) shape.skipped = true;
       shapes.emplace(i, std::move(shape));
     } else if (type == "NiTriShape") {
       Shape shape;
@@ -460,9 +644,20 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
       }
     } else if (type == "NiTriStrips" || type == "BSDynamicTriShape") {
       ++result.skipped_shapes;
+    } else if (type == "NiSkinInstance" || type == "BSDismemberSkinInstance") {
+      SkinInstanceBlock skin;
+      if (ReadSkinInstance(r, &skin)) skin_instances.emplace(i, std::move(skin));
+    } else if (type == "NiSkinData") {
+      base::Vector<Transform> skin_to_bone;
+      if (ReadSkinData(r, &skin_to_bone)) skin_datas.emplace(i, std::move(skin_to_bone));
+    } else if (type == "NiSkinPartition") {
+      SkinPartitionBlock partition;
+      if (ReadSkinPartition(r, header->bs_version, &partition)) {
+        skin_partitions.emplace(i, std::move(partition));
+      }
     } else if (type == "BSLightingShaderProperty") {
       ShaderInfo info;
-      r.Skip(4);  // shader type
+      info.shader_type = r.Read<u32>();
       r.Skip(4);  // name
       u32 extra = r.Read<u32>();
       if (!r.ok || extra > 4096) continue;
@@ -546,9 +741,11 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
       if (shader->effect) {
         diffuse = NormalizeTexturePath(shader->effect_texture);
         material.alpha_mode = asset::AlphaMode::kBlend;
-      } else if (const auto* set = texture_sets.find(static_cast<u32>(shader->texture_set))) {
-        if (set->size() > 0) diffuse = NormalizeTexturePath((*set)[0]);
-        if (set->size() > 1) normal = NormalizeTexturePath((*set)[1]);
+      } else if (ShaderTypeUsesDiffuseSlot(shader->shader_type)) {
+        if (const auto* set = texture_sets.find(static_cast<u32>(shader->texture_set))) {
+          if (set->size() > 0) diffuse = NormalizeTexturePath((*set)[0]);
+          if (set->size() > 1) normal = NormalizeTexturePath((*set)[1]);
+        }
       }
       if (!diffuse.empty()) {
         material.base_color = asset::MakeAssetId(diffuse);
@@ -588,6 +785,102 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
     return material.id;
   };
 
+  // World transform per node block, for skinned shapes whose bones live in
+  // other subtrees than the shape itself.
+  base::UnorderedMap<u32, Transform> node_world;
+  {
+    struct NodeEntry {
+      u32 block;
+      Transform parent;
+    };
+    base::Vector<NodeEntry> walk;
+    for (u32 root : roots) walk.push_back({root, Transform{}});
+    while (!walk.empty()) {
+      NodeEntry entry = walk.back();
+      walk.pop_back();
+      const Node* node = nodes.find(entry.block);
+      if (!node || node_world.contains(entry.block)) continue;
+      Transform world = Compose(entry.parent, node->local);
+      node_world.emplace(entry.block, world);
+      for (i32 child : node->children) {
+        if (child >= 0) walk.push_back({static_cast<u32>(child), world});
+      }
+    }
+  }
+
+  // Bakes a skinned shape rigidly at its bind pose. False when the skeleton
+  // is not fully contained in this file (actor parts).
+  auto bake_skinned = [&](const Shape& shape, Geometry* out) -> bool {
+    const SkinInstanceBlock* skin = skin_instances.find(static_cast<u32>(shape.skin));
+    if (!skin) return false;
+    const base::Vector<Transform>* skin_to_bone = skin_datas.find(static_cast<u32>(skin->data));
+    const SkinPartitionBlock* partition = skin_partitions.find(static_cast<u32>(skin->partition));
+    if (!skin_to_bone || !partition || skin_to_bone->size() != skin->bones.size()) return false;
+    if (partition->vertices.empty() || partition->indices.empty()) return false;
+
+    base::Vector<Transform> bone_world;
+    bone_world.reserve(skin->bones.size());
+    for (size_t b = 0; b < skin->bones.size(); ++b) {
+      i32 bone = skin->bones[b];
+      const Transform* world = bone >= 0 ? node_world.find(static_cast<u32>(bone)) : nullptr;
+      if (!world) return false;  // external skeleton
+      bone_world.push_back(Compose(*world, (*skin_to_bone)[b]));
+    }
+
+    out->vertices = partition->vertices;
+    out->indices = partition->indices;
+    // Vertex bone indices are partition local; resolve them through each
+    // partition's palette by walking its triangles.
+    base::Vector<u32> global_bones(partition->vertices.size() * 4);
+    base::Vector<u8> resolved(partition->vertices.size());
+    for (const SkinPartitionBlock::Span& span : partition->spans) {
+      for (u32 k = 0; k < span.index_count; ++k) {
+        u32 v = partition->indices[span.first_index + k];
+        if (resolved[v]) continue;
+        resolved[v] = 1;
+        for (u32 w = 0; w < 4; ++w) {
+          u8 local = partition->skin.bone_indices[v * 4 + w];
+          global_bones[v * 4 + w] =
+              local < span.bones.size() ? span.bones[local] : 0;
+        }
+      }
+    }
+    for (size_t v = 0; v < out->vertices.size(); ++v) {
+      f32 total = 0;
+      f32 position[3] = {0, 0, 0};
+      f32 normal[3] = {0, 0, 0};
+      f32 tangent[3] = {0, 0, 0};
+      const asset::Vertex& src = partition->vertices[v];
+      for (u32 w = 0; w < 4; ++w) {
+        f32 weight = partition->skin.weights[v * 4 + w];
+        if (weight <= 0) continue;
+        u32 bone = global_bones[v * 4 + w];
+        if (bone >= bone_world.size()) continue;
+        const Transform& t = bone_world[bone];
+        f32 p[3], n[3], tg[3];
+        t.Apply(src.position, p);
+        t.Rotate(src.normal, n);
+        t.Rotate(src.tangent, tg);
+        for (int k = 0; k < 3; ++k) {
+          position[k] += weight * p[k];
+          normal[k] += weight * n[k];
+          tangent[k] += weight * tg[k];
+        }
+        total += weight;
+      }
+      asset::Vertex& dst = out->vertices[v];
+      if (total > 1e-4f) {
+        f32 inv = 1.0f / total;
+        for (int k = 0; k < 3; ++k) {
+          dst.position[k] = position[k] * inv;
+          dst.normal[k] = normal[k] * inv;
+          dst.tangent[k] = tangent[k] * inv;
+        }
+      }
+    }
+    return true;
+  };
+
   // Flatten: depth first from the roots, baking world transforms.
   struct StackEntry {
     u32 block;
@@ -617,15 +910,27 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
 
     Shape* shape = shapes.find(entry.block);
     if (!shape || shape->hidden) continue;
+    const ShaderInfo* shader = shaders.find(static_cast<u32>(shape->shader));
     // Effect shader geometry (smoke wisps, god rays, glow planes) needs
     // blending the mesh path does not do yet; opaque it is worse than absent.
-    if (const ShaderInfo* shader = shaders.find(static_cast<u32>(shape->shader));
-        shader && shader->effect) {
+    // Refraction shapes (heat haze) only carry a distortion normal map.
+    if (shader &&
+        (shader->effect ||
+         (shader->flags1 & (kShaderFlag1Refraction | kShaderFlag1FireRefraction)) != 0)) {
       ++result.skipped_shapes;
       continue;
     }
+    bool skinned = false;
+    Geometry baked;
     const Geometry* geometry = &shape->geometry;
-    if (shape->data >= 0) {
+    if (shape->skin >= 0 && geometry->vertices.empty()) {
+      if (bake_skinned(*shape, &baked)) {
+        geometry = &baked;
+        skinned = true;
+      } else {
+        shape->skipped = true;
+      }
+    } else if (shape->data >= 0) {
       geometry = geometry_blocks.find(static_cast<u32>(shape->data));
       if (!geometry) shape->skipped = true;
     }
@@ -634,7 +939,8 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
       continue;
     }
 
-    Transform world = Compose(entry.world, shape->local);
+    // Skinned geometry is already in scene space via the bone transforms.
+    Transform world = skinned ? Transform{} : Compose(entry.world, shape->local);
     u32 vertex_base = static_cast<u32>(lod.vertices.size());
     u32 index_offset = static_cast<u32>(lod.indices.size());
     for (const asset::Vertex& src : geometry->vertices) {
@@ -649,6 +955,7 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
       lod.vertices.push_back(v);
     }
     for (u32 index : geometry->indices) lod.indices.push_back(vertex_base + index);
+    if (skinned) ++result.skinned_shapes;
 
     asset::Submesh submesh;
     submesh.index_offset = index_offset;

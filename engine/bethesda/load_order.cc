@@ -1,6 +1,7 @@
 #include "bethesda/load_order.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 
@@ -63,7 +64,10 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
   constexpr u32 kRefr = FourCc('R', 'E', 'F', 'R');
   constexpr u32 kLand = FourCc('L', 'A', 'N', 'D');
   constexpr u32 kXclc = FourCc('X', 'C', 'L', 'C');
+  constexpr u32 kData = FourCc('D', 'A', 'T', 'A');
+  constexpr f32 kCellSize = 4096.0f;
 
+  size_t persistent_refs = 0;
   order_ = order;
   plugins_.reserve(order.plugins().size());
   by_order_.resize(order.plugins().size());
@@ -113,9 +117,15 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
         slot->worldspace = world;
         slot->grid_key = grid_key;
       } else if ((header.type == kRefr || header.type == kLand) && ctx.cell.value != 0 &&
+                 ctx.worldspace.value == 0) {
+        // Interior cell children, persistent and temporary alike.
+        if (header.type == kRefr && inserted &&
+            (ctx.cell_group_type == 8 || ctx.cell_group_type == 9)) {
+          interior_[order.Resolve(ctx.cell, i, masters).packed()].push_back(id.packed());
+        }
+      } else if ((header.type == kRefr || header.type == kLand) && ctx.cell.value != 0 &&
                  ctx.cell_group_type == 9) {
-        // Temporary cell children. Persistent refs (group type 8) hang off
-        // the worldspace cell and are skipped for now.
+        // Temporary cell children, listed under their cell's grid slot.
         u64 cell = order.Resolve(ctx.cell, i, masters).packed();
         const CellGridSlot* slot = cell_grid_.find(cell);
         if (!slot) return;
@@ -127,12 +137,30 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
           // Overridden refs are already listed under their cell.
           entry->refs.push_back(id.packed());
         }
+      } else if (header.type == kRefr && inserted && ctx.cell_group_type == 8 &&
+                 ctx.worldspace.value != 0) {
+        // Persistent worldspace refs (load doors, bridges) hang off the
+        // dummy cell; bin them by placement position so the streamer treats
+        // them like temporary refs.
+        Record record;
+        if (!ParseRecordPayload(header, payload, &record)) return;
+        const Subrecord* data = record.Find(kData);
+        if (!data || data->data.size() < 24) return;
+        f32 position[3];
+        std::memcpy(position, data->data.data(), 12);
+        i16 grid_x = static_cast<i16>(std::floor(position[0] / kCellSize));
+        i16 grid_y = static_cast<i16>(std::floor(position[1] / kCellSize));
+        u64 world = order.Resolve(ctx.worldspace, i, masters).packed();
+        exterior_[world].emplace(GridKey(grid_x, grid_y)).first->refs.push_back(id.packed());
+        ++persistent_refs;
       }
     });
     plugins_.push_back(std::move(*plugin));
     by_order_[i] = &plugins_.back();
     REC_INFO("loaded {} ({} records total)", name, records_.size());
   }
+  REC_INFO("{} persistent worldspace refs indexed, {} interior cells", persistent_refs,
+           interior_.size());
   return true;
 }
 
@@ -177,6 +205,23 @@ GlobalFormId RecordStore::FindWorldspace(std::string_view editor_id) const {
     if (record.GetString(kEdid) == editor_id) found = id;
   });
   return found;
+}
+
+GlobalFormId RecordStore::FindInteriorCell(std::string_view editor_id) const {
+  constexpr u32 kCell = FourCc('C', 'E', 'L', 'L');
+  constexpr u32 kEdid = FourCc('E', 'D', 'I', 'D');
+  GlobalFormId found;
+  EachOfType(kCell, [&](GlobalFormId id, const StoredRecord& stored) {
+    if (found.plugin != 0xffff || !interior_.contains(id.packed())) return;
+    Record record;
+    if (!ParseRecordPayload(stored.header, stored.payload, &record)) return;
+    if (record.GetString(kEdid) == editor_id) found = id;
+  });
+  return found;
+}
+
+const base::Vector<u64>* RecordStore::InteriorRefs(GlobalFormId cell) const {
+  return interior_.find(cell.packed());
 }
 
 }  // namespace rec::bethesda

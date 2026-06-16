@@ -83,6 +83,15 @@ const Mesh* AssetDatabase::AddMesh(Mesh mesh) {
       .first->Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
+const Texture* AssetDatabase::AddTexture(Texture texture) {
+  u64 hash = texture.id.hash;
+  if (const auto* existing = textures_.find(hash)) {
+    return existing->Get_UseOnlyIfYouKnowWhatYouareDoing();
+  }
+  return textures_.emplace(hash, base::MakeUnique<Texture>(std::move(texture)))
+      .first->Get_UseOnlyIfYouKnowWhatYouareDoing();
+}
+
 const Material* AssetDatabase::FindMaterial(AssetId id) const {
   return FindIn(materials_, id);
 }

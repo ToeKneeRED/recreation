@@ -40,7 +40,8 @@ struct NifConversion {
   base::Vector<asset::Material> materials;
   // Normalized vfs paths ("textures/..."), deduplicated.
   base::Vector<std::string> texture_paths;
-  u32 skipped_shapes = 0;  // skinned/strip/empty shapes we cannot use yet
+  u32 skipped_shapes = 0;  // strip/effect/empty shapes we cannot use yet
+  u32 skinned_shapes = 0;  // shapes baked rigidly at their bind pose
 };
 
 NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view source_path);

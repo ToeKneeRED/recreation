@@ -174,6 +174,11 @@ bool PluginFile::VisitRecordsRaw(const RawRecordVisitor& visitor) const {
       // follow their enclosing group header, so last-seen labels are enough.
       GroupHeader group;
       if (!reader.Read(&group)) return false;
+      // Top level and interior block groups end any worldspace context, so
+      // interior cells are never misattributed to the last seen worldspace.
+      if (group.group_type == 0 || group.group_type == 2 || group.group_type == 3) {
+        ctx = GroupContext{};
+      }
       if (group.group_type == 1) ctx.worldspace = RawFormId{group.label};
       if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9) {
         ctx.cell = RawFormId{group.label};

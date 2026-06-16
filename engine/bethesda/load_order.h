@@ -67,8 +67,10 @@ class RecordStore {
   GlobalFormId ResolveFrom(RawFormId raw, u16 plugin) const;
 
   // Exterior worldspace index built during load: per worldspace, the CELL,
-  // LAND and temporary REFR children at each grid coordinate. Keyed by
-  // (x << 16 | y) of the cell grid coordinate, ids are packed GlobalFormIds.
+  // LAND and REFR children at each grid coordinate. Persistent refs (which
+  // hang off the worldspace dummy cell with no grid of their own) are binned
+  // by their placement position. Keyed by (x << 16 | y) of the cell grid
+  // coordinate, ids are packed GlobalFormIds.
   struct ExteriorCell {
     u64 cell = 0;
     u64 land = 0;
@@ -84,6 +86,13 @@ class RecordStore {
   // when not found.
   GlobalFormId FindWorldspace(std::string_view editor_id) const;
 
+  // Finds an interior cell by editor id, e.g. "WhiterunBanneredMare". Parses
+  // every CELL record, so this is a one-time startup cost.
+  GlobalFormId FindInteriorCell(std::string_view editor_id) const;
+
+  // All REFR children (persistent and temporary) of an interior cell.
+  const base::Vector<u64>* InteriorRefs(GlobalFormId cell) const;
+
  private:
   struct CellGridSlot {
     u64 worldspace = 0;  // packed
@@ -97,6 +106,7 @@ class RecordStore {
   base::UnorderedMap<u32, base::Vector<u64>> by_type_;
   base::UnorderedMap<u64, ExteriorGrid> exterior_;       // worldspace -> grid
   base::UnorderedMap<u64, CellGridSlot> cell_grid_;      // CELL id -> grid slot
+  base::UnorderedMap<u64, base::Vector<u64>> interior_;  // CELL id -> refs
 };
 
 }  // namespace rec::bethesda

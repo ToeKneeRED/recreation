@@ -172,6 +172,9 @@ void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profi
         if (conversion.skipped_shapes > 0) {
           REC_DEBUG("{}: skipped {} shapes", path, conversion.skipped_shapes);
         }
+        if (conversion.skinned_shapes > 0) {
+          REC_INFO("{}: baked {} skinned shapes", path, conversion.skinned_shapes);
+        }
         return std::move(conversion.mesh);
       });
   database.RegisterTextureConverter(".dds", ConvertDds);

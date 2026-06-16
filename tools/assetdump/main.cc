@@ -7,12 +7,14 @@
 #include "bethesda/archive.h"
 #include "bethesda/converters.h"
 #include "bethesda/game_profile.h"
+#include "bethesda/nif.h"
 
 // Loads one asset through the real Vfs + converter pipeline and dumps what
-// came out. Handy for checking NIF/DDS conversion against game data.
+// came out. Handy for checking NIF/DDS conversion against game data. With an
+// output path the raw vfs bytes are written instead, for external viewers.
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::printf("usage: assetdump <data-dir> <virtual path>\n");
+    std::printf("usage: assetdump <data-dir> <virtual path> [out-file]\n");
     return 1;
   }
   using namespace rec;
@@ -30,7 +32,37 @@ int main(int argc, char** argv) {
   bethesda::RegisterConverters(database, profile);
 
   std::string path = argv[2];
+  if (argc > 3) {
+    auto bytes = vfs.Read(path);
+    if (!bytes) {
+      std::printf("not in vfs: %s\n", path.c_str());
+      return 1;
+    }
+    std::FILE* out = std::fopen(argv[3], "wb");
+    if (!out) return 1;
+    std::fwrite(bytes->data(), 1, bytes->size(), out);
+    std::fclose(out);
+    std::printf("wrote %zu bytes to %s\n", static_cast<size_t>(bytes->size()), argv[3]);
+    return 0;
+  }
   if (path.ends_with(".nif")) {
+    // Convert directly too so material texture ids resolve back to paths.
+    base::UnorderedMap<rec::u64, std::string> paths_by_id;
+    if (auto bytes = vfs.Read(path)) {
+      bethesda::NifConversion conversion = bethesda::ConvertNifScene(
+          rec::ByteSpan(bytes->data(), bytes->size()), asset::MakeAssetId(path), path);
+      for (const std::string& texture : conversion.texture_paths) {
+        paths_by_id.emplace(asset::MakeAssetId(texture).hash, texture);
+      }
+      if (conversion.skipped_shapes > 0) {
+        std::printf("skipped shapes: %u\n", conversion.skipped_shapes);
+      }
+    }
+    auto path_of = [&](asset::AssetId id) -> const char* {
+      const std::string* found = paths_by_id.find(id.hash);
+      return found ? found->c_str() : "";
+    };
+
     const asset::Mesh* mesh = database.LoadMesh(path);
     if (!mesh) {
       std::printf("mesh conversion failed\n");
@@ -49,12 +81,13 @@ int main(int argc, char** argv) {
         std::printf("    MATERIAL MISSING\n");
         continue;
       }
-      std::printf("    alpha_mode=%d cutoff=%.2f two_sided=%d rough=%.2f base=%016llx "
-                  "normal=%016llx\n",
+      std::printf("    alpha_mode=%d cutoff=%.2f two_sided=%d rough=%.2f emissive=%.2f,%.2f,%.2f\n",
                   static_cast<int>(material->alpha_mode), material->alpha_cutoff,
                   material->two_sided, material->roughness_factor,
-                  static_cast<unsigned long long>(material->base_color.hash),
-                  static_cast<unsigned long long>(material->normal.hash));
+                  material->emissive_factor[0], material->emissive_factor[1],
+                  material->emissive_factor[2]);
+      std::printf("    base=%s normal=%s\n", path_of(material->base_color),
+                  path_of(material->normal));
       for (asset::AssetId id : {material->base_color, material->normal}) {
         if (!id) continue;
         const asset::Texture* texture = database.FindTexture(id);
