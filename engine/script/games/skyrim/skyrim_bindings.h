@@ -8,6 +8,7 @@
 #include "bethesda/load_order.h"
 #include "bethesda/strings.h"
 #include "core/types.h"
+#include "quest/quest_system.h"
 #include "script/games/skyrim/skyrim_natives.h"
 
 namespace rec::script::papyrus {
@@ -40,6 +41,12 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   // Registers the Papyrus function a quest runs when it reaches `stage` (from
   // the QUST VMAD fragments). Populated at quest attach.
   void SetStageFragment(u64 quest, i32 stage, std::string function);
+
+  // The engine-side quest store these bindings delegate to. The runtime reads
+  // it for the HUD / debugger / network and seeds it with QUST definitions; all
+  // access happens on the guest thread, the bindings' only caller.
+  quest::QuestSystem& quest_system() { return quest_system_; }
+  const quest::QuestSystem& quest_system() const { return quest_system_; }
 
   papyrus::ObjectRef GetPlayer() override { return player_; }
   papyrus::ObjectRef GetForm(u32 form_id) override;
@@ -125,15 +132,6 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   bool IsObjectiveCompleted(papyrus::ObjectRef quest, i32 objective) override;
 
  private:
-  struct QuestState {
-    bool running = false;
-    bool active = true;
-    i32 stage = 0;
-    std::unordered_map<i32, bool> stage_done;
-    std::unordered_map<i32, bool> objective_displayed;
-    std::unordered_map<i32, bool> objective_completed;
-  };
-
   struct ActorValue {
     f32 base = 0;
     f32 current = 0;
@@ -158,7 +156,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   };
   std::unordered_map<u64, LockState> locks_;
   std::unordered_map<u64, bool> open_;
-  std::unordered_map<u64, QuestState> quests_;
+  quest::QuestSystem quest_system_;
   // quest handle -> stage -> Papyrus fragment function name (from the QUST VMAD).
   std::unordered_map<u64, std::unordered_map<i32, std::string>> stage_fragments_;
   papyrus::VirtualMachine* vm_ = nullptr;

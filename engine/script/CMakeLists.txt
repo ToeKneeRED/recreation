@@ -16,4 +16,4 @@ recreation_add_module(script
 # The CoreCLR host dlopens libhostfxr at runtime (no build-time .NET needed),
 # so it only requires the dynamic loader.
 target_link_libraries(recreation_script PUBLIC
-  recreation::core recreation::ecs recreation::bethesda ${CMAKE_DL_LIBS})
+  recreation::core recreation::ecs recreation::bethesda recreation::quest ${CMAKE_DL_LIBS})
