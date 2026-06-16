@@ -25,6 +25,7 @@ enum class MessageType : u16 {
   kJoinRefuse = 103,
   kSnapshot = 104,
   kPlayerInput = 105,
+  kQuestUpdate = 106,
 };
 
 inline tx::network::PacketType ToPacketType(MessageType type) {
