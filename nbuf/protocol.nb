@@ -69,3 +69,32 @@ message PlayerInput {
   pitch: f32 @6
   buttons: u32 @7
 }
+
+// NOTE: QuestUpdate is hand-encoded in engine/net/quest_replication.cc, not
+// from these messages, because this machine has no nanoc to regenerate the
+// bindings. The schema below documents the wire shape for a future regen; it
+// is non-functional until someone runs the generator and switches the codec
+// over. Stage and objective TEXT is never sent: clients resolve it locally
+// from their own QuestDef, so only ids, the stage, and flags travel.
+//
+// /// One objective's replicated bits.
+// message ObjectiveDelta {
+//   index: i32 @1
+//   displayed: bool @2
+//   completed: bool @3
+// }
+//
+// /// One quest's replicated state.
+// message QuestDelta {
+//   handle: u64 @1
+//   stage: i32 @2
+//   running: bool @3
+//   active: bool @4
+//   complete: bool @5
+//   objectives: list<ObjectiveDelta> @6
+// }
+//
+// /// Reliable server to client journal delta: only quests that changed.
+// message QuestUpdate {
+//   quests: list<QuestDelta> @1
+// }

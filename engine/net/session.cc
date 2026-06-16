@@ -47,7 +47,10 @@ void ServerSession::Tick(ecs::World& world, f32 dt) {
   SimulatePlayers(world, dt);
   TimeoutClients(world, dt);
   ++tick_;
-  if (tick_ % config_.snapshot_interval_ticks == 0) BroadcastSnapshot(world);
+  if (tick_ % config_.snapshot_interval_ticks == 0) {
+    BroadcastSnapshot(world);
+    BroadcastQuests();
+  }
   // Heartbeat for dedicated server logs.
   if (tick_ % (static_cast<u64>(config_.tick_rate) * 30) == 0) {
     REC_INFO("net: tick {}, {} clients, {} entities", tick_, clients_.size(),
@@ -133,8 +136,11 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer,
     client = clients_.find(peer);
     REC_INFO("net: peer {} joined as '{}' ({} clients)", peer,
              client->name.c_str(), clients_.size());
-    // Make sure the newcomer gets the whole world on the next broadcast.
+    // Make sure the newcomer gets the whole world (and journal) on the next
+    // broadcast. Quest deltas reach every peer, but resending all of them is
+    // cheap and the only way a fresh client gets quests it already missed.
     force_keyframe_ = true;
+    quest_replicator_.ForceFull();
   }
 
   // Reply (again, on duplicate joins from retransmits): the accept itself
@@ -204,6 +210,19 @@ void ServerSession::BroadcastSnapshot(ecs::World& world) {
                           snapshot_.Encode(), /*reliable=*/false,
                           full ? tx::network::PacketPriority::High
                                : tx::network::PacketPriority::Medium));
+}
+
+void ServerSession::BroadcastQuests() {
+  if (!quest_source_ || clients_.size() == 0) return;
+  std::vector<u8> blob = quest_replicator_.Build(quest_source_());
+  if (blob.empty()) return;  // nothing changed this tick
+
+  // Unlike snapshots, quest progress must not be lost, so it rides the
+  // reliable channel: a dropped delta would leave a client's journal stale
+  // until the next change happens to touch the same quest.
+  server_.Push(MakePacket(tx::network::ZPeerId::to_all,
+                          MessageType::kQuestUpdate, blob, /*reliable=*/true,
+                          tx::network::PacketPriority::Medium));
 }
 
 // --- client ---
@@ -319,6 +338,15 @@ void ClientSession::PollMessages(ecs::World& world) {
       case MessageType::kSnapshot: {
         if (auto snapshot = ParseAs<SnapshotView>(packet)) {
           applier_.Apply(world, *snapshot, snapshot_dt_);
+        }
+        break;
+      }
+      case MessageType::kQuestUpdate: {
+        if (!quest_sink_) break;
+        const ByteSpan blob(reinterpret_cast<const u8*>(packet.data.data()),
+                            packet.data.size());
+        if (!ApplyQuestUpdate(blob, quest_sink_)) {
+          REC_WARN("net: dropped corrupt quest update");
         }
         break;
       }

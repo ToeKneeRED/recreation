@@ -8,9 +8,13 @@
 #include <znet/z_client.h>
 #include <znet/z_server.h>
 
+#include <functional>
+
 #include "ecs/world.h"
 #include "net/protocol.h"
+#include "net/quest_replication.h"
 #include "net/replication.h"
+#include "quest/quest_system.h"
 
 namespace rec::net {
 
@@ -45,6 +49,12 @@ class ServerSession final : public Session {
   bool Start();
   void Tick(ecs::World& world, f32 dt) override;
 
+  // Authoritative quest state to replicate. Set by the engine to e.g.
+  // [&qs] { return qs.AllStatuses(); }. When unset, no quest packets ship.
+  void SetQuestSource(std::function<std::vector<quest::QuestStatus>()> source) {
+    quest_source_ = std::move(source);
+  }
+
   u32 client_count() const { return static_cast<u32>(clients_.size()); }
   u64 tick() const { return tick_; }
 
@@ -63,6 +73,7 @@ class ServerSession final : public Session {
   void SimulatePlayers(ecs::World& world, f32 dt);
   void TimeoutClients(ecs::World& world, f32 dt);
   void BroadcastSnapshot(ecs::World& world);
+  void BroadcastQuests();
 
   SessionConfig config_;
   tx::network::ZServer server_;
@@ -70,6 +81,8 @@ class ServerSession final : public Session {
   Snapshot snapshot_;  // reused so the vectors keep their capacity
   base::UnorderedMap<u32, RemoteClient> clients_;
   base::Vector<u32> scratch_dropped_;
+  std::function<std::vector<quest::QuestStatus>()> quest_source_;
+  QuestReplicator quest_replicator_;
   u64 tick_ = 0;
   bool force_keyframe_ = false;
   bool started_ = false;
@@ -86,6 +99,13 @@ class ClientSession final : public Session {
   // Local input forwarded to the server every tick once joined.
   void SetInput(const PlayerInput& input) { input_ = input; }
 
+  // Sink invoked once per quest in every kQuestUpdate received. The engine
+  // wires this to QuestSystem::ApplyStatus so the client journal mirrors the
+  // server. When unset, quest updates are decoded and dropped.
+  void SetQuestSink(std::function<void(const quest::QuestStatus&)> sink) {
+    quest_sink_ = std::move(sink);
+  }
+
   bool joined() const { return joined_; }
   u64 player_net_id() const { return player_net_id_; }
   ecs::Entity player_entity() const { return applier_.Find(player_net_id_); }
@@ -97,6 +117,7 @@ class ClientSession final : public Session {
   SessionConfig config_;
   tx::network::ZClient client_;
   SnapshotApplier applier_;
+  std::function<void(const quest::QuestStatus&)> quest_sink_;
   PlayerInput input_;
   u64 player_net_id_ = 0;
   u64 tick_ = 0;
