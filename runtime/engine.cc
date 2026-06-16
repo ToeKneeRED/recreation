@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +27,17 @@
 
 namespace rec {
 namespace {
+
+// printf into a std::string. Attributed so the compiler still type-checks the
+// format at each call site.
+__attribute__((format(printf, 1, 2))) std::string Fmt(const char* fmt, ...) {
+  char buf[600];
+  va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  return buf;
+}
 
 struct Spin {
   f32 angle = 0;
@@ -1498,11 +1510,98 @@ void Engine::AttachQuestScripts() {
       scripts_->guest().Submit([binds, h = handle](rec::script::papyrus::VirtualMachine&) {
         binds->StartQuest(rec::script::papyrus::ObjectRef{h});
       });
+      // Open the debugger on the started quest so its stages/objectives show.
+      if (edid != "all") quest_panel_.selected = handle;
       ++started;
       if (edid != "all") break;
     }
     REC_INFO("debug: started {} quest(s) matching '{}'", started, edid);
   }
+
+  // REC_QUEST_REPORT=<EDID> drives a quest through its stages to its completion
+  // stage and prints the journey, then quits. A headless, deterministic check
+  // that a quest (e.g. the first main quest, MQ101) runs to completion.
+  if (const char* want = std::getenv("REC_QUEST_REPORT")) {
+    ReportQuestToCompletion(want);
+    quit_.store(true, std::memory_order_relaxed);
+  }
+}
+
+void Engine::ReportQuestToCompletion(const std::string& edid) {
+  u64 handle = 0;
+  for (const auto& [h, name] : quest_records_) {
+    if (name == edid) {
+      handle = h;
+      break;
+    }
+  }
+  if (handle == 0) {
+    std::printf("quest report: no quest matching '%s'\n", edid.c_str());
+    return;
+  }
+
+  auto* binds = script_bindings_.get();
+  // Drive and snapshot on the guest thread (the bindings' only legal caller);
+  // build the human-readable report there and print it on return.
+  std::string report =
+      scripts_->guest()
+          .SubmitFor([binds, handle](rec::script::papyrus::VirtualMachine&) {
+            using rec::script::papyrus::ObjectRef;
+            quest::QuestSystem& qs = binds->quest_system();
+            const ObjectRef ref{handle};
+            std::string r;
+            auto emit = [&](const std::string& line) {
+              r += line;
+              r += '\n';
+            };
+
+            const quest::QuestDef* def = qs.Definition(handle);
+            emit(Fmt("=== quest report: %s (0x%llx) ===", def ? def->editor_id.c_str() : "?",
+                     static_cast<unsigned long long>(handle)));
+            if (!def) {
+              emit("no definition parsed");
+              return r;
+            }
+            emit(Fmt("name: %s", def->name.empty() ? "(none)" : def->name.c_str()));
+            emit(Fmt("priority %d, %zu stages, %zu objectives, completion stage %d", def->priority,
+                     def->stages.size(), def->objectives.size(), def->CompletionStage()));
+            for (const quest::StageDef& s : def->stages)
+              emit(Fmt("  stage %d%s %s", s.index, s.complete_quest ? " [completes]" : "",
+                       s.log_entry.c_str()));
+            for (const quest::ObjectiveDef& o : def->objectives)
+              emit(Fmt("  objective %d: %s", o.index, o.text.c_str()));
+
+            emit("driving to completion:");
+            binds->StartQuest(ref);
+            emit(Fmt("  start -> running=%d stage=%d", qs.IsRunning(handle), qs.GetStage(handle)));
+            // Walk the defined stages in ascending order; each SetStage runs the
+            // stage's authored fragment (objectives, ref enables, chained stages).
+            std::vector<i32> order;
+            for (const quest::StageDef& s : def->stages) order.push_back(s.index);
+            std::sort(order.begin(), order.end());
+            order.erase(std::unique(order.begin(), order.end()), order.end());
+            for (i32 stage : order) {
+              binds->SetStage(ref, stage);
+              emit(Fmt("  set stage %d -> stage=%d complete=%d", stage, qs.GetStage(handle),
+                       qs.IsComplete(handle)));
+            }
+            const i32 cs = def->CompletionStage();
+            if (cs >= 0 && !qs.IsComplete(handle)) {
+              binds->SetStage(ref, cs);
+              emit(Fmt("  set completion stage %d -> complete=%d", cs, qs.IsComplete(handle)));
+            }
+
+            quest::QuestStatus st = qs.Status(handle);
+            emit(Fmt("result: running=%d active=%d stage=%d complete=%s", st.running, st.active,
+                     st.stage, st.complete ? "YES" : "no"));
+            for (const quest::ObjectiveStatus& o : st.objectives)
+              emit(Fmt("  objective %d: displayed=%d completed=%d  %s", o.index, o.displayed,
+                       o.completed, o.text.c_str()));
+            return r;
+          })
+          .get();
+  std::printf("%s", report.c_str());
+  std::fflush(stdout);
 }
 
 void Engine::RefreshQuestPanel(f32 dt) {

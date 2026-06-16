@@ -145,6 +145,9 @@ class Engine {
   // Pushes the running-quest snapshot to the HUD tracker: title, objectives,
   // and the "quest updated" banner when the tracked quest changes.
   void UpdateQuestHud(const std::vector<quest::QuestStatus>& running);
+  // REC_QUEST_REPORT debug aid: drives the named quest through its stages to
+  // completion on the guest thread and prints the journey to stdout.
+  void ReportQuestToCompletion(const std::string& edid);
   // Enables guest native-call tracing while the trace window is open and
   // snapshots its ring into the overlay (throttled).
   void RefreshNativeTrace(f32 dt);
