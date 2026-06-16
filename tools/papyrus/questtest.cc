@@ -188,12 +188,48 @@ void TestApplyRemote() {
                                                      cs.objectives[0].text == "Escape Helgen Keep");
 }
 
+// Regressions for review findings: a remotely-applied complete bit must hold
+// even when the local current stage is not the completing stage, and an
+// objective completed without ever being displayed (and without a definition
+// entry) must still appear in the status.
+void TestRemoteCompleteAndOrphanObjective() {
+  std::puts("quest_system review fixes:");
+  const QuestHandle h = 0x000a1234ull;
+
+  // A snapshot says complete at a stage that is NOT the definition's completing
+  // stage (server advanced past it). The client must still report complete.
+  QuestSystem client;
+  Buffers buf;
+  bethesda::Record r = MakeUnboundRecord(buf);
+  client.SetDefinition(ParseQuestDefinition(h, r, nullptr));
+  QuestStatus remote;
+  remote.handle = h;
+  remote.running = false;
+  remote.active = true;
+  remote.complete = true;
+  remote.stage = 999;  // not stage 200 (the completing stage)
+  client.ApplyStatus(remote);
+  Check("remote complete bit honored despite non-completing stage", client.IsComplete(h));
+
+  // An objective completed but never displayed, with no definition entry, still
+  // shows in the status.
+  QuestSystem qs;
+  qs.StartQuest(h);
+  qs.SetObjectiveCompleted(h, 999, true);
+  QuestStatus st = qs.Status(h);
+  bool found = false;
+  for (const ObjectiveStatus& o : st.objectives)
+    if (o.index == 999 && o.completed && !o.displayed) found = true;
+  Check("completed-but-undisplayed orphan objective surfaces", found);
+}
+
 }  // namespace
 
 int main() {
   TestParse();
   TestState();
   TestApplyRemote();
+  TestRemoteCompleteAndOrphanObjective();
   if (g_failures == 0) {
     std::puts("quest: all checks passed");
     return 0;

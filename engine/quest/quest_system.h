@@ -124,6 +124,10 @@ class QuestSystem {
     bool running = false;
     bool active = true;
     i32 stage = 0;
+    // Set when a remote snapshot says the quest is complete, so a client mirrors
+    // completion even if its current stage is not the definition's completing
+    // stage (e.g. the server advanced past it into an epilogue stage).
+    bool complete_override = false;
     std::unordered_map<i32, bool> stage_done;
     std::unordered_map<i32, bool> objective_displayed;
     std::unordered_map<i32, bool> objective_completed;

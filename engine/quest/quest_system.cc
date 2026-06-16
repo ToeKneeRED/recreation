@@ -106,12 +106,17 @@ bool QuestSystem::IsObjectiveCompleted(QuestHandle quest, i32 objective) const {
 
 bool QuestSystem::IsComplete(QuestHandle quest) const {
   const QuestState* s = Peek(quest);
+  if (!s) return false;
+  if (s->complete_override) return true;  // mirrored from a remote authority
   const QuestDef* def = Definition(quest);
-  if (!s || !def) return false;
-  for (const auto& [stage, done] : s->stage_done) {
-    if (!done) continue;
-    const StageDef* sd = def->FindStage(stage);
-    if (sd && sd->complete_quest) return true;
+  if (!def) return false;
+  // Scan the definition's completing stages rather than FindStage(current),
+  // since a stage index can carry several log entries and only one need flag
+  // completion.
+  for (const StageDef& sd : def->stages) {
+    if (!sd.complete_quest) continue;
+    auto it = s->stage_done.find(sd.index);
+    if (it != s->stage_done.end() && it->second) return true;
   }
   return false;
 }
@@ -147,11 +152,17 @@ void QuestSystem::FillStatus(QuestHandle quest, const QuestState& state, QuestSt
       seen.insert(od.index);
     }
   }
-  for (const auto& [index, displayed] : state.objective_displayed) {
+  // Objectives the script touched without a definition entry, from either map
+  // (an objective can be completed without ever having been displayed).
+  std::set<i32> extras;
+  for (const auto& [index, _] : state.objective_displayed) extras.insert(index);
+  for (const auto& [index, _] : state.objective_completed) extras.insert(index);
+  for (i32 index : extras) {
     if (seen.count(index)) continue;
     ObjectiveStatus os;
     os.index = index;
-    os.displayed = displayed;
+    if (auto it = state.objective_displayed.find(index); it != state.objective_displayed.end())
+      os.displayed = it->second;
     if (auto it = state.objective_completed.find(index); it != state.objective_completed.end())
       os.completed = it->second;
     out->objectives.push_back(std::move(os));
@@ -195,6 +206,7 @@ void QuestSystem::ApplyStatus(const QuestStatus& status) {
   q.running = status.running;
   q.active = status.active;
   q.stage = status.stage;
+  q.complete_override = status.complete;
   q.stage_done[status.stage] = true;
   for (const ObjectiveStatus& os : status.objectives) {
     q.objective_displayed[os.index] = os.displayed;

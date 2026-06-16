@@ -1696,7 +1696,11 @@ void Engine::UpdateInteraction(bool activate_pressed) {
   // Skyrim's activation reach is ~150 units; the world is meters (~70 units/m).
   constexpr f32 kRange = 2.2f;
   constexpr f32 kFacingDot = 0.45f;  // ~63 degree cone
-  const Vec3 eye = walk_eye_;
+  // Reach from the player's head, not the camera: in third person the eye sits
+  // metres behind the body and would put everything in front out of range.
+  Vec3 eye = walk_eye_;
+  if (world::Transform* t = world_.Get<world::Transform>(actors_[player_actor_].entity))
+    eye = Vec3{t->position[0], t->position[1] + 1.6f, t->position[2]};
   const Vec3 fwd = Normalize(walk_target_ - walk_eye_);
 
   // Collect the form-linked refs near the eye; a coarse cull keeps this cheap
