@@ -42,6 +42,45 @@ float CompassStripLeft(float heading_deg) {
   return kCompassCenter - (eff / 45.0f) * kCompassLabel - kCompassLabel * 0.5f;
 }
 
+// The tracked quest never shows more than a handful of objectives at once, so a
+// fixed pool of pre-declared rows is filled and toggled each frame; the static
+// ultragui document has no way to add widgets on the fly.
+constexpr int kQuestObjectiveRows = 6;
+constexpr float kToastSeconds = 4.0f;
+
+// The quest tracker (top-right objective list), the "quest updated" banner, and
+// the centered activation prompt. Their text and visibility are driven each
+// frame from engine state; declared empty so they start hidden.
+std::string BuildQuestSection() {
+  std::string s = R"(
+  panel questtracker {
+    position: absolute; right: 30; top: 86; layout: column; align: end; gap: 5; width: 380;
+    text quest_title { text: ""; font-size: 17; color: #ffcc55; text-align: right;
+      letter-spacing: 1; text-shadow-color: #000000d0; text-shadow-x: 1; text-shadow-y: 1; }
+)";
+  for (int i = 0; i < kQuestObjectiveRows; ++i) {
+    s += "    text quest_obj" + std::to_string(i) +
+         " { text: \"\"; font-size: 13; color: #d8def0; text-align: right;"
+         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
+  }
+  s += R"(  }
+
+  panel quest_toast_box {
+    position: absolute; top: 120; left: 0; width: 100vw; layout: column; align: center;
+    text quest_toast { text: ""; font-size: 21; color: #ffcc55; letter-spacing: 3;
+      text-transform: uppercase; text-shadow-color: #000000e0; text-shadow-x: 1; text-shadow-y: 2; }
+  }
+
+  panel activate_box {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center;
+    text activate_prompt { text: ""; font-size: 18; color: #f0f2fb; margin: 110 0 0 0;
+      text-shadow-color: #000000e0; text-shadow-x: 1; text-shadow-y: 1; }
+  }
+)";
+  return s;
+}
+
 std::string BuildUi() {
   std::string s;
   s += R"(
@@ -137,7 +176,11 @@ panel root {
     text hud_heading { text: "--"; font-size: 12; color: #aab2c6;
       text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
   }
+)";
 
+  s += BuildQuestSection();
+
+  s += R"(
   panel menu {
     position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
     layout: column; justify: center; align: center;
@@ -235,6 +278,12 @@ struct GameUi::Impl {
   bool prev_mouse[3] = {};
   float stamina = 1.0f;
 
+  // Quest HUD state, set by the engine and applied each frame.
+  HudQuest quest;
+  std::string toast_text;
+  float toast_age = kToastSeconds + 1.0f;  // starts expired, so hidden
+  std::string activate_prompt;
+
   void SetStyleField(const char* name, void (*mutate)(ugui::Style&, float), float arg) {
     ugui::wid w = ui.FindWidget(name);
     if (!w.valid()) return;
@@ -243,6 +292,15 @@ struct GameUi::Impl {
     ugui::Style s = sc->style;
     mutate(s, arg);
     ugui::SetStyle(ui.world(), w, s);
+  }
+
+  void SetVisible(const char* name, bool visible) {
+    SetStyleField(
+        name,
+        [](ugui::Style& s, float v) {
+          s.visibility = v > 0.5f ? ugui::Visibility::kVisible : ugui::Visibility::kCollapsed;
+        },
+        visible ? 1.0f : 0.0f);
   }
 
   void ApplyMenuVisibility() {
@@ -338,6 +396,20 @@ void GameUi::ToggleMenu() {
 bool GameUi::menu_open() const { return impl_->initialized && impl_->menu_open; }
 bool GameUi::quit_requested() const { return impl_->initialized && impl_->quit_requested; }
 
+void GameUi::SetQuest(const HudQuest& quest) {
+  if (impl_->initialized) impl_->quest = quest;
+}
+
+void GameUi::FlashQuestUpdate(const std::string& message) {
+  if (!impl_->initialized) return;
+  impl_->toast_text = message;
+  impl_->toast_age = 0.0f;
+}
+
+void GameUi::SetActivatePrompt(const std::string& prompt) {
+  if (impl_->initialized) impl_->activate_prompt = prompt;
+}
+
 void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 frame_delta,
                    render::FrameView* view) {
   if (!impl_->initialized) return;
@@ -390,6 +462,35 @@ void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 fra
   std::snprintf(buf, sizeof(buf), "%s  %.0f deg", card, heading);
   ugui::SetText(impl->ui.FindWidget("hud_heading"), buf);
 
+  // --- Quest HUD ---
+  const bool has_quest = !impl->quest.title.empty();
+  impl->SetVisible("questtracker", has_quest);
+  if (has_quest) ugui::SetText(impl->ui.FindWidget("quest_title"), impl->quest.title.c_str());
+  for (int i = 0; i < kQuestObjectiveRows; ++i) {
+    std::string row = "quest_obj" + std::to_string(i);
+    if (has_quest && static_cast<size_t>(i) < impl->quest.objectives.size()) {
+      const HudQuest::Objective& o = impl->quest.objectives[i];
+      // A check for done objectives, a bullet for the rest.
+      std::string line = (o.completed ? "✓  " : "•  ") + o.text;
+      ugui::SetText(impl->ui.FindWidget(row.c_str()), line.c_str());
+      impl->SetVisible(row.c_str(), true);
+    } else {
+      impl->SetVisible(row.c_str(), false);
+    }
+  }
+
+  // The "quest updated" banner fades out after a few seconds.
+  impl->toast_age += frame_delta;
+  const bool toast_on = impl->toast_age < kToastSeconds && !impl->toast_text.empty();
+  impl->SetVisible("quest_toast_box", toast_on);
+  if (toast_on) ugui::SetText(impl->ui.FindWidget("quest_toast"), impl->toast_text.c_str());
+
+  // Centered activation prompt ("Talk to Ralof", "Open the gate", ...).
+  const bool prompt_on = !impl->activate_prompt.empty();
+  impl->SetVisible("activate_box", prompt_on);
+  if (prompt_on)
+    ugui::SetText(impl->ui.FindWidget("activate_prompt"), impl->activate_prompt.c_str());
+
   // Produce the draw list (input routing + layout + paint, no GPU work).
   const ugui::DrawData& dd = impl->ui.RenderDrawData();
   impl->draw_data = &dd;
@@ -420,6 +521,9 @@ GameUi::~GameUi() = default;
 bool GameUi::Initialize(Window&, render::Renderer&) { return false; }
 void GameUi::Shutdown() {}
 void GameUi::Build(Window&, render::Renderer&, FlyCamera&, f32, render::FrameView*) {}
+void GameUi::SetQuest(const HudQuest&) {}
+void GameUi::FlashQuestUpdate(const std::string&) {}
+void GameUi::SetActivatePrompt(const std::string&) {}
 void GameUi::ToggleMenu() {}
 bool GameUi::menu_open() const { return false; }
 bool GameUi::quit_requested() const { return false; }

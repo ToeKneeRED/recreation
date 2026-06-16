@@ -2,6 +2,8 @@
 #define RECREATION_RUNTIME_GAME_UI_H_
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "core/types.h"
 
@@ -13,6 +15,18 @@ namespace render {
 class Renderer;
 struct FrameView;
 }  // namespace render
+
+// The quest the HUD tracker shows: a title and its displayed objectives. The
+// engine fills this from the quest system's running snapshot; an empty title
+// hides the tracker.
+struct HudQuest {
+  struct Objective {
+    std::string text;
+    bool completed = false;
+  };
+  std::string title;
+  std::vector<Objective> objectives;
+};
 
 // libultragui-driven HUD and pause menu. Runs ultragui in draw-data mode and
 // records its draw list into the renderer's ui pass, alongside the debug ImGui
@@ -34,6 +48,14 @@ class GameUi {
   // fill view->hud_draw. Call once per frame after PumpEvents.
   void Build(Window& window, render::Renderer& renderer, FlyCamera& camera, f32 frame_delta,
              render::FrameView* view);
+
+  // Quest HUD, fed by the engine each frame. SetQuest replaces the tracked
+  // quest (empty title hides the tracker). FlashQuestUpdate shows a brief
+  // "quest updated" banner. SetActivatePrompt shows a centered prompt such as
+  // "Talk to Ralof" (empty hides it).
+  void SetQuest(const HudQuest& quest);
+  void FlashQuestUpdate(const std::string& message);
+  void SetActivatePrompt(const std::string& prompt);
 
   void ToggleMenu();
   bool menu_open() const;

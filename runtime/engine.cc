@@ -1531,25 +1531,73 @@ void Engine::RefreshQuestPanel(f32 dt) {
     };
   }
 
-  // Snapshot the live state at a few Hz; one guest round-trip for all quests.
+  // Snapshot the live state at a few Hz; one guest round-trip serves both the
+  // debug panel (every quest, lightweight) and the HUD (only running quests,
+  // with their objective text).
   quest_ui_timer_ -= dt;
   if (!quest_panel_.quests.empty() && quest_ui_timer_ > 0.0f) return;
   quest_ui_timer_ = 0.2f;
   auto* binds = script_bindings_.get();
   base::Vector<std::pair<u64, std::string>> src = quest_records_;
-  quest_panel_.quests =
+
+  struct Snapshot {
+    std::vector<QuestPanel::Quest> panel;
+    std::vector<quest::QuestStatus> running;
+  };
+  Snapshot snap =
       scripts_->guest()
           .SubmitFor([binds, src](script::papyrus::VirtualMachine&) {
-            std::vector<QuestPanel::Quest> out;
-            out.reserve(src.size());
+            const quest::QuestSystem& qs = binds->quest_system();
+            Snapshot out;
+            out.panel.reserve(src.size());
             for (const auto& [handle, edid] : src) {
-              quest::QuestStatus st = binds->quest_system().Status(handle);
-              out.push_back({st.name.empty() ? edid : st.name, handle, st.running, st.active,
-                             st.stage});
+              const quest::QuestDef* def = qs.Definition(handle);
+              std::string name = (def && !def->name.empty()) ? def->name : edid;
+              out.panel.push_back(
+                  {std::move(name), handle, qs.IsRunning(handle), qs.IsActive(handle),
+                   qs.GetStage(handle)});
             }
+            out.running = qs.RunningStatuses();
             return out;
           })
           .get();
+  quest_panel_.quests = std::move(snap.panel);
+  UpdateQuestHud(snap.running);
+}
+
+void Engine::UpdateQuestHud(const std::vector<quest::QuestStatus>& running) {
+  // Track the most recently changed running quest, the one the player is
+  // actively progressing.
+  const quest::QuestStatus* tracked = nullptr;
+  for (const quest::QuestStatus& q : running) {
+    if (!tracked || q.revision > tracked->revision) tracked = &q;
+  }
+
+  if (!tracked) {
+    if (hud_tracked_quest_ != 0) {
+      hud_tracked_quest_ = 0;
+      hud_tracked_revision_ = 0;
+      game_ui_.SetQuest(HudQuest{});
+    }
+    return;
+  }
+
+  HudQuest hud;
+  hud.title = tracked->name;
+  for (const quest::ObjectiveStatus& o : tracked->objectives) {
+    if (!o.displayed && !o.completed) continue;
+    hud.objectives.push_back({o.text, o.completed});
+  }
+  game_ui_.SetQuest(hud);
+
+  // Raise the banner once per change: when the tracked quest switches or its
+  // revision advances.
+  if (tracked->handle != hud_tracked_quest_ || tracked->revision != hud_tracked_revision_) {
+    if (hud_tracked_revision_ != 0 || tracked->handle != hud_tracked_quest_)
+      game_ui_.FlashQuestUpdate(tracked->complete ? tracked->name + " (Complete)" : tracked->name);
+    hud_tracked_quest_ = tracked->handle;
+    hud_tracked_revision_ = tracked->revision;
+  }
 }
 
 void Engine::RefreshNativeTrace(f32 dt) {

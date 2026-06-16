@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
@@ -31,6 +32,7 @@
 #include "net/session.h"
 #endif
 #include "physics/physics_world.h"
+#include "quest/quest_system.h"
 #include "render/presets.h"
 #include "render/renderer.h"
 #include "script/games/skyrim/skyrim_bindings.h"
@@ -140,6 +142,9 @@ class Engine {
   // Refreshes the debug overlay's quest snapshot (throttled) and wires its
   // start/stop/stage callbacks to the guest thread.
   void RefreshQuestPanel(f32 dt);
+  // Pushes the running-quest snapshot to the HUD tracker: title, objectives,
+  // and the "quest updated" banner when the tracked quest changes.
+  void UpdateQuestHud(const std::vector<quest::QuestStatus>& running);
   // Enables guest native-call tracing while the trace window is open and
   // snapshots its ring into the overlay (throttled).
   void RefreshNativeTrace(f32 dt);
@@ -274,6 +279,10 @@ class Engine {
   base::Vector<std::pair<u64, std::string>> quest_records_;
   QuestPanel quest_panel_;
   f32 quest_ui_timer_ = 0;
+  // HUD quest tracker: the quest currently shown and the revision last shown,
+  // so a stage/objective change raises the "quest updated" banner once.
+  u64 hud_tracked_quest_ = 0;
+  u32 hud_tracked_revision_ = 0;
   // Native-call trace window state (F2): the overlay snapshot, refresh timer,
   // and whether guest tracing is currently enabled.
   NativeTracePanel native_trace_panel_;
