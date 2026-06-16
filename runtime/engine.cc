@@ -1464,9 +1464,12 @@ void Engine::AttachQuestScripts() {
                           // objective text, compass targets) for the HUD/debugger.
                           quest::QuestDef def =
                               quest::ParseQuestDefinition(handle, record, &strings_);
-                          std::string name = !def.name.empty() ? def.name : def.editor_id;
-                          if (name.empty()) name = std::to_string(id.local_id);
-                          quest_records_.push_back({handle, std::move(name)});
+                          // Key the record list by editor id: it is the stable
+                          // handle REC_START_QUEST and the debugger match on. The
+                          // panel's display name comes from the quest definition.
+                          std::string edid =
+                              !def.editor_id.empty() ? def.editor_id : std::to_string(id.local_id);
+                          quest_records_.push_back({handle, std::move(edid)});
                           // Register the stage->fragment map and definition on the
                           // guest thread (the bindings' only caller) so SetStage runs
                           // the quest's authored logic and snapshots carry its text.
@@ -1539,10 +1542,10 @@ void Engine::RefreshQuestPanel(f32 dt) {
           .SubmitFor([binds, src](script::papyrus::VirtualMachine&) {
             std::vector<QuestPanel::Quest> out;
             out.reserve(src.size());
-            for (const auto& [handle, name] : src) {
-              script::papyrus::ObjectRef q{handle};
-              out.push_back({name, handle, binds->IsRunning(q), binds->IsQuestActive(q),
-                             binds->GetStage(q)});
+            for (const auto& [handle, edid] : src) {
+              quest::QuestStatus st = binds->quest_system().Status(handle);
+              out.push_back({st.name.empty() ? edid : st.name, handle, st.running, st.active,
+                             st.stage});
             }
             return out;
           })
