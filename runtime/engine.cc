@@ -1524,16 +1524,26 @@ void Engine::AttachQuestScripts() {
   REC_INFO("papyrus: instantiated {} scripts across {} quests, {} script types loaded", instances,
            quests, scripts_->loaded_script_count());
 
-  // REC_START_QUEST=<EDID> starts a quest at load (runs its opening stage
-  // fragment) so quest logic can be exercised without the UI.
+  // REC_START_QUEST=<EDID>[:<stage>] starts a quest at load (runs its opening
+  // stage fragment) so quest logic can be exercised without the UI. The optional
+  // :stage drives it to that stage, e.g. REC_START_QUEST=MQ101:160 to surface an
+  // objective on the HUD.
   if (const char* want = std::getenv("REC_START_QUEST")) {
-    std::string edid = want;
+    std::string spec = want;
+    std::string edid = spec;
+    i32 start_stage = -1;
+    if (size_t colon = spec.find(':'); colon != std::string::npos) {
+      edid = spec.substr(0, colon);
+      start_stage = std::atoi(spec.c_str() + colon + 1);
+    }
     auto* binds = script_bindings_.get();
     int started = 0;
     for (const auto& [handle, name] : quest_records_) {
       if (edid != "all" && name != edid) continue;
-      scripts_->guest().Submit([binds, h = handle](rec::script::papyrus::VirtualMachine&) {
-        binds->StartQuest(rec::script::papyrus::ObjectRef{h});
+      scripts_->guest().Submit([binds, h = handle, start_stage](rec::script::papyrus::VirtualMachine&) {
+        rec::script::papyrus::ObjectRef ref{h};
+        binds->StartQuest(ref);
+        if (start_stage >= 0) binds->SetStage(ref, start_stage);
       });
       // Open the debugger on the started quest so its stages/objectives show.
       if (edid != "all") quest_panel_.selected = handle;
@@ -1607,8 +1617,13 @@ void Engine::ReportQuestToCompletion(const std::string& edid) {
             order.erase(std::unique(order.begin(), order.end()), order.end());
             for (i32 stage : order) {
               binds->SetStage(ref, stage);
-              emit(Fmt("  set stage %d -> stage=%d complete=%d", stage, qs.GetStage(handle),
-                       qs.IsComplete(handle)));
+              std::string shown;
+              for (const quest::ObjectiveDef& o : def->objectives)
+                if (qs.IsObjectiveDisplayed(handle, o.index))
+                  shown += Fmt(" [%d]", o.index);
+              emit(Fmt("  set stage %d -> stage=%d complete=%d displayed:%s", stage,
+                       qs.GetStage(handle), qs.IsComplete(handle),
+                       shown.empty() ? " none" : shown.c_str()));
             }
             const i32 cs = def->CompletionStage();
             if (cs >= 0 && !qs.IsComplete(handle)) {
