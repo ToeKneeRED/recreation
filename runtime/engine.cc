@@ -187,6 +187,8 @@ bool Engine::LoadGameData() {
     };
     streamer_->SetUploads(std::move(uploads));
   }
+
+  if (!config_.interior.empty()) return LoadInterior();
   if (!streamer_->SelectWorldspace(profile.exterior_worldspace)) return false;
 
   // Drop the camera a bit above the terrain at the middle of the start cell.
@@ -206,6 +208,30 @@ bool Engine::LoadGameData() {
   camera_.speed = 30.0f;
   REC_INFO("camera start: cell {},{} at ({:.1f}, {:.1f}, {:.1f})", config_.start_cell_x,
            config_.start_cell_y, start.x, start.y, start.z);
+  return true;
+}
+
+bool Engine::LoadInterior() {
+  bethesda::GlobalFormId cell_id;
+  if (config_.interior.starts_with("0x") || config_.interior.starts_with("0X")) {
+    // Load order form id: top byte is the plugin index for full plugins.
+    u32 raw = static_cast<u32>(std::stoul(config_.interior.substr(2), nullptr, 16));
+    cell_id = {static_cast<u16>(raw >> 24), raw & 0xffffff};
+  } else {
+    cell_id = records_.FindInteriorCell(config_.interior);
+  }
+  if (cell_id.plugin == 0xffff) {
+    REC_ERROR("interior cell not found: {}", config_.interior);
+    return false;
+  }
+
+  Vec3 start{};
+  if (!streamer_->LoadInterior(world_, cell_id, &start)) return false;
+  camera_.set_position(start);
+  camera_.set_yaw_pitch(0.0f, 0.0f);
+  camera_.speed = 5.0f;
+  REC_INFO("camera start: interior {} at ({:.1f}, {:.1f}, {:.1f})", config_.interior, start.x,
+           start.y, start.z);
   return true;
 }
 

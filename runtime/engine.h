@@ -32,6 +32,9 @@ struct EngineConfig {
   // Exterior cell the camera starts in. The default is the Whiterun plains.
   i32 start_cell_x = 5;
   i32 start_cell_y = -3;
+  // Interior cell to load instead of streaming the exterior worldspace.
+  // Editor id ("WhiterunBanneredMare") or a hex load order form id ("0x...").
+  std::string interior;
   render::RendererDesc renderer;
   bool headless = false;
   bool host_server = false;
@@ -53,6 +56,7 @@ class Engine {
 
  private:
   bool LoadGameData();
+  bool LoadInterior();
   void MountArchives();
   bool StartNetworking();
   void CreateDemoScene();
