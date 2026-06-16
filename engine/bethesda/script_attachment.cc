@@ -192,4 +192,32 @@ bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
   return true;
 }
 
+bool ParseInfoFragments(ByteSpan vmad, ScriptAttachment* out, InfoFragments* frags) {
+  Reader r(vmad);
+  if (!ReadScriptsSection(r, out)) return false;
+
+  // INFO fragment section (SSE): a version byte, a flags byte (bit 0 = a start
+  // fragment is present, bit 1 = an end fragment), the shared TIF file name,
+  // then the present fragments, each an unknown byte plus its script and
+  // function names.
+  r.U8();                  // version, unused
+  u8 flags = r.U8();
+  r.Str();                 // shared fragment file name, unused
+  if (flags & 0x01) {
+    r.U8();                // unknown
+    frags->begin.script_name = r.Str();
+    frags->begin.function = r.Str();
+  }
+  if (flags & 0x02) {
+    r.U8();                // unknown
+    frags->end.script_name = r.Str();
+    frags->end.function = r.Str();
+  }
+  if (!r.ok()) {
+    frags->begin = InfoFragment{};
+    frags->end = InfoFragment{};
+  }
+  return true;
+}
+
 }  // namespace rec::bethesda

@@ -204,6 +204,7 @@ set(RECREATION_MODULES
   bethesda
   world
   quest
+  dialogue
   script
 )
 if(RECREATION_NET)

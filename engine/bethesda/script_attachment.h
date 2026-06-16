@@ -71,6 +71,24 @@ bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out);
 bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
                          std::vector<QuestStageFragment>* fragments);
 
+// A dialogue response's Papyrus fragments: the function run when the line
+// starts (begin) and ends (end). They live on the auto-generated TIF_<info>
+// script. An empty `script_name` means the response has no fragment of that
+// kind.
+struct InfoFragment {
+  std::string script_name;
+  std::string function;
+};
+struct InfoFragments {
+  InfoFragment begin;
+  InfoFragment end;
+};
+
+// Parses an INFO VMAD: the script list (into `out`) plus the begin/end response
+// fragments (into `frags`). Returns false if the script section is malformed; a
+// malformed fragment tail leaves whatever parsed cleanly.
+bool ParseInfoFragments(ByteSpan vmad, ScriptAttachment* out, InfoFragments* frags);
+
 }  // namespace rec::bethesda
 
 #endif  // RECREATION_BETHESDA_SCRIPT_ATTACHMENT_H_

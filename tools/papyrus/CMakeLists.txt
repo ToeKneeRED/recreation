@@ -30,6 +30,10 @@ add_executable(interactiontest interactiontest.cc)
 target_link_libraries(interactiontest PRIVATE recreation::world)
 recreation_set_warnings(interactiontest)
 
+add_executable(dialoguetest dialoguetest.cc)
+target_link_libraries(dialoguetest PRIVATE recreation::dialogue recreation::bethesda)
+recreation_set_warnings(dialoguetest)
+
 # Quest replication lives in the net module, so this only builds with networking.
 if(RECREATION_NET)
   add_executable(quest_nettest quest_nettest.cc)
@@ -56,6 +60,7 @@ add_test(NAME papyrus_separationtest COMMAND pexrun separationtest)
 add_test(NAME papyrus_tracetest COMMAND pexrun tracetest)
 add_test(NAME quest_systemtest COMMAND questtest)
 add_test(NAME interactiontest COMMAND interactiontest)
+add_test(NAME dialoguetest COMMAND dialoguetest)
 if(RECREATION_NET)
   add_test(NAME quest_nettest COMMAND quest_nettest)
 endif()
