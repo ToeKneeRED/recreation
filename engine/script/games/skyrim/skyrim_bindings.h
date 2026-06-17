@@ -2,14 +2,19 @@
 #define RECREATION_SCRIPT_GAMES_SKYRIM_SKYRIM_BINDINGS_H_
 
 #include <array>
+#include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "bethesda/load_order.h"
 #include "bethesda/strings.h"
 #include "core/types.h"
+#include "quest/quest_graph.h"
 #include "quest/quest_system.h"
 #include "script/games/skyrim/skyrim_natives.h"
+#include "script/world_effect_sink.h"
 
 namespace rec::script::papyrus {
 class VirtualMachine;
@@ -27,7 +32,11 @@ namespace rec::script::skyrim {
 // property pointing at a form resolves to the same actor-value/inventory bucket.
 // One instance per game world; the guest thread is its only caller, so it needs
 // no internal locking.
-class RecordBackedSkyrimBindings : public SkyrimBindings {
+// Also a quest::QuestActionSink: when a quest graph enters a node, its on-enter
+// actions are dispatched back here (RunScriptFragment runs the Papyrus stage
+// fragment). Imported quests only use the fragment action; the rest stay the
+// base no-ops until native quests need them.
+class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestActionSink {
  public:
   RecordBackedSkyrimBindings() = default;
   explicit RecordBackedSkyrimBindings(const bethesda::RecordStore* records) : records_(records) {}
@@ -35,6 +44,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   void set_records(const bethesda::RecordStore* records) { records_ = records; }
   void set_strings(const bethesda::StringTable* strings) { strings_ = strings; }
   void set_player(papyrus::ObjectRef player) { player_ = player; }
+  // Sink for quest-driven world mutations (spawn/move/enable/delete + cleanup).
+  // Set by the runtime; when null, those bindings only update logical state.
+  void set_world_sink(WorldEffectSink* sink) { world_sink_ = sink; }
   // The guest VM, so SetStage can run the quest's stage fragment. Set once on
   // the guest thread (the only caller of these bindings).
   void set_vm(papyrus::VirtualMachine* vm) { vm_ = vm; }
@@ -69,6 +81,11 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   void SetPosition(papyrus::ObjectRef ref, f32 x, f32 y, f32 z) override;
   f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) override;
   void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) override;
+  void SetEnabled(papyrus::ObjectRef ref, bool enabled) override;
+  bool IsDisabled(papyrus::ObjectRef ref) override;
+  void Delete(papyrus::ObjectRef ref) override;
+  papyrus::ObjectRef PlaceAtMe(papyrus::ObjectRef where, papyrus::ObjectRef base,
+                               i32 count) override;
   papyrus::ObjectRef GetBaseObject(papyrus::ObjectRef ref) override;
   bool IsInterior(papyrus::ObjectRef cell) override;
   f32 GetCellWaterLevel(papyrus::ObjectRef cell) override;
@@ -131,6 +148,11 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   bool IsObjectiveDisplayed(papyrus::ObjectRef quest, i32 objective) override;
   bool IsObjectiveCompleted(papyrus::ObjectRef quest, i32 objective) override;
 
+  // quest::QuestActionSink: the graph drives stage entry through here. State and
+  // dedup still live in quest_system_ (SetStage records the stage before the
+  // graph runs), so this only needs to run the stage's Papyrus fragment.
+  void RunScriptFragment(u64 quest, i32 node, const std::string& fragment) override;
+
  private:
   struct ActorValue {
     f32 base = 0;
@@ -156,13 +178,41 @@ class RecordBackedSkyrimBindings : public SkyrimBindings {
   };
   std::unordered_map<u64, LockState> locks_;
   std::unordered_map<u64, bool> open_;
+  std::unordered_map<u64, bool> disabled_;  // Disable() state, for IsDisabled
+  WorldEffectSink* world_sink_ = nullptr;
+  // The quest whose fragment is currently running; world mutations made during
+  // it are attributed to it so QuestWorld can roll them back. 0 outside a
+  // fragment (engine-driven, unattributed).
+  u64 active_quest_ = 0;
   quest::QuestSystem quest_system_;
   // quest handle -> stage -> Papyrus fragment function name (from the QUST VMAD).
   std::unordered_map<u64, std::unordered_map<i32, std::string>> stage_fragments_;
+  // The native graph for a quest plus its live traversal. Built lazily from the
+  // quest's definition + fragments the first time it is started/advanced, so by
+  // then both are registered. Heap-held so the instance's graph pointer is
+  // stable; dropped on ResetQuest to rebuild fresh.
+  struct QuestRuntime {
+    quest::QuestGraph graph;
+    quest::QuestInstance instance;
+    explicit QuestRuntime(quest::QuestGraph g)
+        : graph(std::move(g)), instance(&graph) {}
+  };
+  std::unordered_map<u64, std::unique_ptr<QuestRuntime>> quest_runtime_;
+  QuestRuntime& Runtime(u64 quest);
   papyrus::VirtualMachine* vm_ = nullptr;
   int fragment_depth_ = 0;  // guards stage->fragment->SetStage recursion
   // Runs the fragment for a freshly-set stage, if one is registered.
   void RunStageFragment(papyrus::ObjectRef quest, i32 stage);
+
+  // Raises a Skyrim form event (OnDeath, OnItemAdded, ...) on the target form's
+  // script instance, if it defines a handler -- a silent no-op without a VM or
+  // handler. Runs synchronously on the guest thread (the bindings' only caller),
+  // so a handler that mutates state is visible immediately to the caller.
+  void RaiseFormEvent(u64 target, const char* event, std::vector<papyrus::Value> args);
+  // Fires OnDying/OnDeath once when an actor's health first reaches zero, and
+  // re-arms if it is healed back above zero.
+  void MaybeNotifyDeath(papyrus::ObjectRef actor);
+  std::unordered_set<u64> dead_;  // actors that have already announced OnDeath
   std::unordered_map<u64, std::unordered_map<u64, i32>> faction_ranks_;  // actor -> faction -> rank
   std::unordered_map<u64, std::unordered_map<u64, i32>> reactions_;      // faction -> other
   std::unordered_map<u64, i32> crime_gold_;                             // faction -> gold

@@ -2,6 +2,7 @@ recreation_add_module(net
   quest_replication.cc
   replication.cc
   session.cc
+  world_replication.cc
 )
 
 # zetanet carries the packets, nanobuf defines what is in them, world/asset

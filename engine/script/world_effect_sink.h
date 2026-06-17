@@ -1,0 +1,30 @@
+#ifndef RECREATION_SCRIPT_WORLD_EFFECT_SINK_H_
+#define RECREATION_SCRIPT_WORLD_EFFECT_SINK_H_
+
+#include "core/types.h"
+
+namespace rec::script {
+
+// Guest-thread-facing sink for quest-driven world mutations. The Skyrim bindings
+// call these; the runtime implements them by marshaling to the main thread's ECS
+// (QuestWorld), which records per-quest provenance so the effects can be rolled
+// back wholesale. SpawnReference allocates and returns the new reference handle
+// synchronously, so PlaceAtMe can hand it straight back to the script.
+//
+// `quest` is the quest a mutation is attributed to (0 = unattributed, not rolled
+// back); the bindings pass the quest whose fragment is currently running.
+class WorldEffectSink {
+ public:
+  virtual ~WorldEffectSink() = default;
+
+  virtual u64 SpawnReference(u64 quest, u64 base, f32 x, f32 y, f32 z) = 0;
+  virtual void MoveReference(u64 quest, u64 handle, f32 x, f32 y, f32 z) = 0;
+  virtual void MovePlayer(u64 quest, f32 x, f32 y, f32 z) = 0;
+  virtual void SetEnabled(u64 quest, u64 handle, bool enabled) = 0;
+  virtual void DeleteReference(u64 quest, u64 handle) = 0;
+  virtual void CleanupQuest(u64 quest) = 0;
+};
+
+}  // namespace rec::script
+
+#endif  // RECREATION_SCRIPT_WORLD_EFFECT_SINK_H_

@@ -30,6 +30,7 @@
 #include "script/host/bridge.h"
 #include "script/host/clr_host.h"
 #include "script/host/guest_bridge.h"
+#include "script/games/skyrim/skyrim_bindings.h"
 #include "script/games/skyrim/skyrim_natives.h"
 
 namespace {
@@ -255,6 +256,85 @@ int SelfTest() {
   };
   check("fallout is-opcode executes -> true",
         ExecuteFunction(b.pex, b.obj, isf, ObjectRef{1}, {Value::Object({2})}, vm).ToBool());
+
+  // Event dispatch: TryCall fires a handler only when the instance defines it,
+  // and is a silent no-op otherwise (how the engine broadcasts form events like
+  // OnDeath / OnItemAdded without warning about forms that ignore them).
+  {
+    NativeRegistry ev_natives;
+    VirtualMachine ev_vm(&ev_natives);
+    Builder lb;
+    lb.obj.name = lb.S("Listener");
+    lb.obj.parent_class = lb.S("");
+    MemberVariable hits;
+    hits.name = lb.S("::Hits_var");
+    hits.type = lb.S("Int");
+    hits.initial_value = lb.IntV(0);
+    lb.obj.variables.push_back(hits);
+    Function on_signal;
+    on_signal.return_type = lb.S("");
+    on_signal.code = {
+        Make(Op::kIAdd, {lb.Id("::Hits_var"), lb.Id("::Hits_var"), lb.IntV(1)}),
+        Make(Op::kReturn, {}),
+    };
+    State def;
+    def.name = lb.S("");
+    def.functions.push_back({lb.S("OnSignal"), std::move(on_signal)});
+    lb.obj.states.push_back(std::move(def));
+    lb.pex.objects.push_back(lb.obj);  // MakeScript is defined later in this file
+    ev_vm.AddScript(std::move(lb.pex));
+    ObjectRef listener = ev_vm.CreateInstance("Listener");
+    auto hits_of = [&] {
+      Value* m = ev_vm.MemberVar(listener, "::Hits_var");
+      return m ? m->ToInt() : -1;
+    };
+    check("TryCall defined handler dispatches", ev_vm.TryCall(listener, "OnSignal", {}));
+    check("handler ran (hits==1)", hits_of() == 1);
+    ev_vm.TryCall(listener, "OnSignal", {});
+    check("repeat dispatch (hits==2)", hits_of() == 2);
+    check("TryCall undefined handler -> false", !ev_vm.TryCall(listener, "OnAbsent", {}));
+    check("undefined handler did not run", hits_of() == 2);
+    check("TryCall on missing instance -> false", !ev_vm.TryCall(ObjectRef{0xDEAD}, "OnSignal", {}));
+  }
+
+  // End-to-end form event: the Skyrim bindings' AddItem must fire OnItemAdded on
+  // the container's script instance, delivering the item count. This is the path
+  // a real "acquire item" objective relies on.
+  {
+    NativeRegistry it_natives;
+    VirtualMachine it_vm(&it_natives);
+    Builder ob2;
+    ob2.obj.name = ob2.S("ObjectReference");
+    ob2.obj.parent_class = ob2.S("");
+    MemberVariable got;
+    got.name = ob2.S("::Got_var");
+    got.type = ob2.S("Int");
+    got.initial_value = ob2.IntV(0);
+    ob2.obj.variables.push_back(got);
+    Function on_added;
+    on_added.return_type = ob2.S("");
+    on_added.params.push_back({ob2.S("akBaseItem"), ob2.S("Form")});
+    on_added.params.push_back({ob2.S("aiItemCount"), ob2.S("Int")});
+    on_added.params.push_back({ob2.S("akItemReference"), ob2.S("ObjectReference")});
+    on_added.params.push_back({ob2.S("akSourceContainer"), ob2.S("ObjectReference")});
+    on_added.code = {
+        Make(Op::kAssign, {ob2.Id("::Got_var"), ob2.Id("aiItemCount")}),
+        Make(Op::kReturn, {}),
+    };
+    State def2;
+    def2.name = ob2.S("");
+    def2.functions.push_back({ob2.S("OnItemAdded"), std::move(on_added)});
+    ob2.obj.states.push_back(std::move(def2));
+    ob2.pex.objects.push_back(ob2.obj);
+    it_vm.AddScript(std::move(ob2.pex));
+    ObjectRef container = it_vm.CreateInstance("ObjectReference");
+
+    rec::script::skyrim::RecordBackedSkyrimBindings bindings;
+    bindings.set_vm(&it_vm);
+    bindings.AddItem(container, ObjectRef{0xA11CE}, 5);
+    Value* got_m = it_vm.MemberVar(container, "::Got_var");
+    check("AddItem fires OnItemAdded (count delivered)", got_m && got_m->ToInt() == 5);
+  }
 
   std::printf("%s (%d failures)\n", failures ? "SELFTEST FAILED" : "SELFTEST PASSED", failures);
   return failures ? 1 : 0;

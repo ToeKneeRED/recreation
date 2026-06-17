@@ -178,6 +178,11 @@ bool Engine::StartNetworking() {
           REC_INFO("net: applied quest 0x{:x} stage {} complete {}", status.handle, status.stage,
                    status.complete ? 1 : 0);
       });
+      // Mirror the host's quest-driven world effects (spawns/moves/disables/
+      // cleanup). Runs in the net sim stage on the main thread, which owns the
+      // ECS, so applying straight to QuestWorld is safe.
+      client_session_->SetWorldCommandSink(
+          [this](const std::vector<world::WorldCommand>& cmds) { quest_world_.Apply(cmds); });
     }
   } else {
     return true;
@@ -1389,6 +1394,11 @@ bool Engine::LoadGameData() {
   script_bindings_ = std::make_unique<rec::script::skyrim::RecordBackedSkyrimBindings>(&records_);
   script_bindings_->set_strings(&strings_);
   script_bindings_->set_player(rec::script::papyrus::ObjectRef{0x14});  // Skyrim player ref
+  // Route quest-driven world mutations (PlaceAtMe/MoveTo/Enable/Delete + cleanup)
+  // through the provenance layer; the player teleports through a host hook since
+  // it is an actor/capsule, not a registry entity.
+  script_bindings_->set_world_sink(&runtime_world_sink_);
+  quest_world_.set_on_move_player([this](f32 x, f32 y, f32 z) { TeleportPlayer(x, y, z); });
   scripts_ = std::make_unique<rec::script::ScriptSystem>(game_, &vfs_, script_bindings_.get());
   // Hand the bindings the guest VM so quest stage fragments can execute (run on
   // the guest thread, where the bindings live).
@@ -1595,6 +1605,7 @@ void Engine::ReportDialogue(const std::string& edid) {
   std::printf("=== dialogue for %s (0x%llx): %zu topics ===\n", edid.c_str(),
               static_cast<unsigned long long>(handle), topics.size());
   int with_fragment = 0;
+  int with_conditions = 0;
   for (dialogue::Handle t : topics) {
     bethesda::GlobalFormId dial{static_cast<u16>(t >> 32), static_cast<u32>(t & 0xffffffffu)};
     dialogue::Topic topic = dialogue::ParseTopic(records_, dial, &strings_);
@@ -1608,9 +1619,14 @@ void Engine::ReportDialogue(const std::string& edid) {
         std::printf("  fragment: %s.%s\n", r.fragment_script.c_str(),
                     r.fragment_function.c_str());
       }
+      if (!r.conditions.empty()) {
+        ++with_conditions;
+        std::printf("  conditions: %zu\n", r.conditions.comparisons.size());
+      }
     }
   }
-  std::printf("=== %d responses carry a fragment ===\n", with_fragment);
+  std::printf("=== %d responses carry a fragment, %d carry conditions ===\n", with_fragment,
+              with_conditions);
   std::fflush(stdout);
 }
 
@@ -2165,6 +2181,25 @@ void Engine::ThrowPhysicsCube() {
   physics_entities_.push_back({body, entity});
 }
 
+void Engine::TeleportPlayer(f32 x, f32 y, f32 z) {
+  if (player_actor_ < 0) return;
+  Actor& a = actors_[player_actor_];
+  if (a.character) physics_.SetCharacterPosition(a.character, Vec3{x, y, z});
+  if (world::Transform* t = world_.Get<world::Transform>(a.entity)) {
+    t->position[0] = x;
+    t->position[1] = y;
+    t->position[2] = z;
+  }
+  REC_INFO("quest: teleported player to ({:.1f}, {:.1f}, {:.1f})", x, y, z);
+}
+
+void Engine::ApplyQuestWorld() {
+  std::vector<world::WorldCommand> commands = quest_world_queue_.Drain();
+  if (commands.empty()) return;
+  quest_world_.Apply(commands);  // host/single-player: apply locally + record provenance
+  if (server_session_) server_session_->SendWorldCommands(commands);  // mirror to clients
+}
+
 bool Engine::RunFrame() {
   if (quit_.load(std::memory_order_relaxed)) return false;
   if (window_ && !window_->PumpEvents()) return false;
@@ -2180,6 +2215,10 @@ bool Engine::RunFrame() {
     // The guest advances on the main loop's clock; it does its work on its own
     // thread, so this only posts a tick.
     if (scripts_) scripts_->Tick(static_cast<f32>(timer_.frame_delta()));
+
+    // Apply (and, when hosting, replicate) the world mutations quests requested
+    // on the guest thread. Main-thread only, so it owns the ECS exclusively here.
+    ApplyQuestWorld();
 
     if (!config_.headless) {
       f32 frame_delta = static_cast<f32>(timer_.frame_delta());
@@ -2201,6 +2240,7 @@ bool Engine::RunFrame() {
       base::UnorderedMap<u64, Mat4> transforms;
       world_.Each<world::Transform, world::Renderable>(
           [&](ecs::Entity entity, world::Transform& transform, world::Renderable& renderable) {
+            if (world_.Has<world::Hidden>(entity)) return;  // Disable()d by a quest
             u64 key = static_cast<u64>(entity.generation) << 32 | entity.index;
             Mat4 current = TransformMatrix(transform);
             const Mat4* prev = prev_transforms_.find(key);

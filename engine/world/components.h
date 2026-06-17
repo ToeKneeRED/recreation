@@ -29,6 +29,17 @@ struct CellMembership {
   bool interior = false;
 };
 
+// Tag marking an entity disabled (Papyrus Disable()); the render pass skips it.
+// A tag carries no data -- its presence is the state.
+struct Hidden {};
+
+// Tag marking an entity created by a quest (PlaceAtMe), with the issuing quest,
+// so quest-spawned content can be found by an ECS sweep as well as via the
+// QuestWorld provenance ledger.
+struct QuestSpawned {
+  u64 quest = 0;
+};
+
 }  // namespace rec::world
 
 #endif  // RECREATION_WORLD_COMPONENTS_H_

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "core/log.h"
+#include "net/world_replication.h"
 
 namespace rec::net {
 namespace {
@@ -225,6 +226,15 @@ void ServerSession::BroadcastQuests() {
                           tx::network::PacketPriority::Medium));
 }
 
+void ServerSession::SendWorldCommands(const std::vector<world::WorldCommand>& commands) {
+  if (clients_.size() == 0 || commands.empty()) return;
+  std::vector<u8> blob = EncodeWorldCommands(commands);
+  // Reliable, like quests: a dropped spawn or cleanup would desync a client's
+  // world from the host's permanently.
+  server_.Push(MakePacket(tx::network::ZPeerId::to_all, MessageType::kWorldCommands, blob,
+                          /*reliable=*/true, tx::network::PacketPriority::Medium));
+}
+
 // --- client ---
 
 ClientSession::ClientSession(SessionConfig config) : config_(std::move(config)) {
@@ -347,6 +357,17 @@ void ClientSession::PollMessages(ecs::World& world) {
                             packet.data.size());
         if (!ApplyQuestUpdate(blob, quest_sink_)) {
           REC_WARN("net: dropped corrupt quest update");
+        }
+        break;
+      }
+      case MessageType::kWorldCommands: {
+        if (!world_command_sink_) break;
+        const ByteSpan blob(reinterpret_cast<const u8*>(packet.data.data()),
+                            packet.data.size());
+        if (auto cmds = DecodeWorldCommands(blob)) {
+          world_command_sink_(*cmds);
+        } else {
+          REC_WARN("net: dropped corrupt world-command update");
         }
         break;
       }

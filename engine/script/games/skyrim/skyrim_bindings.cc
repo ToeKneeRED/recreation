@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "bethesda/record.h"
 #include "core/log.h"
+#include "quest/quest_import.h"
 #include "script/papyrus/vm.h"
 
 namespace rec::script::skyrim {
@@ -151,7 +153,12 @@ f32 RecordBackedSkyrimBindings::GetPositionY(ObjectRef ref) { return Position(re
 f32 RecordBackedSkyrimBindings::GetPositionZ(ObjectRef ref) { return Position(ref)[2]; }
 
 void RecordBackedSkyrimBindings::SetPosition(ObjectRef ref, f32 x, f32 y, f32 z) {
-  positions_[ref.handle] = {x, y, z};
+  positions_[ref.handle] = {x, y, z};  // logical position for script reads
+  if (!world_sink_) return;
+  if (ref.handle == player_.handle)
+    world_sink_->MovePlayer(active_quest_, x, y, z);
+  else
+    world_sink_->MoveReference(active_quest_, ref.handle, x, y, z);
 }
 
 f32 RecordBackedSkyrimBindings::GetDistance(ObjectRef a, ObjectRef b) {
@@ -162,7 +169,39 @@ f32 RecordBackedSkyrimBindings::GetDistance(ObjectRef a, ObjectRef b) {
 }
 
 void RecordBackedSkyrimBindings::MoveTo(ObjectRef ref, ObjectRef target) {
-  positions_[ref.handle] = Position(target);
+  std::array<f32, 3> p = Position(target);
+  positions_[ref.handle] = p;
+  if (!world_sink_) return;
+  if (ref.handle == player_.handle)
+    world_sink_->MovePlayer(active_quest_, p[0], p[1], p[2]);
+  else
+    world_sink_->MoveReference(active_quest_, ref.handle, p[0], p[1], p[2]);
+}
+
+void RecordBackedSkyrimBindings::SetEnabled(ObjectRef ref, bool enabled) {
+  disabled_[ref.handle] = !enabled;
+  if (world_sink_) world_sink_->SetEnabled(active_quest_, ref.handle, enabled);
+}
+
+bool RecordBackedSkyrimBindings::IsDisabled(ObjectRef ref) {
+  auto it = disabled_.find(ref.handle);
+  return it != disabled_.end() && it->second;
+}
+
+void RecordBackedSkyrimBindings::Delete(ObjectRef ref) {
+  if (world_sink_) world_sink_->DeleteReference(active_quest_, ref.handle);
+}
+
+papyrus::ObjectRef RecordBackedSkyrimBindings::PlaceAtMe(ObjectRef where, ObjectRef base,
+                                                         i32 /*count*/) {
+  if (!world_sink_) return ObjectRef{0};
+  // Spawn at the placer's position; the sink allocates the new ref handle so we
+  // can return it to the script immediately. Mirror the position locally so the
+  // script's GetPosition on the new ref reads back.
+  std::array<f32, 3> p = Position(where);
+  u64 handle = world_sink_->SpawnReference(active_quest_, base.handle, p[0], p[1], p[2]);
+  positions_[handle] = p;
+  return ObjectRef{handle};
 }
 
 f32 RecordBackedSkyrimBindings::GetScale(ObjectRef ref) {
@@ -364,10 +403,33 @@ f32 RecordBackedSkyrimBindings::GetActorValuePercentage(ObjectRef actor, const s
   return std::clamp(v.current / v.base, 0.0f, 1.0f);
 }
 
+void RecordBackedSkyrimBindings::RaiseFormEvent(u64 target, const char* event,
+                                                std::vector<papyrus::Value> args) {
+  const bool dispatched = vm_ && vm_->TryCall(ObjectRef{target}, event, std::move(args));
+  // REC_EVENT_TRACE logs every raised form event and whether a handler ran, so a
+  // headless quest run shows which events the stage fragments actually produce.
+  static const bool trace = std::getenv("REC_EVENT_TRACE") != nullptr;
+  if (trace)
+    REC_INFO("event {} -> 0x{:x} (handler {})", event, target, dispatched ? "ran" : "none");
+}
+
+void RecordBackedSkyrimBindings::MaybeNotifyDeath(ObjectRef actor) {
+  if (GetActorValue(actor, "health") > 0.0f) {
+    dead_.erase(actor.handle);  // healed or resurrected: re-arm the death event
+    return;
+  }
+  if (!dead_.insert(actor.handle).second) return;  // already announced
+  // No combat system yet, so the killer is unknown (None).
+  const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
+  RaiseFormEvent(actor.handle, "OnDying", {none});
+  RaiseFormEvent(actor.handle, "OnDeath", {none});
+}
+
 void RecordBackedSkyrimBindings::SetActorValue(ObjectRef actor, const std::string& av, f32 value) {
   ActorValue& v = Av(actor, av);
   v.base = value;
   v.current = value;
+  if (Lower(av) == "health") MaybeNotifyDeath(actor);
 }
 
 void RecordBackedSkyrimBindings::ForceActorValue(ObjectRef actor, const std::string& av, f32 value) {
@@ -376,12 +438,14 @@ void RecordBackedSkyrimBindings::ForceActorValue(ObjectRef actor, const std::str
 
 void RecordBackedSkyrimBindings::ModActorValue(ObjectRef actor, const std::string& av, f32 delta) {
   Av(actor, av).current += delta;
+  if (Lower(av) == "health") MaybeNotifyDeath(actor);
 }
 
 void RecordBackedSkyrimBindings::RestoreActorValue(ObjectRef actor, const std::string& av,
                                                    f32 amount) {
   ActorValue& v = Av(actor, av);
   v.current = std::min(v.base, v.current + amount);
+  if (Lower(av) == "health") MaybeNotifyDeath(actor);
 }
 
 bool RecordBackedSkyrimBindings::IsDead(ObjectRef actor) {
@@ -398,6 +462,11 @@ i32 RecordBackedSkyrimBindings::GetItemCount(ObjectRef container, ObjectRef item
 void RecordBackedSkyrimBindings::AddItem(ObjectRef container, ObjectRef item, i32 count) {
   if (count <= 0) return;
   inventory_[container.handle][item.handle] += count;
+  // OnItemAdded(akBaseItem, aiItemCount, akItemReference, akSourceContainer).
+  // No placed reference / source container yet, so those are None.
+  const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
+  RaiseFormEvent(container.handle, "OnItemAdded",
+                 {papyrus::Value::Object(item), papyrus::Value::Int(count), none, none});
 }
 
 void RecordBackedSkyrimBindings::RemoveItem(ObjectRef container, ObjectRef item, i32 count) {
@@ -406,8 +475,14 @@ void RecordBackedSkyrimBindings::RemoveItem(ObjectRef container, ObjectRef item,
   if (it == inventory_.end()) return;
   auto item_it = it->second.find(item.handle);
   if (item_it == it->second.end()) return;
+  const i32 removed = std::min(count, item_it->second);
   item_it->second = std::max(0, item_it->second - count);
   if (item_it->second == 0) it->second.erase(item_it);
+  if (removed <= 0) return;
+  // OnItemRemoved(akBaseItem, aiItemCount, akItemReference, akDestContainer).
+  const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
+  RaiseFormEvent(container.handle, "OnItemRemoved",
+                 {papyrus::Value::Object(item), papyrus::Value::Int(removed), none, none});
 }
 
 i32 RecordBackedSkyrimBindings::GetStage(ObjectRef quest) {
@@ -431,19 +506,45 @@ void RecordBackedSkyrimBindings::RunStageFragment(ObjectRef quest, i32 stage) {
     return;
   }
   ++fragment_depth_;
+  // Attribute world mutations made during this fragment to the quest, so the
+  // provenance layer can roll them back. Save/restore for nested fragments.
+  u64 prev_quest = active_quest_;
+  active_quest_ = quest.handle;
   u64 before = vm_->native_call_count();
   vm_->Call(quest, fit->second, {});
   REC_DEBUG("quest fragment {} (stage {}) ran, {} native calls", fit->second, stage,
             vm_->native_call_count() - before);
+  active_quest_ = prev_quest;
   --fragment_depth_;
+}
+
+RecordBackedSkyrimBindings::QuestRuntime& RecordBackedSkyrimBindings::Runtime(u64 quest) {
+  if (auto it = quest_runtime_.find(quest); it != quest_runtime_.end()) return *it->second;
+  static const std::unordered_map<i32, std::string> kNoFragments;
+  auto fit = stage_fragments_.find(quest);
+  const auto& fragments = fit != stage_fragments_.end() ? fit->second : kNoFragments;
+  quest::QuestDef empty;
+  empty.handle = quest;
+  const quest::QuestDef* def = quest_system_.Definition(quest);
+  quest::QuestGraph graph = quest::BuildQuestGraph(def ? *def : empty, fragments);
+  auto [it, _] = quest_runtime_.emplace(quest, std::make_unique<QuestRuntime>(std::move(graph)));
+  return *it->second;
+}
+
+void RecordBackedSkyrimBindings::RunScriptFragment(u64 quest, i32 node, const std::string&) {
+  // RunStageFragment looks the function up itself (and keeps the recursion-depth
+  // guard and logging), so the node's stored name is informational here.
+  RunStageFragment(ObjectRef{quest}, node);
 }
 
 void RecordBackedSkyrimBindings::SetStage(ObjectRef quest, i32 stage) {
   // The quest system owns the state and tells us whether this is a fresh stage;
-  // only then do we run its Papyrus fragment (the logic that advances the quest:
-  // sets objectives, enables refs, chains stages). Re-setting a done stage is a
-  // no-op, matching the game.
-  if (quest_system_.SetStage(quest.handle, stage)) RunStageFragment(quest, stage);
+  // only then do we run the stage's logic. That logic now flows through the
+  // quest graph: Advance enters the stage node and dispatches its on-enter
+  // actions (for imported quests, a RunScriptFragment that runs the Papyrus
+  // fragment). Re-setting a done stage is a no-op, matching the game.
+  if (quest_system_.SetStage(quest.handle, stage))
+    Runtime(quest.handle).instance.Advance(stage, *this);
 }
 
 bool RecordBackedSkyrimBindings::GetStageDone(ObjectRef quest, i32 stage) {
@@ -472,6 +573,9 @@ void RecordBackedSkyrimBindings::StopQuest(ObjectRef quest) {
 
 void RecordBackedSkyrimBindings::ResetQuest(ObjectRef quest) {
   quest_system_.ResetQuest(quest.handle);
+  quest_runtime_.erase(quest.handle);  // rebuild a fresh traversal on next start
+  // Roll back everything the quest spawned/placed/moved in the world.
+  if (world_sink_) world_sink_->CleanupQuest(quest.handle);
 }
 
 bool RecordBackedSkyrimBindings::IsQuestActive(ObjectRef quest) {

@@ -15,6 +15,7 @@
 #include "net/quest_replication.h"
 #include "net/replication.h"
 #include "quest/quest_system.h"
+#include "world/quest_world.h"
 
 namespace rec::net {
 
@@ -54,6 +55,11 @@ class ServerSession final : public Session {
   void SetQuestSource(std::function<std::vector<quest::QuestStatus>()> source) {
     quest_source_ = std::move(source);
   }
+
+  // Broadcasts a batch of quest-driven world commands (already drained and
+  // applied locally by the host) to every client on the reliable channel. A
+  // no-op when there are no clients or the list is empty.
+  void SendWorldCommands(const std::vector<world::WorldCommand>& commands);
 
   u32 client_count() const { return static_cast<u32>(clients_.size()); }
   u64 tick() const { return tick_; }
@@ -106,6 +112,13 @@ class ClientSession final : public Session {
     quest_sink_ = std::move(sink);
   }
 
+  // Sink invoked with the command list from every kWorldCommands received. The
+  // engine wires this to QuestWorld::Apply so client world state (spawns, moves,
+  // disables, cleanup) mirrors the host. When unset, updates are dropped.
+  void SetWorldCommandSink(std::function<void(const std::vector<world::WorldCommand>&)> sink) {
+    world_command_sink_ = std::move(sink);
+  }
+
   bool joined() const { return joined_; }
   u64 player_net_id() const { return player_net_id_; }
   ecs::Entity player_entity() const { return applier_.Find(player_net_id_); }
@@ -118,6 +131,7 @@ class ClientSession final : public Session {
   tx::network::ZClient client_;
   SnapshotApplier applier_;
   std::function<void(const quest::QuestStatus&)> quest_sink_;
+  std::function<void(const std::vector<world::WorldCommand>&)> world_command_sink_;
   PlayerInput input_;
   u64 player_net_id_ = 0;
   u64 tick_ = 0;

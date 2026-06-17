@@ -39,8 +39,68 @@
 #include "script/games/skyrim/skyrim_bindings.h"
 #include "script/script_system.h"
 #include "world/cell_streaming.h"
+#include "world/quest_world.h"
 
 namespace rec {
+
+// WorldEffectSink implementation: the Skyrim bindings call this on the guest
+// thread; it allocates handles and marshals each mutation into the thread-safe
+// WorldCommandQueue, which the main thread drains into QuestWorld. Kept tiny and
+// header-only so the script module need not know about the ECS.
+class RuntimeWorldSink : public script::WorldEffectSink {
+ public:
+  explicit RuntimeWorldSink(world::WorldCommandQueue* queue) : queue_(queue) {}
+
+  u64 SpawnReference(u64 quest, u64 base, f32 x, f32 y, f32 z) override {
+    // Synthetic runtime handle in the reserved 0xFFFF plugin slot, so it never
+    // collides with a real form id; allocated here so PlaceAtMe can return it.
+    const u64 handle = (0xFFFFull << 32) | next_handle_.fetch_add(1);
+    world::WorldCommand c;
+    c.op = world::WorldOp::kSpawn;
+    c.quest = quest;
+    c.handle = handle;
+    c.base = base;
+    c.pos = {x, y, z};
+    queue_->Push(c);
+    return handle;
+  }
+  void MoveReference(u64 quest, u64 handle, f32 x, f32 y, f32 z) override {
+    Emit(world::WorldOp::kMove, quest, handle, x, y, z);
+  }
+  void MovePlayer(u64 quest, f32 x, f32 y, f32 z) override {
+    Emit(world::WorldOp::kMovePlayer, quest, 0, x, y, z);
+  }
+  void SetEnabled(u64 quest, u64 handle, bool enabled) override {
+    world::WorldCommand c;
+    c.op = world::WorldOp::kSetEnabled;
+    c.quest = quest;
+    c.handle = handle;
+    c.enabled = enabled;
+    queue_->Push(c);
+  }
+  void DeleteReference(u64 quest, u64 handle) override {
+    Emit(world::WorldOp::kDelete, quest, handle, 0, 0, 0);
+  }
+  void CleanupQuest(u64 quest) override {
+    world::WorldCommand c;
+    c.op = world::WorldOp::kCleanupQuest;
+    c.quest = quest;
+    queue_->Push(c);
+  }
+
+ private:
+  void Emit(world::WorldOp op, u64 quest, u64 handle, f32 x, f32 y, f32 z) {
+    world::WorldCommand c;
+    c.op = op;
+    c.quest = quest;
+    c.handle = handle;
+    c.pos = {x, y, z};
+    queue_->Push(c);
+  }
+
+  world::WorldCommandQueue* queue_;
+  std::atomic<u32> next_handle_{1};
+};
 
 struct EngineConfig {
   std::string data_dir;
@@ -234,6 +294,12 @@ class Engine {
   void LookCameraAt(const Vec3& eye, const Vec3& center);
   // Walk mode step: input -> character move -> entity transform + follow camera.
   void WalkUpdate(f32 dt, bool allow_input);
+  // Teleports the player actor (capsule + ECS transform), the target of a quest
+  // MoveTo on the player. Coordinates are passed through as given.
+  void TeleportPlayer(f32 x, f32 y, f32 z);
+  // Drains quest world commands into QuestWorld on the main thread, and (when
+  // hosting) replicates the batch to clients.
+  void ApplyQuestWorld();
   // Advances every actor's gait and recomputes its model-space bone matrices.
   void UpdateActors(f32 dt);
   // Appends each actor's skinned draws + bone palettes to the frame view.
@@ -261,6 +327,12 @@ class Engine {
 
   ecs::World world_;
   ecs::Scheduler scheduler_;
+  // Quest-driven world effects: the bindings push commands onto the queue (guest
+  // thread); the main thread drains them into QuestWorld, which spawns/moves ECS
+  // entities and records per-quest provenance so a quest can be rolled back.
+  world::WorldCommandQueue quest_world_queue_;
+  world::QuestWorld quest_world_{world_};
+  RuntimeWorldSink runtime_world_sink_{&quest_world_queue_};
 
   asset::Vfs vfs_;
   std::unique_ptr<asset::AssetDatabase> assets_;
