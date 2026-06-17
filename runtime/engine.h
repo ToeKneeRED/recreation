@@ -252,6 +252,11 @@ class Engine {
   void UpdateFollowers(f32 dt);
   // Registers / clears an NPC (by form handle) as a follower of the player.
   void SetFollower(u64 npc, bool follow);
+  // REC_MQ101_DEMO one-shot: once the player exists and MQ101 has surfaced an
+  // objective, drop a waypoint ahead of the player (reaching it completes the
+  // quest) and recruit nearby NPCs as followers. Stitches the new systems into a
+  // playable slice of the first main quest. Retries each frame until it seeds.
+  void SetupMq101Demo();
   // REC_QUEST_REPORT debug aid: drives the named quest through its stages to
   // completion on the guest thread and prints the journey to stdout.
   void ReportQuestToCompletion(const std::string& edid);
@@ -456,6 +461,8 @@ class Engine {
   base::Vector<QuestMarker> quest_markers_;
   // NPCs steered to follow the player, keyed by form handle -> formation slot.
   base::UnorderedMap<u64, i32> followers_;
+  // REC_MQ101_DEMO: set at load, cleared once the interactive slice is seeded.
+  bool mq101_demo_pending_ = false;
   // Activation: the form the player is looking at in walk mode (0 = none) and
   // the cached HUD label, recomputed only when the target changes.
   u64 activate_target_ = 0;

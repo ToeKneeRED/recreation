@@ -1711,6 +1711,28 @@ void Engine::AttachQuestScripts() {
     REC_INFO("debug: started {} quest(s) matching '{}'", started, edid);
   }
 
+  // REC_MQ101_DEMO seeds a playable slice of the first main quest: start MQ101
+  // (its opening fragment surfaces the first objective), then SetupMq101Demo
+  // drops a waypoint and recruits followers once the player and that objective
+  // exist. Walk to the marker to complete the quest.
+  if (std::getenv("REC_MQ101_DEMO")) {
+    auto* binds = script_bindings_.get();
+    for (const auto& [handle, name] : quest_records_) {
+      if (name != "MQ101") continue;
+      scripts_->guest().Submit([binds, h = handle](rec::script::papyrus::VirtualMachine&) {
+        rec::script::papyrus::ObjectRef ref{h};
+        binds->StartQuest(ref);
+        // Stage 160 is the first that displays an objective ("Make your way to
+        // the Keep"), so the marker has a live objective to arm against.
+        binds->SetStage(ref, 160);
+      });
+      quest_panel_.selected = handle;
+      mq101_demo_pending_ = true;
+      break;
+    }
+    REC_INFO("debug: MQ101 interactive demo armed (walk to the marker to complete)");
+  }
+
   // REC_QUEST_REPORT=<EDID> drives a quest through its stages to its completion
   // stage and prints the journey, then quits. A headless, deterministic check
   // that a quest (e.g. the first main quest, MQ101) runs to completion.
@@ -2262,26 +2284,26 @@ void Engine::UpdateObjectiveMarkers(const std::vector<quest::QuestStatus>& runni
     return;
   }
 
-  // The tracked quest is the most-recently-changed running one, the same quest
-  // the HUD tracker shows.
-  const quest::QuestStatus* tracked = nullptr;
-  for (const quest::QuestStatus& q : running)
-    if (!tracked || q.revision > tracked->revision) tracked = &q;
-
-  // The armed marker: belongs to the tracked quest, and its objective is the
-  // current displayed-and-incomplete one. Skip already-fired markers.
-  QuestMarker* armed = nullptr;
-  if (tracked) {
-    for (QuestMarker& m : quest_markers_) {
-      if (m.fired || m.quest != tracked->handle) continue;
-      for (const quest::ObjectiveStatus& o : tracked->objectives) {
-        if (o.index != m.objective) continue;
-        if (o.displayed && !o.completed) armed = &m;
-        break;
-      }
-      if (armed) break;
+  // A marker is armed when its own quest is running and its objective is the
+  // current displayed-and-incomplete one. Checked per marker against its own
+  // quest (not just the single most-recently-changed one), so a seeded marker
+  // arms reliably even with many quests running at once.
+  auto is_armed = [&](const QuestMarker& m) -> bool {
+    if (m.fired) return false;
+    for (const quest::QuestStatus& q : running) {
+      if (q.handle != m.quest) continue;
+      for (const quest::ObjectiveStatus& o : q.objectives)
+        if (o.index == m.objective) return o.displayed && !o.completed;
+      return false;
     }
-  }
+    return false;
+  };
+  QuestMarker* armed = nullptr;
+  for (QuestMarker& m : quest_markers_)
+    if (is_armed(m)) {
+      armed = &m;
+      break;
+    }
 
   // Trigger: a player within an armed marker's radius advances the quest's
   // stage. Host authoritative (a client receives the advance via quest
@@ -2415,6 +2437,72 @@ void Engine::UpdateFollowers(f32 dt) {
       if (!out.arrived) a->yaw = out.yaw;
     }
   }
+}
+
+void Engine::SetupMq101Demo() {
+  if (!mq101_demo_pending_ || player_actor_ < 0 || !scripts_ || !script_bindings_) return;
+  u64 mq = 0;
+  for (const auto& [h, n] : quest_records_)
+    if (n == "MQ101") {
+      mq = h;
+      break;
+    }
+  if (mq == 0) {
+    mq101_demo_pending_ = false;
+    return;
+  }
+
+  // The opening fragment runs asynchronously on the guest; wait until MQ101 is
+  // running and has surfaced an objective before seeding, so the marker has one
+  // to arm against.
+  auto* binds = script_bindings_.get();
+  struct Seed {
+    bool running = false;
+    i32 objective = -1;
+    i32 complete_stage = -1;
+  };
+  const Seed seed = scripts_->guest()
+                        .SubmitFor([binds, mq](rec::script::papyrus::VirtualMachine&) {
+                          const quest::QuestSystem& qs = binds->quest_system();
+                          Seed s;
+                          s.running = qs.IsRunning(mq);
+                          if (const quest::QuestDef* def = qs.Definition(mq))
+                            s.complete_stage = def->CompletionStage();
+                          for (const quest::ObjectiveStatus& o : qs.Status(mq).objectives)
+                            if (o.displayed && !o.completed) {
+                              s.objective = o.index;
+                              break;
+                            }
+                          return s;
+                        })
+                        .get();
+  if (!seed.running || seed.objective < 0) return;  // retry next frame
+
+  Vec3 ppos{};
+  if (const world::Transform* t = world_.Get<world::Transform>(actors_[player_actor_].entity))
+    ppos = Vec3{t->position[0], t->position[1], t->position[2]};
+  const Vec3 fwd{std::sin(cam_yaw_), 0.0f, -std::cos(cam_yaw_)};
+  QuestMarker m;
+  m.quest = mq;
+  m.objective = seed.objective;
+  m.advance_stage = seed.complete_stage >= 0 ? seed.complete_stage : 900;
+  m.pos = ppos + fwd * 6.0f;
+  quest_markers_.push_back(m);
+
+  // Recruit a few nearby NPCs as followers so the player has company on the way.
+  int recruited = 0;
+  world_.Each<world::Npc, world::FormLink, world::Transform>(
+      [&](ecs::Entity, world::Npc&, world::FormLink& link, world::Transform& t) {
+        if (recruited >= 3) return;
+        const f32 dx = t.position[0] - ppos.x, dz = t.position[2] - ppos.z;
+        if (dx * dx + dz * dz > 15.0f * 15.0f) return;
+        SetFollower(link.form.packed(), true);
+        ++recruited;
+      });
+
+  mq101_demo_pending_ = false;
+  REC_INFO("demo: MQ101 marker at objective {} -> stage {}, {} follower(s) recruited", seed.objective,
+           m.advance_stage, recruited);
 }
 
 void Engine::RefreshNativeTrace(f32 dt) {
@@ -2752,6 +2840,7 @@ bool Engine::RunFrame() {
     // Steer follower NPCs toward the player (host authoritative; streams to
     // clients via actor sync, like any other NPC movement).
     UpdateFollowers(static_cast<f32>(timer_.frame_delta()));
+    if (mq101_demo_pending_) SetupMq101Demo();
 
     if (!config_.headless) {
       f32 frame_delta = static_cast<f32>(timer_.frame_delta());

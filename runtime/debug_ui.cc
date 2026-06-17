@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -84,6 +85,10 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
     ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event*>(event));
   });
 
+  // REC_HIDE_DEBUG_UI starts with the imgui overlays hidden, so the libultragui
+  // HUD has the screen to itself for clean screenshots (cf. RECREATION_UI_MENU).
+  if (std::getenv("REC_HIDE_DEBUG_UI"))
+    visible_ = trace_visible_ = quests_visible_ = false;
   initialized_ = true;
   REC_INFO("imgui {} initialized (vulkan dynamic rendering)", IMGUI_VERSION);
   return true;
