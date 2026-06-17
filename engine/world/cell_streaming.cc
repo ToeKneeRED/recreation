@@ -231,7 +231,12 @@ bool CellStreamer::LoadCellIncremental(ecs::World& world, i16 grid_x, i16 grid_y
 void CellStreamer::UnloadCell(ecs::World& world, u32 key) {
   LoadedCell* cell = loaded_.find(key);
   if (!cell) return;
-  for (ecs::Entity entity : cell->entities) world.Destroy(entity);
+  for (ecs::Entity entity : cell->entities) {
+    if (quest_world_)
+      if (const FormLink* link = world.Get<FormLink>(entity))
+        quest_world_->Unregister(link->form.packed());
+    world.Destroy(entity);
+  }
   if (physics_) {
     if (cell->terrain_body) physics_->RemoveBody(cell->terrain_body);
     for (physics::BodyId body : cell->bodies) physics_->RemoveBody(body);
@@ -605,6 +610,9 @@ bool CellStreamer::SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64
     world.Add(entity, Npc{base_id});
     world.Add(entity, CellMembership{grid_x, grid_y, interior});
     cell.entities.push_back(entity);
+    // Map form -> entity so quests can target this NPC and clients can apply its
+    // replicated transform by form id.
+    if (quest_world_) quest_world_->Register(id.packed(), entity);
     ++spawned_entities_;
     ++spawned_npcs_;
     return true;

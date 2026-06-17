@@ -14,6 +14,7 @@
 #include "physics/physics_world.h"
 #include "world/grass_baker.h"
 #include "world/land_baker.h"
+#include "world/quest_world.h"
 
 namespace rec::world {
 
@@ -32,6 +33,11 @@ class CellStreamer {
   // Optional rigid body world: loaded cells then register terrain
   // colliders and water answers buoyancy queries.
   void set_physics(physics::PhysicsWorld* physics) { physics_ = physics; }
+
+  // Optional quest world: loaded NPC references register their form->entity
+  // mapping here so quests can target them and clients can apply replicated
+  // actor transforms by form id.
+  void set_quest_world(QuestWorld* quest_world) { quest_world_ = quest_world; }
 
   // Water surface height and flow at an engine-space position, for
   // buoyancy. Flow derives from the height gradient of neighboring cells.
@@ -114,6 +120,7 @@ class CellStreamer {
   Settings settings_;
   Uploads uploads_;
   physics::PhysicsWorld* physics_ = nullptr;
+  QuestWorld* quest_world_ = nullptr;
   bethesda::GlobalFormId worldspace_;
   const bethesda::RecordStore::ExteriorGrid* grid_ = nullptr;
   base::UnorderedMap<u32, LoadedCell> loaded_;
