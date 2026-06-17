@@ -27,6 +27,7 @@
 #include "world/interaction.h"
 #include "world/npc_ai.h"
 #include "world/objective_marker.h"
+#include "world/steering_avoidance.h"
 #include "script/games/skyrim/skyrim_condition_context.h"
 #include "script/papyrus/value.h"
 
@@ -2425,6 +2426,39 @@ void Engine::SetFollower(u64 npc, bool follow) {
   }
 }
 
+void Engine::AvoidObstacles(const float self_pos[3], const float goal_dir[3], float out_dir[3]) {
+  // Without physics (e.g. a stub build) there is nothing to raycast against, so
+  // steer straight at the goal.
+  if (!physics_.initialized()) {
+    out_dir[0] = goal_dir[0];
+    out_dir[1] = 0;
+    out_dir[2] = goal_dir[2];
+    return;
+  }
+  // Fan candidate directions around the goal and raycast each from chest height
+  // for the open distance ahead, then let the context steerer pick a clear,
+  // still-goal-ish way around whatever is in front.
+  constexpr int kFan = 9;
+  constexpr float kAngles[kFan] = {0, 20, -20, 40, -40, 60, -60, 80, -80};  // degrees
+  constexpr float kLookAhead = 3.0f;
+  float candidates[kFan * 3];
+  float clearances[kFan];
+  const Vec3 origin{self_pos[0], self_pos[1] + 1.0f, self_pos[2]};
+  for (int i = 0; i < kFan; ++i) {
+    const float a = kAngles[i] * 0.0174533f;
+    const float c = std::cos(a), s = std::sin(a);
+    const float dx = goal_dir[0] * c + goal_dir[2] * s;  // rotate goal_dir about +Y
+    const float dz = -goal_dir[0] * s + goal_dir[2] * c;
+    candidates[i * 3 + 0] = dx;
+    candidates[i * 3 + 1] = 0;
+    candidates[i * 3 + 2] = dz;
+    physics::PhysicsWorld::RayHit hit;
+    clearances[i] = physics_.Raycast(origin, Vec3{dx, 0, dz}, kLookAhead, &hit) ? hit.distance
+                                                                               : kLookAhead;
+  }
+  world::SteerAroundObstacles(goal_dir, candidates, clearances, kFan, 1.5f, out_dir);
+}
+
 void Engine::UpdateFollowers(f32 dt) {
   // Host authoritative: a client receives follower motion via actor sync.
   if (followers_.empty() || player_actor_ < 0 || client_session_) return;
@@ -2475,10 +2509,21 @@ void Engine::UpdateFollowers(f32 dt) {
     world::Transform* t = followers[i].transform;
     const float self_pos[3] = {t->position[0], t->position[1], t->position[2]};
     const world::SteerOutput out = world::SteerToward(self_pos, goal, params);
+    float move_yaw = out.yaw;
     if (!out.arrived) {
-      t->position[0] += out.velocity[0] * dt;
-      t->position[2] += out.velocity[2] * dt;
-      const float h = out.yaw * 0.5f;
+      // Deflect the straight-line steer around nearby obstacles, then move along
+      // the chosen direction at the arrival-adjusted speed.
+      const float speed = __builtin_sqrtf(out.velocity[0] * out.velocity[0] +
+                                          out.velocity[2] * out.velocity[2]);
+      const float gx = goal[0] - self_pos[0], gz = goal[2] - self_pos[2];
+      const float gl = __builtin_sqrtf(gx * gx + gz * gz);
+      const float goal_dir[3] = {gl > 1e-4f ? gx / gl : 0.0f, 0.0f, gl > 1e-4f ? gz / gl : 0.0f};
+      float steer_dir[3];
+      AvoidObstacles(self_pos, goal_dir, steer_dir);
+      t->position[0] += steer_dir[0] * speed * dt;
+      t->position[2] += steer_dir[2] * speed * dt;
+      move_yaw = std::atan2(steer_dir[0], steer_dir[2]);
+      const float h = move_yaw * 0.5f;
       t->rotation[0] = 0;
       t->rotation[1] = std::sin(h);
       t->rotation[2] = 0;
@@ -2488,7 +2533,7 @@ void Engine::UpdateFollowers(f32 dt) {
     const u64 key = static_cast<u64>(followers[i].entity.generation) << 32 | followers[i].entity.index;
     if (Actor* a = npc_actors_.find(key)) {
       a->speed = out.arrived ? 0.0f : params.speed;
-      if (!out.arrived) a->yaw = out.yaw;
+      if (!out.arrived) a->yaw = move_yaw;
     }
   }
 }

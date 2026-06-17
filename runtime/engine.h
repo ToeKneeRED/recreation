@@ -257,6 +257,11 @@ class Engine {
   void UpdateFollowers(f32 dt);
   // Registers / clears an NPC (by form handle) as a follower of the player.
   void SetFollower(u64 npc, bool follow);
+  // Picks a travel direction toward `goal_dir` that steers around nearby
+  // obstacles: fans candidate directions, raycasts each for clearance, and
+  // returns the clearest still-goal-ish one in `out_dir`. Falls back to
+  // `goal_dir` when physics is unavailable.
+  void AvoidObstacles(const float self_pos[3], const float goal_dir[3], float out_dir[3]);
   // REC_MQ101_DEMO breadcrumb: once the player exists, walks MQ101 through a
   // curated sequence of gameplay stages. Each frame, if no waypoint is pending,
   // it drops the next one ahead of the player (and recruits nearby NPCs as
