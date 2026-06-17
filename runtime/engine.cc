@@ -25,6 +25,7 @@
 #include "quest/quest_def.h"
 #include "world/components.h"
 #include "world/interaction.h"
+#include "world/npc_ai.h"
 #include "script/games/skyrim/skyrim_condition_context.h"
 #include "script/papyrus/value.h"
 
@@ -165,6 +166,33 @@ bool Engine::StartNetworking() {
       // A client picking a dialogue topic runs that INFO's fragment here, so the
       // quest advances on the server and replicates to everyone.
       server_session_->SetDialogueSink([this](u64 info) { RunInfoFragment(info); });
+      // A client's quest debugger acts through the server: apply the requested
+      // stage/objective/running change on the guest, which replicates back as a
+      // normal quest update.
+      server_session_->SetStageRequestSink([this](const net::StageRequest& r) {
+        if (!scripts_) return;
+        auto* binds = script_bindings_.get();
+        scripts_->guest().Submit([binds, r](script::papyrus::VirtualMachine&) {
+          const script::papyrus::ObjectRef ref{r.quest};
+          switch (r.op) {
+            case net::StageOp::kSetStage:
+              binds->SetStage(ref, r.a);
+              break;
+            case net::StageOp::kSetRunning:
+              if (r.b)
+                binds->StartQuest(ref);
+              else
+                binds->StopQuest(ref);
+              break;
+            case net::StageOp::kSetObjectiveDisplayed:
+              binds->SetObjectiveDisplayed(ref, r.a, r.b != 0);
+              break;
+            case net::StageOp::kSetObjectiveCompleted:
+              binds->SetObjectiveCompleted(ref, r.a, r.b != 0);
+              break;
+          }
+        });
+      });
     }
     // Stream authoritative NPC transforms; the session deltas them so only the
     // NPCs that actually moved this tick go out.
@@ -2067,6 +2095,13 @@ void Engine::RefreshQuestPanel(f32 dt) {
   // Mutations run on the guest thread (the bindings' only legal caller).
   if (!quest_panel_.set_running) {
     quest_panel_.set_running = [this](u64 handle, bool run) {
+#if RECREATION_HAS_NET
+      // On a client, the debugger acts through the server (authoritative).
+      if (client_session_ && client_session_->joined()) {
+        client_session_->SendStageRequest({handle, net::StageOp::kSetRunning, 0, run ? 1 : 0});
+        return;
+      }
+#endif
       auto* binds = script_bindings_.get();
       scripts_->guest().Submit([binds, handle, run](script::papyrus::VirtualMachine&) {
         if (run)
@@ -2076,23 +2111,57 @@ void Engine::RefreshQuestPanel(f32 dt) {
       });
     };
     quest_panel_.set_stage = [this](u64 handle, i32 stage) {
+#if RECREATION_HAS_NET
+      if (client_session_ && client_session_->joined()) {
+        client_session_->SendStageRequest({handle, net::StageOp::kSetStage, stage, 0});
+        return;
+      }
+#endif
       auto* binds = script_bindings_.get();
       scripts_->guest().Submit([binds, handle, stage](script::papyrus::VirtualMachine&) {
         binds->SetStage(script::papyrus::ObjectRef{handle}, stage);
       });
     };
     quest_panel_.set_objective_displayed = [this](u64 handle, i32 objective, bool displayed) {
+#if RECREATION_HAS_NET
+      if (client_session_ && client_session_->joined()) {
+        client_session_->SendStageRequest(
+            {handle, net::StageOp::kSetObjectiveDisplayed, objective, displayed ? 1 : 0});
+        return;
+      }
+#endif
       auto* binds = script_bindings_.get();
       scripts_->guest().Submit([binds, handle, objective, displayed](script::papyrus::VirtualMachine&) {
         binds->SetObjectiveDisplayed(script::papyrus::ObjectRef{handle}, objective, displayed);
       });
     };
     quest_panel_.set_objective_completed = [this](u64 handle, i32 objective, bool completed) {
+#if RECREATION_HAS_NET
+      if (client_session_ && client_session_->joined()) {
+        client_session_->SendStageRequest(
+            {handle, net::StageOp::kSetObjectiveCompleted, objective, completed ? 1 : 0});
+        return;
+      }
+#endif
       auto* binds = script_bindings_.get();
       scripts_->guest().Submit([binds, handle, objective, completed](script::papyrus::VirtualMachine&) {
         binds->SetObjectiveCompleted(script::papyrus::ObjectRef{handle}, objective, completed);
       });
     };
+    quest_panel_.set_follower = [this](u64 npc, bool follow) { SetFollower(npc, follow); };
+    quest_panel_.place_marker = [this](u64 quest, i32 objective, i32 advance_stage) {
+      QuestMarker m;
+      m.quest = quest;
+      m.objective = objective;
+      m.advance_stage = advance_stage;
+      if (player_actor_ >= 0)
+        if (const world::Transform* t = world_.Get<world::Transform>(actors_[player_actor_].entity))
+          m.pos = Vec3{t->position[0], t->position[1], t->position[2]};
+      quest_markers_.push_back(m);
+      REC_INFO("quest: placed marker for objective {} of 0x{:x} -> advance to stage {}", objective,
+               quest, advance_stage);
+    };
+    quest_panel_.clear_markers = [this] { quest_markers_.clear(); };
   }
 
   // Snapshot the live state at a few Hz; one guest round-trip serves both the
@@ -2141,7 +2210,15 @@ void Engine::RefreshQuestPanel(f32 dt) {
           .get();
   quest_panel_.quests = std::move(snap.panel);
   quest_panel_.detail = std::move(snap.detail);
+  // Surface the look-target and counts so the debugger can toggle follow and
+  // show how much is armed.
+  quest_panel_.look_target = activate_target_;
+  quest_panel_.look_label = activate_label_;
+  quest_panel_.look_following = activate_target_ != 0 && followers_.find(activate_target_) != nullptr;
+  quest_panel_.follower_count = static_cast<int>(followers_.size());
+  quest_panel_.marker_count = static_cast<int>(quest_markers_.size());
   UpdateQuestHud(snap.running);
+  UpdateObjectiveMarkers(snap.running);
 }
 
 void Engine::UpdateQuestHud(const std::vector<quest::QuestStatus>& running) {
@@ -2176,6 +2253,167 @@ void Engine::UpdateQuestHud(const std::vector<quest::QuestStatus>& running) {
       game_ui_.FlashQuestUpdate(tracked->complete ? tracked->name + " (Complete)" : tracked->name);
     hud_tracked_quest_ = tracked->handle;
     hud_tracked_revision_ = tracked->revision;
+  }
+}
+
+void Engine::UpdateObjectiveMarkers(const std::vector<quest::QuestStatus>& running) {
+  if (quest_markers_.empty()) {
+    if (!config_.headless) game_ui_.SetObjectiveMarker(false, 0, 0);
+    return;
+  }
+
+  // The tracked quest is the most-recently-changed running one, the same quest
+  // the HUD tracker shows.
+  const quest::QuestStatus* tracked = nullptr;
+  for (const quest::QuestStatus& q : running)
+    if (!tracked || q.revision > tracked->revision) tracked = &q;
+
+  // The armed marker: belongs to the tracked quest, and its objective is the
+  // current displayed-and-incomplete one. Skip already-fired markers.
+  QuestMarker* armed = nullptr;
+  if (tracked) {
+    for (QuestMarker& m : quest_markers_) {
+      if (m.fired || m.quest != tracked->handle) continue;
+      for (const quest::ObjectiveStatus& o : tracked->objectives) {
+        if (o.index != m.objective) continue;
+        if (o.displayed && !o.completed) armed = &m;
+        break;
+      }
+      if (armed) break;
+    }
+  }
+
+  // Trigger: a player within an armed marker's radius advances the quest's
+  // stage. Host authoritative (a client receives the advance via quest
+  // replication), evaluated against the local player plus every networked one.
+  if (armed && armed->advance_stage >= 0 && !client_session_ && scripts_ && script_bindings_) {
+    auto within = [&](f32 px, f32 pz) {
+      const f32 dx = px - armed->pos.x, dz = pz - armed->pos.z;
+      return dx * dx + dz * dz <= armed->radius * armed->radius;
+    };
+    bool reached = false;
+    if (player_actor_ >= 0)
+      if (const world::Transform* t = world_.Get<world::Transform>(actors_[player_actor_].entity))
+        reached = within(t->position[0], t->position[2]);
+    if (!reached)
+      world_.Each<net::NetworkId, world::Transform>(
+          [&](ecs::Entity, net::NetworkId&, world::Transform& t) {
+            if (within(t.position[0], t.position[2])) reached = true;
+          });
+    if (reached) {
+      armed->fired = true;
+      const u64 quest = armed->quest;
+      const i32 stage = armed->advance_stage;
+      auto* binds = script_bindings_.get();
+      scripts_->guest().Submit([binds, quest, stage](script::papyrus::VirtualMachine&) {
+        binds->SetStage(script::papyrus::ObjectRef{quest}, stage);
+      });
+      REC_INFO("quest: reached objective {} marker, advancing 0x{:x} to stage {}", armed->objective,
+               quest, stage);
+    }
+  }
+
+  // HUD compass pip: bearing from the player's view to the armed marker, plus
+  // planar distance. Local player only (the marker lives in this peer's world).
+  if (config_.headless) return;
+  if (!armed || player_actor_ < 0) {
+    game_ui_.SetObjectiveMarker(false, 0, 0);
+    return;
+  }
+  Vec3 ppos{};
+  if (const world::Transform* t = world_.Get<world::Transform>(actors_[player_actor_].entity))
+    ppos = Vec3{t->position[0], t->position[1], t->position[2]};
+  Vec3 view = walk_mode_ ? (walk_target_ - walk_eye_) : camera_.forward();
+  view.y = 0;
+  Vec3 to{armed->pos.x - ppos.x, 0, armed->pos.z - ppos.z};
+  const f32 distance = Length(to);
+  if (Length(view) < 1e-4f || distance < 1e-4f) {
+    game_ui_.SetObjectiveMarker(true, 0, distance);
+    return;
+  }
+  view = Normalize(view);
+  to = Normalize(to);
+  // Signed angle from the view to the marker, positive when the marker is to the
+  // player's right (cross.y > 0 in this left-handed, +Y up convention).
+  const f32 det = view.z * to.x - view.x * to.z;
+  const f32 dot = view.x * to.x + view.z * to.z;
+  const f32 bearing = std::atan2(det, dot) * 57.29578f;
+  game_ui_.SetObjectiveMarker(true, bearing, distance);
+}
+
+void Engine::SetFollower(u64 npc, bool follow) {
+  if (follow) {
+    if (!followers_.find(npc)) followers_.insert(npc, static_cast<i32>(followers_.size()));
+  } else {
+    followers_.erase(npc);
+  }
+}
+
+void Engine::UpdateFollowers(f32 dt) {
+  // Host authoritative: a client receives follower motion via actor sync.
+  if (followers_.empty() || player_actor_ < 0 || client_session_) return;
+  const world::Transform* pt = world_.Get<world::Transform>(actors_[player_actor_].entity);
+  if (!pt) return;
+  const float leader_pos[3] = {pt->position[0], pt->position[1], pt->position[2]};
+  const float leader_yaw = actors_[player_actor_].yaw;
+
+  // Collect the follower transforms, with positions kept flat for separation.
+  struct Follower {
+    ecs::Entity entity;
+    i32 slot;
+    world::Transform* transform;
+  };
+  base::Vector<Follower> followers;
+  base::Vector<float> positions;  // xyz per follower, parallel to `followers`
+  world_.Each<world::Npc, world::FormLink, world::Transform>(
+      [&](ecs::Entity e, world::Npc&, world::FormLink& link, world::Transform& t) {
+        const i32* slot = followers_.find(link.form.packed());
+        if (!slot) return;
+        followers.push_back({e, *slot, &t});
+        positions.push_back(t.position[0]);
+        positions.push_back(t.position[1]);
+        positions.push_back(t.position[2]);
+      });
+  if (followers.empty()) return;
+
+  const world::SteerParams params{2.6f, 2.2f, 1.5f};
+  base::Vector<float> others;
+  for (size_t i = 0; i < followers.size(); ++i) {
+    float goal[3];
+    world::FollowSlot(leader_pos, leader_yaw, followers[i].slot, 1.8f, goal);
+
+    // Spread followers apart so they do not pile onto the same slot.
+    others.clear();
+    for (size_t j = 0; j < followers.size(); ++j) {
+      if (j == i) continue;
+      others.push_back(positions[j * 3 + 0]);
+      others.push_back(positions[j * 3 + 1]);
+      others.push_back(positions[j * 3 + 2]);
+    }
+    float sep[3];
+    world::SeparationOffset(&positions[i * 3], others.data(),
+                           static_cast<int>(others.size() / 3), 1.2f, sep);
+    goal[0] += sep[0] * 0.6f;
+    goal[2] += sep[2] * 0.6f;
+
+    world::Transform* t = followers[i].transform;
+    const float self_pos[3] = {t->position[0], t->position[1], t->position[2]};
+    const world::SteerOutput out = world::SteerToward(self_pos, goal, params);
+    if (!out.arrived) {
+      t->position[0] += out.velocity[0] * dt;
+      t->position[2] += out.velocity[2] * dt;
+      const float h = out.yaw * 0.5f;
+      t->rotation[0] = 0;
+      t->rotation[1] = std::sin(h);
+      t->rotation[2] = 0;
+      t->rotation[3] = std::cos(h);
+    }
+    // Drive the render actor's gait, if this NPC has a streamed-in instance.
+    const u64 key = static_cast<u64>(followers[i].entity.generation) << 32 | followers[i].entity.index;
+    if (Actor* a = npc_actors_.find(key)) {
+      a->speed = out.arrived ? 0.0f : params.speed;
+      if (!out.arrived) a->yaw = out.yaw;
+    }
   }
 }
 
@@ -2511,6 +2749,9 @@ bool Engine::RunFrame() {
     // Authoritative NPC simulation runs on the host / single-player only; a
     // client receives the results via actor sync instead of simulating.
     if (!client_session_) ServerSimulateActors(static_cast<f32>(timer_.frame_delta()));
+    // Steer follower NPCs toward the player (host authoritative; streams to
+    // clients via actor sync, like any other NPC movement).
+    UpdateFollowers(static_cast<f32>(timer_.frame_delta()));
 
     if (!config_.headless) {
       f32 frame_delta = static_cast<f32>(timer_.frame_delta());

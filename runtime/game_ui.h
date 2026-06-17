@@ -65,6 +65,10 @@ class GameUi {
   void SetQuest(const HudQuest& quest);
   void FlashQuestUpdate(const std::string& message);
   void SetActivatePrompt(const std::string& prompt);
+  // Objective compass waypoint. active shows a pip on the compass at
+  // bearing_deg (0 = dead ahead, positive = to the right of where the player
+  // looks) and a distance readout; inactive hides both.
+  void SetObjectiveMarker(bool active, float bearing_deg, float distance_m);
   // The dialogue panel (speaker line + NPC reply + numbered player topics).
   void SetDialogue(const DialogueView& dialogue);
 

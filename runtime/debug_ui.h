@@ -57,6 +57,22 @@ struct QuestPanel {
   std::function<void(u64 handle, i32 stage)> set_stage;
   std::function<void(u64 handle, i32 objective, bool displayed)> set_objective_displayed;
   std::function<void(u64 handle, i32 objective, bool completed)> set_objective_completed;
+
+  // NPC follow control: the reference the player is currently looking at (0 =
+  // none), its HUD label, and whether it is already a follower. The button wires
+  // to the engine's follower registry. follower_count is shown live.
+  u64 look_target = 0;
+  std::string look_label;
+  bool look_following = false;
+  int follower_count = 0;
+  std::function<void(u64 npc, bool follow)> set_follower;
+
+  // Objective waypoint authoring: drop a marker at the player for one quest
+  // objective (reaching it advances the quest to advance_stage), or clear them
+  // all. marker_count is the number currently authored.
+  int marker_count = 0;
+  std::function<void(u64 quest, i32 objective, i32 advance_stage)> place_marker;
+  std::function<void()> clear_markers;
 };
 
 // Recently invoked Papyrus native functions, for the trace window. The engine

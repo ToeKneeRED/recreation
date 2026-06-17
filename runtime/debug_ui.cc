@@ -457,6 +457,20 @@ void DebugUi::RenderQuestPanel(QuestPanel* quests) {
   ImGui::Text("%zu quests, %d running", quests->quests.size(), running);
   ImGui::TextDisabled("Papyrus quest scripts attached from VMAD");
 
+  // NPC follow: toggle the reference the player is looking at as a follower.
+  if (quests->look_target != 0 && quests->set_follower) {
+    ImGui::TextUnformatted(quests->look_label.empty() ? "(look target)" : quests->look_label.c_str());
+    ImGui::SameLine();
+    if (quests->look_following) {
+      if (ImGui::SmallButton("Stop following")) quests->set_follower(quests->look_target, false);
+    } else if (ImGui::SmallButton("Follow me")) {
+      quests->set_follower(quests->look_target, true);
+    }
+  }
+  if (quests->follower_count > 0 || quests->marker_count > 0)
+    ImGui::TextDisabled("%d follower(s), %d objective marker(s)", quests->follower_count,
+                        quests->marker_count);
+
   // Case-insensitive name/id filter (1000+ quests load).
   static char filter[64] = "";
   ImGui::SetNextItemWidth(-1);
@@ -539,6 +553,35 @@ void DebugUi::RenderQuestPanel(QuestPanel* quests) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Complete") && quests->set_stage)
       quests->set_stage(d.handle, d.completion_stage);
+  }
+
+  // Objective waypoint authoring: drop a marker at the player for the current
+  // objective; reaching it advances the quest to the entered stage. The pair of
+  // "set marker, set the stage it advances to" lets you wire a quest's path
+  // in-world without scripts.
+  if (quests->place_marker) {
+    int current_obj = -1;
+    for (const QuestPanel::Objective& o : d.objectives)
+      if (o.displayed && !o.completed) {
+        current_obj = o.index;
+        break;
+      }
+    static int marker_stage = 0;
+    ImGui::SetNextItemWidth(70);
+    ImGui::InputInt("##markerstage", &marker_stage, 0, 0);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(current_obj < 0);
+    if (ImGui::SmallButton("Place marker @ player"))
+      quests->place_marker(d.handle, current_obj, marker_stage);
+    ImGui::EndDisabled();
+    if (quests->clear_markers) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Clear")) quests->clear_markers();
+    }
+    if (current_obj >= 0)
+      ImGui::TextDisabled("objective %d -> reaching advances to stage %d", current_obj, marker_stage);
+    else
+      ImGui::TextDisabled("no current objective to mark");
   }
 
   if (!d.stages.empty() && ImGui::TreeNode("Stages")) {

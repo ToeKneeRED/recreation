@@ -66,6 +66,12 @@ std::string BuildQuestSection() {
   }
   s += R"(  }
 
+  panel quest_marker_box {
+    position: absolute; top: 52; left: 0; width: 100vw; layout: column; align: center;
+    text quest_marker_text { text: ""; font-size: 13; color: #ffe6a0; letter-spacing: 1;
+      text-shadow-color: #000000d0; text-shadow-x: 1; text-shadow-y: 1; }
+  }
+
   panel quest_toast_box {
     position: absolute; top: 120; left: 0; width: 100vw; layout: column; align: center;
     text quest_toast { text: ""; font-size: 21; color: #ffcc55; letter-spacing: 3;
@@ -137,6 +143,10 @@ panel root {
       panel compass_marker {
         position: absolute; top: 0; left: 169; width: 2; height: 30;
         background: #ffcc55;
+      }
+      panel quest_pip {
+        position: absolute; top: 10; left: 0; width: 9; height: 9; corner-radius: 5;
+        background: #ffd24a; border-color: #000000aa; border-width: 1; visibility: collapsed;
       }
     }
   }
@@ -306,6 +316,10 @@ struct GameUi::Impl {
   float toast_age = kToastSeconds + 1.0f;  // starts expired, so hidden
   std::string activate_prompt;
   DialogueView dialogue;
+  // Objective compass waypoint, driven by the engine each frame.
+  bool marker_active = false;
+  float marker_bearing = 0.0f;   // degrees, 0 = ahead, + = right
+  float marker_distance = 0.0f;  // meters
 
   void SetStyleField(const char* name, void (*mutate)(ugui::Style&, float), float arg) {
     ugui::wid w = ui.FindWidget(name);
@@ -433,6 +447,13 @@ void GameUi::SetActivatePrompt(const std::string& prompt) {
   if (impl_->initialized) impl_->activate_prompt = prompt;
 }
 
+void GameUi::SetObjectiveMarker(bool active, float bearing_deg, float distance_m) {
+  if (!impl_->initialized) return;
+  impl_->marker_active = active;
+  impl_->marker_bearing = bearing_deg;
+  impl_->marker_distance = distance_m;
+}
+
 void GameUi::SetDialogue(const DialogueView& dialogue) {
   if (impl_->initialized) impl_->dialogue = dialogue;
 }
@@ -468,6 +489,22 @@ void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 fra
   impl->SetStyleField(
       "compass_strip", [](ugui::Style& s, float v) { s.left_offset = ugui::Length::Px(v); },
       CompassStripLeft(heading));
+
+  // Objective compass waypoint: a gold pip at the bearing to the active quest
+  // marker, plus a distance readout under the compass. 70 px on the strip spans
+  // 45 degrees, so the pip tracks the same scale as the cardinal labels.
+  impl->SetVisible("quest_pip", impl->marker_active);
+  impl->SetVisible("quest_marker_box", impl->marker_active);
+  if (impl->marker_active) {
+    float off = impl->marker_bearing / 45.0f * kCompassLabel;
+    off = std::clamp(off, -(kCompassCenter - 8.0f), kCompassCenter - 8.0f);
+    impl->SetStyleField(
+        "quest_pip", [](ugui::Style& s, float v) { s.left_offset = ugui::Length::Px(v); },
+        kCompassCenter + off - 4.5f);
+    char mbuf[48];
+    std::snprintf(mbuf, sizeof(mbuf), "%.0f m", impl->marker_distance);
+    ugui::SetText(impl->ui.FindWidget("quest_marker_text"), mbuf);
+  }
 
   // Stamina drains while sprinting (shift + movement), regenerates otherwise.
   bool moving = in.key(Key::kW) || in.key(Key::kA) || in.key(Key::kS) || in.key(Key::kD);
@@ -569,6 +606,7 @@ void GameUi::Build(Window&, render::Renderer&, FlyCamera&, f32, render::FrameVie
 void GameUi::SetQuest(const HudQuest&) {}
 void GameUi::FlashQuestUpdate(const std::string&) {}
 void GameUi::SetActivatePrompt(const std::string&) {}
+void GameUi::SetObjectiveMarker(bool, float, float) {}
 void GameUi::SetDialogue(const DialogueView&) {}
 void GameUi::ToggleMenu() {}
 bool GameUi::menu_open() const { return false; }

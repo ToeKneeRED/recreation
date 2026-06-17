@@ -214,6 +214,20 @@ class Engine {
     std::vector<DialogueOption> options;
   };
 
+  // A world waypoint for one quest objective: where the objective sends the
+  // player and the stage reaching it advances to. Armed only while its objective
+  // is the tracked quest's current displayed-and-incomplete one; entering
+  // `radius` (any player, host authoritative) fires SetStage(advance_stage) once.
+  // Authored at runtime from the debugger or seeded for a quest.
+  struct QuestMarker {
+    u64 quest = 0;
+    i32 objective = 0;
+    i32 advance_stage = -1;  // <0: marker is display-only, never triggers
+    Vec3 pos{};
+    f32 radius = 2.5f;
+    bool fired = false;  // a trigger fires once; cleared by re-authoring
+  };
+
   bool LoadGameData();
   bool LoadInterior();
   void MountArchives();
@@ -226,6 +240,18 @@ class Engine {
   // Pushes the running-quest snapshot to the HUD tracker: title, objectives,
   // and the "quest updated" banner when the tracked quest changes.
   void UpdateQuestHud(const std::vector<quest::QuestStatus>& running);
+  // Objective waypoints: arms the marker for the tracked quest's current
+  // objective, drives the HUD compass marker + distance from it, and (host
+  // authoritative) advances the quest's stage when a player reaches the marker.
+  // The stage advance runs on the guest and replicates like any other, so a
+  // client progresses by walking into the same trigger the host evaluates.
+  void UpdateObjectiveMarkers(const std::vector<quest::QuestStatus>& running);
+  // Steers every registered follower NPC toward its formation slot behind the
+  // player and writes the resulting transform (host authoritative; the motion
+  // streams to clients via actor sync). A no-op with no followers.
+  void UpdateFollowers(f32 dt);
+  // Registers / clears an NPC (by form handle) as a follower of the player.
+  void SetFollower(u64 npc, bool follow);
   // REC_QUEST_REPORT debug aid: drives the named quest through its stages to
   // completion on the guest thread and prints the journey to stdout.
   void ReportQuestToCompletion(const std::string& edid);
@@ -425,6 +451,11 @@ class Engine {
   // so a stage/objective change raises the "quest updated" banner once.
   u64 hud_tracked_quest_ = 0;
   u32 hud_tracked_revision_ = 0;
+  // Objective waypoints (host authoritative). Armed against the tracked quest's
+  // current displayed objective; reaching one advances the quest's stage.
+  base::Vector<QuestMarker> quest_markers_;
+  // NPCs steered to follow the player, keyed by form handle -> formation slot.
+  base::UnorderedMap<u64, i32> followers_;
   // Activation: the form the player is looking at in walk mode (0 = none) and
   // the cached HUD label, recomputed only when the target changes.
   u64 activate_target_ = 0;
