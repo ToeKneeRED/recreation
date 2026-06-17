@@ -12,6 +12,7 @@
 
 #include "ecs/world.h"
 #include "net/actor_sync.h"
+#include "net/objective_marker_net.h"
 #include "net/protocol.h"
 #include "net/quest_replication.h"
 #include "net/replication.h"
@@ -65,6 +66,11 @@ class ServerSession final : public Session {
   void SetStageRequestSink(std::function<void(const StageRequest&)> sink) {
     stage_request_sink_ = std::move(sink);
   }
+
+  // Replicates the active objective waypoint to every client on the reliable
+  // channel. The engine calls this when the marker changes (active=false clears
+  // the clients' pip), not every tick.
+  void SendObjectiveMarker(const ObjectiveMarkerState& m);
 
   // Broadcasts a batch of quest-driven world commands (already drained and
   // applied locally by the host) to every client on the reliable channel. A
@@ -165,6 +171,13 @@ class ClientSession final : public Session {
     actor_sink_ = std::move(sink);
   }
 
+  // Sink invoked once per kObjectiveMarker received. The engine wires this to
+  // feed the HUD compass pip, recomputed from the client's own camera. When
+  // unset, markers are decoded and dropped.
+  void SetObjectiveMarkerSink(std::function<void(const ObjectiveMarkerState&)> sink) {
+    objective_marker_sink_ = std::move(sink);
+  }
+
   bool joined() const { return joined_; }
   u64 player_net_id() const { return player_net_id_; }
   ecs::Entity player_entity() const { return applier_.Find(player_net_id_); }
@@ -177,6 +190,7 @@ class ClientSession final : public Session {
   tx::network::ZClient client_;
   SnapshotApplier applier_;
   std::function<void(const quest::QuestStatus&)> quest_sink_;
+  std::function<void(const ObjectiveMarkerState&)> objective_marker_sink_;
   std::function<void(const std::vector<world::WorldCommand>&)> world_command_sink_;
   std::function<void(const std::vector<ActorState>&)> actor_sink_;
   PlayerInput input_;

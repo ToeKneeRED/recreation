@@ -31,6 +31,7 @@ enum class MessageType : u16 {
   kActorSync = 109,      // server -> clients: NPC transforms that changed
   kDialogueSelect = 110,  // client -> server: the player chose a dialogue INFO
   kStageRequest = 111,    // client -> server: a debugger stage/objective/running change
+  kObjectiveMarker = 112,  // server -> clients: the active quest objective waypoint
 };
 
 inline tx::network::PacketType ToPacketType(MessageType type) {

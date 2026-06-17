@@ -1,5 +1,6 @@
 recreation_add_module(net
   actor_sync.cc
+  objective_marker_net.cc
   quest_replication.cc
   replication.cc
   session.cc

@@ -269,6 +269,15 @@ void ServerSession::SendWorldCommands(const std::vector<world::WorldCommand>& co
                           /*reliable=*/true, tx::network::PacketPriority::Medium));
 }
 
+void ServerSession::SendObjectiveMarker(const ObjectiveMarkerState& m) {
+  if (clients_.size() == 0) return;
+  // Reliable: a dropped marker would leave the clients' compass pip stale until
+  // the next change.
+  server_.Push(MakePacket(tx::network::ZPeerId::to_all, MessageType::kObjectiveMarker,
+                          EncodeObjectiveMarker(m), /*reliable=*/true,
+                          tx::network::PacketPriority::Medium));
+}
+
 // --- client ---
 
 ClientSession::ClientSession(SessionConfig config) : config_(std::move(config)) {
@@ -436,6 +445,17 @@ void ClientSession::PollMessages(ecs::World& world) {
           actor_sink_(*actors);
         } else {
           REC_WARN("net: dropped corrupt actor sync");
+        }
+        break;
+      }
+      case MessageType::kObjectiveMarker: {
+        if (!objective_marker_sink_) break;
+        const ByteSpan blob(reinterpret_cast<const u8*>(packet.data.data()),
+                            packet.data.size());
+        if (auto marker = DecodeObjectiveMarker(blob)) {
+          objective_marker_sink_(*marker);
+        } else {
+          REC_WARN("net: dropped corrupt objective marker");
         }
         break;
       }
