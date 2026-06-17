@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -277,10 +278,18 @@ class Engine {
   // an engine Skeleton and the worn body-part NIFs as skinned meshes bound to
   // it by bone name. Returns false if the core skeleton/body could not load.
   bool CreateSkyrimActor();
+  // Loads the shared character rig + meshes into `out` (skeleton, basis, bind
+  // pose, body/head/hair parts), uploading each mesh once. Reused by the player
+  // actor and as the template every NPC actor is instanced from. Returns false
+  // if the core skeleton/body could not load.
+  bool LoadActorTemplate(Actor* out);
   // Loads one body-part NIF, uploads it, and appends it to `actor`. Skinned
   // parts bind to the skeleton by name; a part with no skin falls back to a
   // rigid mesh riding `attach_bone` (>= 0), used for the head and hair.
   bool LoadActorPart(const std::string& path, Actor& actor, i32 attach_bone = -1);
+  // Gives every placed NPC entity a skinned actor (instanced from the shared
+  // template) and drops actors whose NPC entity has streamed out. Non-headless.
+  void SyncNpcActors();
   // Collects up to `max` non-female HDPT model paths of a head-part type
   // (3 = hair, 1 = face), for assembling an actor's head.
   base::Vector<std::string> FindHeadPartModels(u32 part_type, u32 max);
@@ -309,8 +318,10 @@ class Engine {
   void ServerSimulateActors(f32 dt);
   // Advances every actor's gait and recomputes its model-space bone matrices.
   void UpdateActors(f32 dt);
+  void UpdateOneActor(Actor& actor, f32 dt);
   // Appends each actor's skinned draws + bone palettes to the frame view.
   void EmitActorDraws(render::FrameView& view);
+  void EmitOneActor(Actor& actor, render::FrameView& view);
 
   bool particles_enabled_ = false;
   Vec3 particle_emitter_{0, 0, 0};
@@ -399,6 +410,13 @@ class Engine {
 
   base::Vector<Actor> actors_;
   i32 player_actor_ = -1;  // index into actors_ the walk mode drives, -1 = none
+  // Placed-NPC actors, keyed by ECS entity (generation<<32 | index). Separate
+  // from actors_ so streaming can add/remove them without disturbing the player
+  // index. Each is instanced from npc_template_ (own pose, shared GPU meshes).
+  std::optional<Actor> npc_template_;
+  bool npc_template_failed_ = false;
+  base::UnorderedMap<u64, Actor> npc_actors_;
+  base::Vector<u64> scratch_dead_actors_;
 
   // Walk-on-the-map mode: WASD drives the player actor, mouse looks, C swaps
   // first/third person. Toggled with T; otherwise the fly camera roams.

@@ -1207,7 +1207,7 @@ base::Vector<std::string> Engine::FindHeadPartModels(u32 part_type, u32 max) {
   return out;
 }
 
-bool Engine::CreateSkyrimActor() {
+bool Engine::LoadActorTemplate(Actor* out) {
   const std::string skel_path = "meshes/actors/character/character assets/skeleton.nif";
   auto skel_bytes = vfs_.Read(asset::NormalizePath(skel_path));
   if (!skel_bytes) {
@@ -1220,17 +1220,8 @@ bool Engine::CreateSkyrimActor() {
     REC_ERROR("failed to parse skeleton.nif");
     return false;
   }
-  REC_INFO("loaded skyrim skeleton: {} bones", skeleton.bones.size());
-
-  Actor actor;
-  actor.entity = world_.Create();
-  world_.Add(actor.entity, world::Transform{.position = {0, 0, 0}});
-  actor.skeleton = std::move(skeleton);
-  actor.pose.ResetToBind(actor.skeleton);
-  actor.animate = true;
-  actor.speed = 0.0f;  // idle while tuning foot ik
-  actor.foot_ik = true;
-  actor.ankle_height = 6.0f;  // game units: the ankle sits ~6u above the sole
+  out->skeleton = std::move(skeleton);
+  out->pose.ResetToBind(out->skeleton);
   // Bethesda game space (Z-up, ~70 units/m) -> engine space (Y-up, metres).
   constexpr f32 s = 0.01428f;
   Mat4 basis{};
@@ -1238,12 +1229,11 @@ bool Engine::CreateSkyrimActor() {
   basis.m[6] = -s;
   basis.m[9] = s;
   basis.m[15] = 1.0f;
-  actor.skeleton_to_local = basis;
-  actor.ik_up = {0, 0, 1};      // Bethesda up
-  actor.ik_forward = {0, 1, 0};  // Bethesda forward
-  // Bind pose up front so rigid parts (head, hair) can capture their bone's
-  // bind transform.
-  anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+  out->skeleton_to_local = basis;
+  out->ik_up = {0, 0, 1};       // Bethesda up
+  out->ik_forward = {0, 1, 0};  // Bethesda forward
+  // Bind pose up front so rigid parts (head, hair) capture their bone's bind.
+  anim::ComputeModelMatrices(out->skeleton, out->pose, &out->bone_model);
 
   const std::string skinned_parts[] = {
       "meshes/actors/character/character assets/malebody_1.nif",
@@ -1251,20 +1241,34 @@ bool Engine::CreateSkyrimActor() {
       "meshes/actors/character/character assets/malefeet_1.nif",
   };
   bool any = false;
-  for (const std::string& p : skinned_parts) any = LoadActorPart(p, actor) || any;
+  for (const std::string& p : skinned_parts) any = LoadActorPart(p, *out) || any;
   if (!any) {
     REC_ERROR("no skyrim body parts loaded");
     return false;
   }
   // Head + hair ride the head bone (static meshes, no FaceGen morphs).
-  i32 head_bone = actor.skeleton.Find("NPC Head [Head]");
-  LoadActorPart("meshes/actors/character/character assets/malehead.nif", actor, head_bone);
+  i32 head_bone = out->skeleton.Find("NPC Head [Head]");
+  LoadActorPart("meshes/actors/character/character assets/malehead.nif", *out, head_bone);
   for (const std::string& hair : FindHeadPartModels(/*hair=*/3, 24)) {
-    if (LoadActorPart(hair, actor, head_bone)) {
+    if (LoadActorPart(hair, *out, head_bone)) {
       REC_INFO("hair: {}", hair);
       break;
     }
   }
+  return true;
+}
+
+bool Engine::CreateSkyrimActor() {
+  Actor actor;
+  if (!LoadActorTemplate(&actor)) return false;
+  REC_INFO("loaded skyrim skeleton: {} bones", actor.skeleton.bones.size());
+
+  actor.entity = world_.Create();
+  world_.Add(actor.entity, world::Transform{.position = {0, 0, 0}});
+  actor.animate = true;
+  actor.speed = 0.0f;  // idle while tuning foot ik
+  actor.foot_ik = true;
+  actor.ankle_height = 6.0f;  // game units: the ankle sits ~6u above the sole
 
   // Character capsule so walk mode (T) drives the Skyrim actor too. Capsule
   // half-height+radius = 0.85, so the entity origin (feet) sits on the ground.
@@ -1304,66 +1308,107 @@ bool Engine::CreateSkyrimActor() {
 }
 
 void Engine::UpdateActors(f32 dt) {
-  for (Actor& actor : actors_) {
-    if (!actor.animate) {
-      actor.pose.ResetToBind(actor.skeleton);
-      anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
-      continue;
-    }
-    actor.locomotion.phase = anim::AdvancePhase(actor.locomotion.phase, actor.speed, dt);
-    actor.locomotion.Apply(actor.skeleton, actor.speed, &actor.pose);
+  for (Actor& actor : actors_) UpdateOneActor(actor, dt);
+  for (auto entry : npc_actors_) UpdateOneActor(entry.value, dt);
+}
 
-    if (actor.foot_ik && physics_.initialized()) {
-      const world::Transform* t = world_.Get<world::Transform>(actor.entity);
-      Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
-      Mat4 inv_model = Inverse(model);
-      // Foot IK works in model space; bridge to the engine-space physics world.
-      auto ground = [&](const Vec3& origin, Vec3* hit, Vec3* normal) -> bool {
-        physics::PhysicsWorld::RayHit rh;
-        if (!physics_.Raycast(TransformPoint(model, origin), {0, -1, 0}, 3.0f, &rh)) return false;
-        *hit = TransformPoint(inv_model, rh.position);
-        *normal = Normalize(TransformDir(inv_model, rh.normal));
-        return true;
-      };
-      // Stance weights: at speed the planted foot gets IK while the swing foot
-      // is left to lift; when nearly idle both feet plant.
-      f32 theta = actor.locomotion.phase * 6.2831853f;
-      f32 leg = std::sin(theta);
-      f32 idle = std::clamp(1.0f - actor.speed, 0.0f, 1.0f);
-      f32 foot_weight[2] = {std::max(idle, std::clamp(0.5f + leg * 2.0f, 0.0f, 1.0f)),
-                            std::max(idle, std::clamp(0.5f - leg * 2.0f, 0.0f, 1.0f))};
-      anim::SolveFootIk(actor.skeleton, ground, actor.ik_up, actor.ik_forward, actor.ankle_height,
-                        foot_weight, &actor.pose, &actor.bone_model);
-    } else {
-      anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
-    }
+void Engine::UpdateOneActor(Actor& actor, f32 dt) {
+  if (!actor.animate) {
+    actor.pose.ResetToBind(actor.skeleton);
+    anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+    return;
+  }
+  actor.locomotion.phase = anim::AdvancePhase(actor.locomotion.phase, actor.speed, dt);
+  actor.locomotion.Apply(actor.skeleton, actor.speed, &actor.pose);
+
+  if (actor.foot_ik && physics_.initialized()) {
+    const world::Transform* t = world_.Get<world::Transform>(actor.entity);
+    Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
+    Mat4 inv_model = Inverse(model);
+    // Foot IK works in model space; bridge to the engine-space physics world.
+    auto ground = [&](const Vec3& origin, Vec3* hit, Vec3* normal) -> bool {
+      physics::PhysicsWorld::RayHit rh;
+      if (!physics_.Raycast(TransformPoint(model, origin), {0, -1, 0}, 3.0f, &rh)) return false;
+      *hit = TransformPoint(inv_model, rh.position);
+      *normal = Normalize(TransformDir(inv_model, rh.normal));
+      return true;
+    };
+    // Stance weights: at speed the planted foot gets IK while the swing foot is
+    // left to lift; when nearly idle both feet plant.
+    f32 theta = actor.locomotion.phase * 6.2831853f;
+    f32 leg = std::sin(theta);
+    f32 idle = std::clamp(1.0f - actor.speed, 0.0f, 1.0f);
+    f32 foot_weight[2] = {std::max(idle, std::clamp(0.5f + leg * 2.0f, 0.0f, 1.0f)),
+                          std::max(idle, std::clamp(0.5f - leg * 2.0f, 0.0f, 1.0f))};
+    anim::SolveFootIk(actor.skeleton, ground, actor.ik_up, actor.ik_forward, actor.ankle_height,
+                      foot_weight, &actor.pose, &actor.bone_model);
+  } else {
+    anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
   }
 }
 
 void Engine::EmitActorDraws(render::FrameView& view) {
-  for (Actor& actor : actors_) {
-    const world::Transform* t = world_.Get<world::Transform>(actor.entity);
-    Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
-    for (ActorPart& part : actor.parts) {
-      render::DrawItem item;
-      item.mesh = part.mesh.hash;
-      if (part.attach_bone >= 0 && part.attach_bone < static_cast<i32>(actor.bone_model.size())) {
-        // Rigid part: ride the bone's animated delta from its bind transform.
-        item.transform = model * actor.bone_model[part.attach_bone] * part.attach_inverse_bind;
-        item.prev_transform = item.transform;
-        item.skin_offset = -1;
-      } else {
-        item.transform = model;
-        item.prev_transform = actor.prev_model;
-        item.skin_offset = static_cast<i32>(view.bone_matrices.size());
-        base::Vector<Mat4> palette;
-        anim::BuildSkinPalette(actor.bone_model, part.skin, part.remap, &palette);
-        for (const Mat4& m : palette) view.bone_matrices.push_back(m);
-      }
-      view.draws.push_back(item);
+  for (Actor& actor : actors_) EmitOneActor(actor, view);
+  for (auto entry : npc_actors_) EmitOneActor(entry.value, view);
+}
+
+void Engine::EmitOneActor(Actor& actor, render::FrameView& view) {
+  const world::Transform* t = world_.Get<world::Transform>(actor.entity);
+  Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
+  for (ActorPart& part : actor.parts) {
+    render::DrawItem item;
+    item.mesh = part.mesh.hash;
+    if (part.attach_bone >= 0 && part.attach_bone < static_cast<i32>(actor.bone_model.size())) {
+      // Rigid part: ride the bone's animated delta from its bind transform.
+      item.transform = model * actor.bone_model[part.attach_bone] * part.attach_inverse_bind;
+      item.prev_transform = item.transform;
+      item.skin_offset = -1;
+    } else {
+      item.transform = model;
+      item.prev_transform = actor.prev_model;
+      item.skin_offset = static_cast<i32>(view.bone_matrices.size());
+      base::Vector<Mat4> palette;
+      anim::BuildSkinPalette(actor.bone_model, part.skin, part.remap, &palette);
+      for (const Mat4& m : palette) view.bone_matrices.push_back(m);
     }
-    actor.prev_model = model;
+    view.draws.push_back(item);
   }
+  actor.prev_model = model;
+}
+
+void Engine::SyncNpcActors() {
+  if (config_.headless) return;  // dedicated server doesn't render NPCs
+  // Build the shared rig once; every NPC actor is instanced from it.
+  if (!npc_template_) {
+    if (npc_template_failed_) return;
+    Actor tmpl;
+    if (!LoadActorTemplate(&tmpl)) {
+      npc_template_failed_ = true;
+      REC_WARN("npc rendering disabled: actor template failed to load");
+      return;
+    }
+    tmpl.animate = true;
+    tmpl.speed = 0.0f;     // idle
+    tmpl.foot_ik = false;  // skip per-NPC ground raycasts
+    npc_template_ = std::move(tmpl);
+    REC_INFO("npc actor template ready ({} parts)", npc_template_->parts.size());
+  }
+  // Give every NPC entity without one a skinned actor instance (own pose, GPU
+  // meshes shared by hash with the template).
+  world_.Each<world::Npc, world::Transform>([&](ecs::Entity e, world::Npc&, world::Transform&) {
+    const u64 key = static_cast<u64>(e.generation) << 32 | e.index;
+    if (npc_actors_.find(key)) return;
+    Actor a = *npc_template_;
+    a.entity = e;
+    a.character = 0;
+    a.pose.ResetToBind(a.skeleton);
+    npc_actors_.insert(key, std::move(a));
+  });
+  // Drop actors whose NPC entity streamed out, so none render at the origin.
+  scratch_dead_actors_.clear();
+  for (auto entry : npc_actors_)
+    if (!world_.IsAlive(entry.value.entity)) scratch_dead_actors_.push_back(entry.key);
+  for (u64 key : scratch_dead_actors_) npc_actors_.erase(key);
 }
 
 bool Engine::LoadGameData() {
@@ -2293,6 +2338,7 @@ bool Engine::RunFrame() {
       f32 frame_delta = static_cast<f32>(timer_.frame_delta());
       debug_ui_.BeginFrame();
       UpdateCamera(frame_delta);
+      SyncNpcActors();  // add/remove NPC actors as cells stream in/out
       UpdateActors(frame_delta);
       scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
 
