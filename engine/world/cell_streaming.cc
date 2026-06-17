@@ -18,6 +18,7 @@ constexpr u32 kLandGridPoints = 33;
 constexpr u32 kName = FourCc('N', 'A', 'M', 'E');
 constexpr u32 kData = FourCc('D', 'A', 'T', 'A');
 constexpr u32 kXscl = FourCc('X', 'S', 'C', 'L');
+constexpr u32 kAchr = FourCc('A', 'C', 'H', 'R');  // placed actor (NPC) reference
 constexpr u32 kModl = FourCc('M', 'O', 'D', 'L');
 constexpr u32 kVhgt = FourCc('V', 'H', 'G', 'T');
 constexpr u32 kVnml = FourCc('V', 'N', 'M', 'L');
@@ -585,6 +586,29 @@ bool CellStreamer::SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64
   std::memcpy(&base_raw, name->data.data(), 4);
   bethesda::GlobalFormId base_id =
       records_.ResolveFrom(bethesda::RawFormId{base_raw}, stored->winning_plugin);
+
+  // Placed actors (ACHR) have no static model -- their visuals come from the base
+  // NPC's race/skeleton, rendered separately. Create an interactable actor entity
+  // from the placement, tagged with its base, and skip the static-mesh path.
+  if (stored->header.type == kAchr) {
+    f32 placement[6];
+    std::memcpy(placement, data->data.data(), 24);
+    ecs::Entity entity = world.Create();
+    Transform transform;
+    Vec3 position = ToEngine(placement[0], placement[1], placement[2]);
+    transform.position[0] = position.x;
+    transform.position[1] = position.y;
+    transform.position[2] = position.z;
+    RefrRotationToEngine(placement + 3, transform.rotation);
+    world.Add(entity, transform);
+    world.Add(entity, FormLink{id});
+    world.Add(entity, Npc{base_id});
+    world.Add(entity, CellMembership{grid_x, grid_y, interior});
+    cell.entities.push_back(entity);
+    ++spawned_entities_;
+    ++spawned_npcs_;
+    return true;
+  }
 
   bool budget_exceeded = false;
   const asset::Mesh* mesh = MeshForBase(base_id, mesh_budget, budget_exceeded);

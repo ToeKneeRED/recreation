@@ -62,6 +62,7 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
                           const GameProfile& profile) {
   constexpr u32 kCell = FourCc('C', 'E', 'L', 'L');
   constexpr u32 kRefr = FourCc('R', 'E', 'F', 'R');
+  constexpr u32 kAchr = FourCc('A', 'C', 'H', 'R');  // placed actor (NPC) reference
   constexpr u32 kLand = FourCc('L', 'A', 'N', 'D');
   constexpr u32 kXclc = FourCc('X', 'C', 'L', 'C');
   constexpr u32 kData = FourCc('D', 'A', 'T', 'A');
@@ -117,15 +118,16 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
         CellGridSlot* slot = cell_grid_.emplace(id.packed()).first;
         slot->worldspace = world;
         slot->grid_key = grid_key;
-      } else if ((header.type == kRefr || header.type == kLand) && ctx.cell.value != 0 &&
-                 ctx.worldspace.value == 0) {
-        // Interior cell children, persistent and temporary alike.
-        if (header.type == kRefr && inserted &&
+      } else if ((header.type == kRefr || header.type == kAchr || header.type == kLand) &&
+                 ctx.cell.value != 0 && ctx.worldspace.value == 0) {
+        // Interior cell children, persistent and temporary alike. Placed actors
+        // (ACHR) are indexed alongside object refs so NPCs load with the cell.
+        if ((header.type == kRefr || header.type == kAchr) && inserted &&
             (ctx.cell_group_type == 8 || ctx.cell_group_type == 9)) {
           interior_[order.Resolve(ctx.cell, i, masters).packed()].push_back(id.packed());
         }
-      } else if ((header.type == kRefr || header.type == kLand) && ctx.cell.value != 0 &&
-                 ctx.cell_group_type == 9) {
+      } else if ((header.type == kRefr || header.type == kAchr || header.type == kLand) &&
+                 ctx.cell.value != 0 && ctx.cell_group_type == 9) {
         // Temporary cell children, listed under their cell's grid slot.
         u64 cell = order.Resolve(ctx.cell, i, masters).packed();
         const CellGridSlot* slot = cell_grid_.find(cell);
@@ -138,8 +140,8 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
           // Overridden refs are already listed under their cell.
           entry->refs.push_back(id.packed());
         }
-      } else if (header.type == kRefr && inserted && ctx.cell_group_type == 8 &&
-                 ctx.worldspace.value != 0) {
+      } else if ((header.type == kRefr || header.type == kAchr) && inserted &&
+                 ctx.cell_group_type == 8 && ctx.worldspace.value != 0) {
         // Persistent worldspace refs (load doors, bridges) hang off the
         // dummy cell; bin them by placement position so the streamer treats
         // them like temporary refs.

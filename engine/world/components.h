@@ -29,6 +29,14 @@ struct CellMembership {
   bool interior = false;
 };
 
+// A placed NPC reference (ACHR), tagged with its base actor (NPC_) so callers
+// can distinguish actors from static refs and resolve their base data. Loaded
+// from cell data on every peer, so placement needs no replication; only dynamic
+// changes (move/disable/spawn) ride the quest world-command channel.
+struct Npc {
+  bethesda::GlobalFormId base;
+};
+
 // Tag marking an entity disabled (Papyrus Disable()); the render pass skips it.
 // A tag carries no data -- its presence is the state.
 struct Hidden {};

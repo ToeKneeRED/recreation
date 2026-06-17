@@ -74,6 +74,7 @@ class CellStreamer {
 
   size_t loaded_cell_count() const { return loaded_.size(); }
   size_t spawned_entity_count() const { return spawned_entities_; }
+  size_t spawned_npc_count() const { return spawned_npcs_; }
   size_t converted_mesh_count() const { return base_meshes_.size(); }
 
  private:
@@ -123,6 +124,7 @@ class CellStreamer {
   asset::AssetId land_material_;
   f32 default_water_height_ = -3.0e38f;  // worldspace WRLD DNAM, game units
   size_t spawned_entities_ = 0;
+  size_t spawned_npcs_ = 0;
   size_t water_planes_ = 0;
   u32 skipped_refs_ = 0;
   bool announced_idle_ = false;
