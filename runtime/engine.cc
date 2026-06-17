@@ -2513,17 +2513,29 @@ void Engine::Mq101DemoTick(f32 dt) {
   m.pos = ppos + fwd * 6.0f;
   quest_markers_.push_back(m);
 
-  // Recruit a few nearby NPCs as companions when the walk begins.
+  // Recruit the nearest few NPCs as companions when the walk begins, so the
+  // follow AI leads the cell's actual actors. Nearest-first (not a fixed radius)
+  // so a populated cell like the Helgen keep always yields company.
   int recruited = 0;
-  if (first)
+  if (first) {
+    struct Cand {
+      u64 form;
+      f32 dist_sq;
+    };
+    std::vector<Cand> cands;
     world_.Each<world::Npc, world::FormLink, world::Transform>(
         [&](ecs::Entity, world::Npc&, world::FormLink& link, world::Transform& t) {
-          if (recruited >= 3) return;
           const f32 dx = t.position[0] - ppos.x, dz = t.position[2] - ppos.z;
-          if (dx * dx + dz * dz > 15.0f * 15.0f) return;
-          SetFollower(link.form.packed(), true);
-          ++recruited;
+          cands.push_back({link.form.packed(), dx * dx + dz * dz});
         });
+    std::sort(cands.begin(), cands.end(),
+              [](const Cand& a, const Cand& b) { return a.dist_sq < b.dist_sq; });
+    for (size_t i = 0; i < cands.size() && recruited < 3; ++i) {
+      if (cands[i].dist_sq > 60.0f * 60.0f) break;  // skip actors across the whole cell
+      SetFollower(cands[i].form, true);
+      ++recruited;
+    }
+  }
 
   REC_INFO("demo: MQ101 waypoint dropped -> reaching it advances to stage {}{}", advance_to,
            first ? Fmt(", %d companion(s) recruited", recruited) : std::string());
