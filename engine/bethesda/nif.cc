@@ -154,6 +154,7 @@ struct ShaderInfo {
   f32 emissive_multiple = 1;
   f32 glossiness = 80;
   bool effect = false;
+  bool water = false;
   std::string effect_texture;
 };
 
@@ -671,6 +672,12 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
       r.Skip(4 + 4 + 4);  // clamp mode, alpha, refraction strength
       info.glossiness = r.Read<f32>();
       if (r.ok) shaders.emplace(i, info);
+    } else if (type == "BSWaterShaderProperty") {
+      // Placed water (river rapids, waterfalls pools): routed to the
+      // engine's water pipeline through a synthesized water material.
+      ShaderInfo info;
+      info.water = true;
+      shaders.emplace(i, info);
     } else if (type == "BSEffectShaderProperty") {
       ShaderInfo info;
       info.effect = true;
@@ -736,7 +743,17 @@ NifConversion ConvertNifScene(ByteSpan data, asset::AssetId id, std::string_view
     material.id = asset::MakeAssetId(name);
 
     const ShaderInfo* shader = shaders.find(static_cast<u32>(shader_block));
-    if (shader) {
+    if (shader && shader->water) {
+      material.base_color_factor[0] = 0.08f;
+      material.base_color_factor[1] = 0.12f;
+      material.base_color_factor[2] = 0.16f;
+      material.base_color_factor[3] = 0.75f;
+      material.metallic_factor = 0;
+      material.roughness_factor = 0.05f;
+      material.alpha_mode = asset::AlphaMode::kBlend;
+      material.two_sided = true;
+      material.is_water = true;
+    } else if (shader) {
       std::string diffuse, normal;
       if (shader->effect) {
         diffuse = NormalizeTexturePath(shader->effect_texture);
