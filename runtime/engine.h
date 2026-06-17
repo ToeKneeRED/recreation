@@ -35,6 +35,7 @@ struct EngineConfig {
   // Interior cell to load instead of streaming the exterior worldspace.
   // Editor id ("WhiterunBanneredMare") or a hex load order form id ("0x...").
   std::string interior;
+  f32 grass_density = 1.0f;  // multiplies every GRAS density, 0 disables
   render::RendererDesc renderer;
   bool headless = false;
   bool host_server = false;

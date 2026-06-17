@@ -61,6 +61,122 @@ int DumpCellRefs(const std::string& data_dir, int x, int y) {
   return 0;
 }
 
+// Dumps the LAND texture layers of one exterior cell, for grass placement
+// work.
+int DumpLand(const std::string& data_dir, int x, int y) {
+  const auto& profile = GameProfile::For(GameProfile::DetectFromDataDir(data_dir));
+  auto order = LoadOrder::FromPluginsTxt(data_dir + "/../plugins.txt", profile);
+  RecordStore records;
+  if (!records.LoadAll(data_dir, order, profile)) return 1;
+
+  GlobalFormId world = records.FindWorldspace(profile.exterior_worldspace);
+  const RecordStore::ExteriorGrid* grid = records.ExteriorCells(world);
+  const RecordStore::ExteriorCell* cell =
+      grid ? grid->find(RecordStore::GridKey(static_cast<rec::i16>(x), static_cast<rec::i16>(y)))
+           : nullptr;
+  if (!cell || cell->land == 0) {
+    std::printf("no land at %d,%d\n", x, y);
+    return 1;
+  }
+  GlobalFormId land_id{static_cast<rec::u16>(cell->land >> 32),
+                       static_cast<rec::u32>(cell->land)};
+  Record land;
+  if (!records.Parse(land_id, &land)) return 1;
+  rec::u16 plugin = records.Find(land_id)->winning_plugin;
+
+  auto ltex_name = [&](rec::u32 raw) {
+    if (raw == 0) return std::string("(default)");
+    GlobalFormId id = records.ResolveFrom(RawFormId{raw}, plugin);
+    Record ltex;
+    char buffer[64];
+    std::string edid;
+    if (records.Parse(id, &ltex)) edid = ltex.GetString(kEdid);
+    std::snprintf(buffer, sizeof(buffer), "%04x:%06x %s", id.plugin, id.local_id, edid.c_str());
+    return std::string(buffer);
+  };
+
+  constexpr rec::u32 kBtxt = rec::FourCc('B', 'T', 'X', 'T');
+  constexpr rec::u32 kAtxt = rec::FourCc('A', 'T', 'X', 'T');
+  constexpr rec::u32 kVtxt = rec::FourCc('V', 'T', 'X', 'T');
+  for (const Subrecord& sub : land.subrecords) {
+    if ((sub.type == kBtxt || sub.type == kAtxt) && sub.data.size() >= 8) {
+      rec::u32 raw;
+      std::memcpy(&raw, sub.data.data(), 4);
+      std::printf("%s quadrant=%u %s\n", sub.type == kBtxt ? "BTXT" : "ATXT", sub.data[4],
+                  ltex_name(raw).c_str());
+    } else if (sub.type == kVtxt) {
+      size_t count = sub.data.size() / 8;
+      float sum = 0, max = 0;
+      for (size_t i = 0; i + 8 <= sub.data.size(); i += 8) {
+        float opacity;
+        std::memcpy(&opacity, sub.data.data() + i + 4, 4);
+        sum += opacity;
+        if (opacity > max) max = opacity;
+      }
+      std::printf("  VTXT %zu points (of 289), mean=%.2f max=%.2f\n", count,
+                  count ? sum / static_cast<float>(count) : 0.0f, max);
+    }
+  }
+  return 0;
+}
+
+// Dumps every GRAS record and the LTEX -> GRAS links, for grass placement
+// work.
+int DumpGrass(const std::string& data_dir) {
+  const auto& profile = GameProfile::For(GameProfile::DetectFromDataDir(data_dir));
+  auto order = LoadOrder::FromPluginsTxt(data_dir + "/../plugins.txt", profile);
+  RecordStore records;
+  if (!records.LoadAll(data_dir, order, profile)) return 1;
+
+  constexpr rec::u32 kGnam = rec::FourCc('G', 'N', 'A', 'M');
+  records.EachOfType(rec::FourCc('G', 'R', 'A', 'S'),
+                     [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    Record gras;
+    if (!records.Parse(id, &gras)) return;
+    const Subrecord* data = gras.Find(kData);
+    std::printf("GRAS %04x:%06x %-24s model=%s data=%zu\n", id.plugin, id.local_id,
+                gras.GetString(kEdid).c_str(), gras.GetString(kModl).c_str(),
+                data ? static_cast<size_t>(data->data.size()) : 0);
+    if (data && data->data.size() >= 32) {
+      const rec::u8* d = data->data.data();
+      rec::u16 units_from_water;
+      rec::u32 water_type;
+      float pos_range, height_range, color_range, wave_period;
+      std::memcpy(&units_from_water, d + 4, 2);
+      std::memcpy(&water_type, d + 8, 4);
+      std::memcpy(&pos_range, d + 12, 4);
+      std::memcpy(&height_range, d + 16, 4);
+      std::memcpy(&color_range, d + 20, 4);
+      std::memcpy(&wave_period, d + 24, 4);
+      std::printf("  density=%u slope=%u..%u water=%u type=%u posR=%.1f heightR=%.1f "
+                  "colorR=%.2f wave=%.2f flags=%02x\n",
+                  d[0], d[1], d[2], units_from_water, water_type, pos_range, height_range,
+                  color_range, wave_period, d[28]);
+    }
+  });
+
+  records.EachOfType(rec::FourCc('L', 'T', 'E', 'X'),
+                     [&](GlobalFormId id, const RecordStore::StoredRecord& stored) {
+    Record ltex;
+    if (!records.Parse(id, &ltex)) return;
+    std::string grass;
+    for (const Subrecord& sub : ltex.subrecords) {
+      if (sub.type != kGnam || sub.data.size() < 4) continue;
+      rec::u32 raw;
+      std::memcpy(&raw, sub.data.data(), 4);
+      GlobalFormId gras_id = records.ResolveFrom(RawFormId{raw}, stored.winning_plugin);
+      char buffer[32];
+      std::snprintf(buffer, sizeof(buffer), " %04x:%06x", gras_id.plugin, gras_id.local_id);
+      grass += buffer;
+    }
+    if (!grass.empty()) {
+      std::printf("LTEX %04x:%06x %-24s grass:%s\n", id.plugin, id.local_id,
+                  ltex.GetString(kEdid).c_str(), grass.c_str());
+    }
+  });
+  return 0;
+}
+
 }  // namespace
 
 // Dumps header info and record counts of a plugin. Handy for checking the
@@ -70,7 +186,18 @@ int main(int argc, char** argv) {
   if (argc < 2) {
     std::printf("usage: esminfo <plugin.esm> [game: skyrimse|fo4|fo76]\n");
     std::printf("       esminfo <data-dir> cell <x,y>\n");
+    std::printf("       esminfo <data-dir> gras\n");
     return 1;
+  }
+
+  if (argc >= 3 && std::string(argv[2]) == "gras") return DumpGrass(argv[1]);
+
+  if (argc >= 4 && std::string(argv[2]) == "land") {
+    std::string coords = argv[3];
+    size_t comma = coords.find(',');
+    if (comma == std::string::npos) return 1;
+    return DumpLand(argv[1], std::stoi(coords.substr(0, comma)),
+                    std::stoi(coords.substr(comma + 1)));
   }
 
   if (argc >= 4 && std::string(argv[2]) == "cell") {

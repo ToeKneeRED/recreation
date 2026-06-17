@@ -180,9 +180,10 @@ void CellStreamer::Update(ecs::World& world, const Vec3& camera_position) {
     announced_idle_ = true;
     REC_INFO(
         "streaming idle: {} cells, {} entities, {} meshes converted, {} refs skipped, "
-        "{} land bakes, {} water planes",
+        "{} land bakes, {} water planes, {} grass instances ({} verts)",
         loaded_.size(), spawned_entities_, base_meshes_.size(), skipped_refs_,
-        baker_.baked_count(), water_planes_);
+        baker_.baked_count(), water_planes_, grass_baker_.total_instances(),
+        grass_baker_.total_vertices());
   } else if (!all_done) {
     announced_idle_ = false;
   }
@@ -200,6 +201,14 @@ bool CellStreamer::LoadCellIncremental(ecs::World& world, i16 grid_x, i16 grid_y
     SpawnTerrain(world, grid_x, grid_y, cell);
     SpawnWater(world, grid_x, grid_y, cell);
     cell.terrain_done = true;
+  }
+  if (!cell.grass_done) {
+    // The merge (and the one-time GRAS model conversions) costs like a mesh
+    // conversion, so it takes a budget slot of its own.
+    if (mesh_budget == 0) return false;
+    --mesh_budget;
+    SpawnGrass(world, grid_x, grid_y, cell);
+    cell.grass_done = true;
   }
   while (cell.next_ref < cell.source->refs.size()) {
     if (mesh_budget == 0 || ref_budget == 0) return false;
@@ -361,6 +370,7 @@ const asset::Mesh* CellStreamer::EnsureWaterMesh() {
   material.roughness_factor = 0.05f;
   material.alpha_mode = asset::AlphaMode::kBlend;
   material.two_sided = true;
+  material.is_water = true;
   assets_.AddMaterial(material);
 
   // One cell sized quad in Bethesda space (z up), instanced per flooded cell.
@@ -391,7 +401,7 @@ const asset::Mesh* CellStreamer::EnsureWaterMesh() {
   return assets_.AddMesh(std::move(built));
 }
 
-bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell) {
+bool CellStreamer::CellWaterHeight(const LoadedCell& cell, f32* height) const {
   if (cell.source->cell == 0) return false;
   bethesda::Record record;
   if (!records_.Parse({static_cast<u16>(cell.source->cell >> 32),
@@ -407,12 +417,19 @@ bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   }
   if (!(flags & kCellFlagHasWater)) return false;
 
-  f32 height = kNoCellWater;
+  f32 h = kNoCellWater;
   if (const bethesda::Subrecord* xclw = record.Find(kXclw); xclw && xclw->data.size() >= 4) {
-    std::memcpy(&height, xclw->data.data(), 4);
+    std::memcpy(&h, xclw->data.data(), 4);
   }
-  if (height >= kNoCellWater || std::isnan(height)) height = default_water_height_;
-  if (height <= -kNoCellWater) return false;
+  if (h >= kNoCellWater || std::isnan(h)) h = default_water_height_;
+  if (h <= -kNoCellWater) return false;
+  *height = h;
+  return true;
+}
+
+bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell) {
+  f32 height;
+  if (!CellWaterHeight(cell, &height)) return false;
 
   // Skip cells whose terrain sits entirely above the water level.
   if (cell.source->land != 0) {
@@ -446,6 +463,41 @@ bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   cell.entities.push_back(entity);
   ++spawned_entities_;
   ++water_planes_;
+  return true;
+}
+
+bool CellStreamer::SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell) {
+  if (settings_.grass_density <= 0.0f || cell.source->land == 0) return false;
+  bethesda::GlobalFormId land_id{static_cast<u16>(cell.source->land >> 32),
+                                 static_cast<u32>(cell.source->land)};
+  bethesda::Record land;
+  if (!records_.Parse(land_id, &land)) return false;
+
+  // Dry cells read as far above water so only the "above" grasses grow.
+  f32 water_height = -kNoCellWater;
+  CellWaterHeight(cell, &water_height);
+
+  const asset::Mesh* mesh =
+      grass_baker_.BuildCell(land, records_.Find(land_id)->winning_plugin, grid_x, grid_y,
+                             water_height, settings_.grass_density);
+  if (!mesh || !EnsureUploaded(*mesh)) return false;
+
+  // Same cell-origin transform as the terrain: instances are merged in
+  // cell-local Bethesda space.
+  ecs::Entity entity = world.Create();
+  Transform transform;
+  Vec3 position = ToEngine(static_cast<f32>(grid_x) * kCellSize,
+                           static_cast<f32>(grid_y) * kCellSize, 0.0f);
+  transform.position[0] = position.x;
+  transform.position[1] = position.y;
+  transform.position[2] = position.z;
+  std::memcpy(transform.rotation, kAxisChange, sizeof(transform.rotation));
+  transform.scale = kUnitsToMeters;
+  world.Add(entity, transform);
+  world.Add(entity, Renderable{mesh->id});
+  world.Add(entity, CellMembership{grid_x, grid_y, false});
+  cell.entities.push_back(entity);
+  ++spawned_entities_;
   return true;
 }
 

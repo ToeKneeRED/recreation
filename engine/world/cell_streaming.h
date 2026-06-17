@@ -11,6 +11,7 @@
 #include "bethesda/load_order.h"
 #include "core/math.h"
 #include "ecs/world.h"
+#include "world/grass_baker.h"
 #include "world/land_baker.h"
 
 namespace rec::world {
@@ -37,10 +38,14 @@ class CellStreamer {
     i32 load_radius = 3;          // cells around the camera cell
     u32 mesh_budget = 6;          // new mesh conversions/uploads per update
     u32 ref_budget = 192;         // reference instantiations per update
+    f32 grass_density = 1.0f;     // multiplies every GRAS density, 0 disables
   };
 
   CellStreamer(const bethesda::RecordStore& records, asset::AssetDatabase& assets)
-      : records_(records), assets_(assets), baker_(records, assets) {}
+      : records_(records),
+        assets_(assets),
+        baker_(records, assets),
+        grass_baker_(records, assets) {}
 
   void Configure(const Settings& settings) { settings_ = settings; }
   void SetUploads(Uploads uploads) { uploads_ = std::move(uploads); }
@@ -68,6 +73,7 @@ class CellStreamer {
     const bethesda::RecordStore::ExteriorCell* source = nullptr;
     u32 next_ref = 0;
     bool terrain_done = false;
+    bool grass_done = false;
     bool done = false;
   };
 
@@ -77,6 +83,9 @@ class CellStreamer {
   void UnloadCell(ecs::World& world, u32 key);
   bool SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
   bool SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
+  bool SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
+  // Water level of the cell in game units; false when the cell has none.
+  bool CellWaterHeight(const LoadedCell& cell, f32* height) const;
   bool SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64 ref_id, LoadedCell& cell,
                       u32& mesh_budget, bool interior);
   const asset::Mesh* MeshForBase(bethesda::GlobalFormId base_id, u32& mesh_budget,
@@ -88,6 +97,7 @@ class CellStreamer {
   const bethesda::RecordStore& records_;
   asset::AssetDatabase& assets_;
   LandBaker baker_;
+  GrassBaker grass_baker_;
   Settings settings_;
   Uploads uploads_;
   bethesda::GlobalFormId worldspace_;

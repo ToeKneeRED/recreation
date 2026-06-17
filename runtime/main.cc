@@ -19,6 +19,7 @@ void PrintUsage() {
   REC_INFO("  --name <name>         player name sent to the server");
   REC_INFO("  --cell <x,y>          exterior start cell (default: 5,-3 near Whiterun)");
   REC_INFO("  --interior <id>       load one interior cell (editor id or 0x form id)");
+  REC_INFO("  --grass-density <f>   grass density multiplier (default: 1.0, 0 disables)");
   REC_INFO("  --no-taa              disable temporal antialiasing");
   REC_INFO("  --upscaler <id>       fsr3 | dlss | xess");
   REC_INFO("  --no-rt               disable raytracing");
@@ -68,6 +69,7 @@ int main(int argc, char** argv) {
       config.start_cell_y = std::stoi(cell.substr(comma + 1));
     }
     else if (arg == "--interior") config.interior = next();
+    else if (arg == "--grass-density") config.grass_density = std::stof(next());
     else if (arg == "--no-taa") config.renderer.aa_mode = rec::render::AntiAliasingMode::kNone;
     else if (arg == "--upscaler") config.renderer.upscaler = ParseUpscaler(next());
     else if (arg == "--no-rt") config.renderer.enable_raytracing = false;

@@ -1,5 +1,6 @@
 recreation_add_module(world
   cell_streaming.cc
+  grass_baker.cc
   land_baker.cc
 )
 

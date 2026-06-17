@@ -175,7 +175,9 @@ bool Engine::LoadGameData() {
   REC_INFO("{} plugins, {} records", order.plugins().size(), records_.record_count());
 
   streamer_ = std::make_unique<world::CellStreamer>(records_, *assets_);
-  streamer_->Configure({});
+  world::CellStreamer::Settings settings;
+  settings.grass_density = config_.grass_density;
+  streamer_->Configure(settings);
   if (!config_.headless) {
     world::CellStreamer::Uploads uploads;
     uploads.mesh = [this](const asset::Mesh& mesh) { return renderer_.UploadMesh(mesh); };
