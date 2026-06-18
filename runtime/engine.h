@@ -215,6 +215,21 @@ class Engine {
     std::vector<DialogueOption> options;
   };
 
+  // One stack of items inside an open container: display name and count.
+  struct ContainerItem {
+    std::string name;
+    i32 count = 0;
+  };
+  // The container the player has open (a chest, barrel, etc.). Read from the
+  // base CONT record's contents when the reference is activated; closed/empty
+  // otherwise. A read-only loot view: there is no player inventory to take into.
+  struct ContainerSession {
+    bool open = false;
+    u64 container = 0;
+    std::string name;
+    std::vector<ContainerItem> items;
+  };
+
   // A world waypoint for one quest objective: where the objective sends the
   // player and the stage reaching it advances to. Armed only while its objective
   // is the tracked quest's current displayed-and-incomplete one; entering
@@ -322,6 +337,17 @@ class Engine {
   void SelectDialogueOption(int index);
   void CloseDialogue();
   void UpdateDialogueInput(const InputState& input);
+  // Load-door activation: if `handle` is a DOOR reference with an XTEL teleport,
+  // transition the world to its destination (streaming the target interior or
+  // resuming the exterior) and move the player there. Returns true when handled.
+  bool TryActivateDoor(u64 handle);
+  void EnterThroughDoor(bethesda::GlobalFormId dest_door, const f32 pos[3], const f32 rot[3]);
+  // Container activation: if `handle` is a CONT reference, read the base record's
+  // contents and open the loot panel. Returns true when handled. CloseContainer
+  // ends it; UpdateContainerInput closes it on Esc while one is open.
+  bool TryOpenContainer(u64 handle);
+  void CloseContainer();
+  void UpdateContainerInput(const InputState& input);
   // Runs an INFO record's TIF_ dialogue fragment authoritatively: lazily attaches
   // the script to the INFO handle (seeding its quest property) and calls the
   // begin fragment, which advances the quest. Server / single-player only.
@@ -329,6 +355,9 @@ class Engine {
   // Builds the activation prompt label, e.g. "Talk to Whiterun Guard" or
   // "Activate Iron Sword", from the reference's base object record.
   std::string ActivationLabel(bethesda::GlobalFormId refr);
+  // The FULL display name of a record (localized string id or literal), empty
+  // when it has none. Shared by the prompt label and the container item list.
+  std::string RecordName(bethesda::GlobalFormId id);
   // Enables guest native-call tracing while the trace window is open and
   // snapshots its ring into the overlay (throttled).
   void RefreshNativeTrace(f32 dt);
@@ -483,6 +512,7 @@ class Engine {
   // DIAL topics indexed by quest, for NPC dialogue.
   dialogue::DialogueDb dialogue_;
   DialogueSession dialogue_session_;
+  ContainerSession container_session_;
   std::unique_ptr<world::CellStreamer> streamer_;
   // Declared before scripts_ so the guest thread (which calls into the bindings)
   // is joined in ScriptSystem's destructor before the bindings are torn down.
@@ -513,6 +543,12 @@ class Engine {
   // so a stage/objective change raises the "quest updated" banner once.
   u64 hud_tracked_quest_ = 0;
   u32 hud_tracked_revision_ = 0;
+  // Player quest journal (J): open state, the quest the player pinned to track
+  // (0 = auto-pick the most recent), and the handles currently listed so a 1-4
+  // press pins the right quest regardless of list order.
+  bool journal_open_ = false;
+  u64 pinned_quest_ = 0;
+  base::Vector<u64> journal_handles_;
   // Objective waypoints (host authoritative). Armed against the tracked quest's
   // current displayed objective; reaching one advances the quest's stage.
   base::Vector<QuestMarker> quest_markers_;

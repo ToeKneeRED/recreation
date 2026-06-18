@@ -47,6 +47,9 @@ float CompassStripLeft(float heading_deg) {
 // ultragui document has no way to add widgets on the fly.
 constexpr int kQuestObjectiveRows = 6;
 constexpr int kDialogueOptionRows = 4;  // matches the 1-4 selection keys
+constexpr int kJournalRows = 6;         // quests listed in the journal (1-N pick, 1-4 usable)
+constexpr int kJournalObjRows = 6;      // objectives shown for the selected journal quest
+constexpr int kContainerRows = 14;      // item rows in the container loot panel
 constexpr float kToastSeconds = 4.0f;
 
 // The quest tracker (top-right objective list), the "quest updated" banner, and
@@ -88,6 +91,40 @@ std::string BuildQuestSection() {
   return s;
 }
 
+// The quest journal overlay: a dimmed full-screen panel with a card listing the
+// player's active quests and, for the selected one, its objectives. Rows are a
+// fixed pool filled and toggled each frame; starts hidden.
+std::string BuildJournalSection() {
+  std::string s = R"(
+  panel journal_box {
+    position: absolute; left: 0; top: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center; background: #05070cdd;
+    panel journal_card {
+      layout: column; align: start; padding: 30 44; width: 580;
+      background: #0d1018f7; corner-radius: 14; border-color: #ffffff1c; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 18;
+      text journal_head { text: "Journal"; font-size: 24; color: #ffcc55; letter-spacing: 6;
+        text-transform: uppercase; margin: 0 0 14 0; }
+)";
+  for (int i = 0; i < kJournalRows; ++i) {
+    s += "      text journal_q" + std::to_string(i) +
+         " { text: \"\"; font-size: 16; color: #d8def0; margin: 0 0 3 0;"
+         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
+  }
+  s += "      panel journal_rule { width: 492; height: 1; background: #ffffff1f; margin: 12 0 12 0; }\n";
+  for (int i = 0; i < kJournalObjRows; ++i) {
+    s += "      text journal_obj" + std::to_string(i) +
+         " { text: \"\"; font-size: 13; color: #c7e0ff; margin: 0 0 2 0;"
+         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
+  }
+  s += R"(      text journal_hint { text: "press a number to track, J to close"; font-size: 12;
+        color: #8a93a8; margin: 14 0 0 0; }
+    }
+  }
+)";
+  return s;
+}
+
 // The dialogue panel (bottom-centre): the speaker, their last line, and a fixed
 // pool of numbered topic rows filled/toggled each frame.
 std::string BuildDialogueSection() {
@@ -105,6 +142,33 @@ std::string BuildDialogueSection() {
          " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
   }
   s += "  }\n";
+  return s;
+}
+
+// The container loot panel: a dimmed full-screen overlay with a card naming the
+// container and listing its contents in a fixed pool of rows. Starts hidden.
+std::string BuildContainerSection() {
+  std::string s = R"(
+  panel container_box {
+    position: absolute; left: 0; top: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center; background: #05070cdd;
+    panel container_card {
+      layout: column; align: start; padding: 28 40; width: 460;
+      background: #0d1018f7; corner-radius: 14; border-color: #ffffff1c; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 18;
+      text container_head { text: ""; font-size: 22; color: #ffcc55; letter-spacing: 4;
+        text-transform: uppercase; margin: 0 0 12 0; }
+)";
+  for (int i = 0; i < kContainerRows; ++i) {
+    s += "      text container_item" + std::to_string(i) +
+         " { text: \"\"; font-size: 15; color: #d8def0; margin: 0 0 2 0;"
+         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
+  }
+  s += R"(      text container_hint { text: "press Esc to close"; font-size: 12;
+        color: #8a93a8; margin: 14 0 0 0; }
+    }
+  }
+)";
   return s;
 }
 
@@ -210,7 +274,9 @@ panel root {
 )";
 
   s += BuildQuestSection();
+  s += BuildJournalSection();
   s += BuildDialogueSection();
+  s += BuildContainerSection();
 
   s += R"(
   panel menu {
@@ -316,10 +382,15 @@ struct GameUi::Impl {
   float toast_age = kToastSeconds + 1.0f;  // starts expired, so hidden
   std::string activate_prompt;
   DialogueView dialogue;
+  ContainerView container;
   // Objective compass waypoint, driven by the engine each frame.
   bool marker_active = false;
   float marker_bearing = 0.0f;   // degrees, 0 = ahead, + = right
   float marker_distance = 0.0f;  // meters
+  // Quest journal overlay, driven by the engine.
+  bool journal_open = false;
+  std::vector<HudQuest> journal;
+  int journal_selected = -1;
 
   void SetStyleField(const char* name, void (*mutate)(ugui::Style&, float), float arg) {
     ugui::wid w = ui.FindWidget(name);
@@ -458,6 +529,17 @@ void GameUi::SetDialogue(const DialogueView& dialogue) {
   if (impl_->initialized) impl_->dialogue = dialogue;
 }
 
+void GameUi::SetContainer(const ContainerView& container) {
+  if (impl_->initialized) impl_->container = container;
+}
+
+void GameUi::SetJournal(bool open, const std::vector<HudQuest>& quests, int selected) {
+  if (!impl_->initialized) return;
+  impl_->journal_open = open;
+  impl_->journal = quests;
+  impl_->journal_selected = selected;
+}
+
 void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 frame_delta,
                    render::FrameView* view) {
   if (!impl_->initialized) return;
@@ -573,6 +655,61 @@ void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 fra
     }
   }
 
+  // Container loot panel: the container's name and a fixed pool of item rows.
+  const ContainerView& cont = impl->container;
+  impl->SetVisible("container_box", cont.open);
+  if (cont.open) {
+    ugui::SetText(impl->ui.FindWidget("container_head"), cont.name.c_str());
+    for (int i = 0; i < kContainerRows; ++i) {
+      const std::string row = "container_item" + std::to_string(i);
+      if (i < static_cast<int>(cont.items.size())) {
+        std::string line = cont.items[i].name;
+        if (cont.items[i].count > 1) line += "  x" + std::to_string(cont.items[i].count);
+        ugui::SetText(impl->ui.FindWidget(row.c_str()), line.c_str());
+        impl->SetVisible(row.c_str(), true);
+      } else {
+        impl->SetVisible(row.c_str(), false);
+      }
+    }
+    // An empty chest still gets a line so it does not read as a bug.
+    if (cont.items.empty()) {
+      ugui::SetText(impl->ui.FindWidget("container_item0"), "(empty)");
+      impl->SetVisible("container_item0", true);
+    }
+  }
+
+  // Quest journal: a numbered list of active quests; an arrow marks the tracked
+  // one and its objectives are listed below.
+  impl->SetVisible("journal_box", impl->journal_open);
+  if (impl->journal_open) {
+    for (int i = 0; i < kJournalRows; ++i) {
+      const std::string row = "journal_q" + std::to_string(i);
+      if (i < static_cast<int>(impl->journal.size())) {
+        const std::string mark = i == impl->journal_selected ? "▶ " : "   ";
+        const std::string line = mark + std::to_string(i + 1) + ". " + impl->journal[i].title;
+        ugui::SetText(impl->ui.FindWidget(row.c_str()), line.c_str());
+        impl->SetVisible(row.c_str(), true);
+      } else {
+        impl->SetVisible(row.c_str(), false);
+      }
+    }
+    const HudQuest* sel = (impl->journal_selected >= 0 &&
+                           impl->journal_selected < static_cast<int>(impl->journal.size()))
+                              ? &impl->journal[impl->journal_selected]
+                              : nullptr;
+    for (int i = 0; i < kJournalObjRows; ++i) {
+      const std::string row = "journal_obj" + std::to_string(i);
+      if (sel && i < static_cast<int>(sel->objectives.size())) {
+        const std::string line =
+            (sel->objectives[i].completed ? "✓  " : "•  ") + sel->objectives[i].text;
+        ugui::SetText(impl->ui.FindWidget(row.c_str()), line.c_str());
+        impl->SetVisible(row.c_str(), true);
+      } else {
+        impl->SetVisible(row.c_str(), false);
+      }
+    }
+  }
+
   // Produce the draw list (input routing + layout + paint, no GPU work).
   const ugui::DrawData& dd = impl->ui.RenderDrawData();
   impl->draw_data = &dd;
@@ -608,6 +745,8 @@ void GameUi::FlashQuestUpdate(const std::string&) {}
 void GameUi::SetActivatePrompt(const std::string&) {}
 void GameUi::SetObjectiveMarker(bool, float, float) {}
 void GameUi::SetDialogue(const DialogueView&) {}
+void GameUi::SetContainer(const ContainerView&) {}
+void GameUi::SetJournal(bool, const std::vector<HudQuest>&, int) {}
 void GameUi::ToggleMenu() {}
 bool GameUi::menu_open() const { return false; }
 bool GameUi::quit_requested() const { return false; }

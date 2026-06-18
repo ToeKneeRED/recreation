@@ -1777,6 +1777,10 @@ void Engine::AttachQuestScripts() {
     REC_INFO("debug: MQ101 escort scene armed (a guide NPC will lead the player out)");
   }
 
+  // REC_JOURNAL opens the quest journal at load (it is normally toggled with J),
+  // for screenshots (cf. RECREATION_UI_MENU / REC_HIDE_DEBUG_UI).
+  if (std::getenv("REC_JOURNAL")) journal_open_ = true;
+
   // REC_QUEST_REPORT=<EDID> drives a quest through its stages to its completion
   // stage and prints the journey, then quits. A headless, deterministic check
   // that a quest (e.g. the first main quest, MQ101) runs to completion.
@@ -1942,6 +1946,21 @@ void Engine::ReportQuestToCompletion(const std::string& edid) {
   std::fflush(stdout);
 }
 
+std::string Engine::RecordName(bethesda::GlobalFormId id) {
+  bethesda::Record record;
+  if (!records_.Parse(id, &record)) return {};
+  const bethesda::Subrecord* full = record.Find(FourCc('F', 'U', 'L', 'L'));
+  if (!full) return {};
+  // A localized plugin stores a 4-byte string id here; a non-localized one
+  // stores the literal text. Try the table first, fall back to the bytes.
+  if (full->data.size() >= 4) {
+    u32 string_id;
+    std::memcpy(&string_id, full->data.data(), 4);
+    if (const base::String* s = strings_.Find(string_id)) return std::string(s->c_str());
+  }
+  return record.GetString(FourCc('F', 'U', 'L', 'L'));
+}
+
 std::string Engine::ActivationLabel(bethesda::GlobalFormId refr) {
   const bethesda::RecordStore::StoredRecord* stored = records_.Find(refr);
   if (!stored) return "Activate";
@@ -1957,20 +1976,14 @@ std::string Engine::ActivationLabel(bethesda::GlobalFormId refr) {
     std::memcpy(&raw, nm->data.data(), 4);
     bethesda::GlobalFormId base = records_.ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin);
     if (const bethesda::RecordStore::StoredRecord* bstored = records_.Find(base)) {
-      if (bstored->header.type == FourCc('N', 'P', 'C', '_') ||
-          bstored->header.type == FourCc('A', 'C', 'H', 'R'))
-        verb = "Talk to";
-      bethesda::Record brecord;
-      if (records_.Parse(base, &brecord)) {
-        if (const bethesda::Subrecord* full = brecord.Find(FourCc('F', 'U', 'L', 'L'))) {
-          if (full->data.size() >= 4) {
-            u32 string_id;
-            std::memcpy(&string_id, full->data.data(), 4);
-            if (const base::String* s = strings_.Find(string_id)) name = std::string(s->c_str());
-          }
-          if (name.empty()) name = brecord.GetString(FourCc('F', 'U', 'L', 'L'));
-        }
+      switch (bstored->header.type) {
+        case FourCc('N', 'P', 'C', '_'):
+        case FourCc('A', 'C', 'H', 'R'): verb = "Talk to"; break;
+        case FourCc('D', 'O', 'O', 'R'):
+        case FourCc('C', 'O', 'N', 'T'): verb = "Open"; break;
+        default: break;
       }
+      name = RecordName(base);
     }
   }
   return name.empty() ? verb : verb + " " + name;
@@ -2036,12 +2049,17 @@ void Engine::UpdateInteraction(bool activate_pressed) {
 
   if (activate_pressed) {
     REC_INFO("activate: {} (0x{:x})", activate_label_, handle);
-    // Activating an NPC opens a conversation; other refs raise OnActivate. A
-    // multiplayer client is not authoritative for the latter -- it asks the
-    // server -- but the dialogue menu itself is local (the player's own view).
+    // Local-view affordances first: talking to an NPC, walking through a load
+    // door, and opening a container are each the activating player's own view.
+    // Anything else raises OnActivate, which a multiplayer client is not
+    // authoritative for -- it asks the server.
     const ecs::Entity e = quest_world_.Find(handle);
     if (world_.IsAlive(e) && world_.Has<world::Npc>(e)) {
       OpenDialogue(handle);
+    } else if (TryActivateDoor(handle)) {
+      // Entered a load door (teleport / cell transition).
+    } else if (TryOpenContainer(handle)) {
+      // Opened a container's loot view.
     } else if (client_session_ && client_session_->joined()) {
       client_session_->SendActivate(handle);
     } else {
@@ -2149,6 +2167,121 @@ void Engine::RaiseActivate(u64 handle) {
   scripts_->guest().RaiseEvent(
       script::papyrus::ObjectRef{handle}, "OnActivate",
       {script::papyrus::Value::Object(script::papyrus::ObjectRef{0x14})});
+}
+
+bool Engine::TryActivateDoor(u64 handle) {
+  if (!streamer_) return false;
+  bethesda::GlobalFormId refr{static_cast<u16>(handle >> 32),
+                              static_cast<u32>(handle & 0xffffffffu)};
+  const bethesda::RecordStore::StoredRecord* stored = records_.Find(refr);
+  if (!stored) return false;
+  bethesda::Record record;
+  if (!records_.Parse(refr, &record)) return false;
+
+  // The reference must be a DOOR (its base object's type).
+  const bethesda::Subrecord* nm = record.Find(FourCc('N', 'A', 'M', 'E'));
+  if (!nm || nm->data.size() < 4) return false;
+  u32 base_raw;
+  std::memcpy(&base_raw, nm->data.data(), 4);
+  bethesda::GlobalFormId base = records_.ResolveFrom(bethesda::RawFormId{base_raw},
+                                                     stored->winning_plugin);
+  const bethesda::RecordStore::StoredRecord* bstored = records_.Find(base);
+  if (!bstored || bstored->header.type != FourCc('D', 'O', 'O', 'R')) return false;
+
+  // XTEL on the reference is the teleport: dest door form id (4), then the
+  // landing position (3 floats) and rotation (3 floats). A door without one is
+  // not a load door -- let it fall through to its OnActivate script.
+  const bethesda::Subrecord* xtel = record.Find(FourCc('X', 'T', 'E', 'L'));
+  if (!xtel || xtel->data.size() < 28) return false;
+  u32 dest_raw;
+  f32 pos[3], rot[3];
+  std::memcpy(&dest_raw, xtel->data.data(), 4);
+  std::memcpy(pos, xtel->data.data() + 4, 12);
+  std::memcpy(rot, xtel->data.data() + 16, 12);
+  bethesda::GlobalFormId dest = records_.ResolveFrom(bethesda::RawFormId{dest_raw},
+                                                     stored->winning_plugin);
+  EnterThroughDoor(dest, pos, rot);
+  return true;
+}
+
+void Engine::EnterThroughDoor(bethesda::GlobalFormId dest_door, const f32 pos[3], const f32 rot[3]) {
+  // The destination door's parent interior cell (if any) decides the
+  // transition: stream that interior, or resume the exterior worldspace.
+  bethesda::GlobalFormId interior = records_.InteriorCellOfRef(dest_door);
+  if (interior.plugin != 0xffff) {
+    Vec3 spawn;
+    if (!streamer_->EnterInterior(world_, interior, &spawn)) {
+      REC_WARN("door: failed to enter interior {:04x}:{:06x}", interior.plugin, interior.local_id);
+      return;
+    }
+    REC_INFO("door: entered interior {:04x}:{:06x}", interior.plugin, interior.local_id);
+  } else {
+    streamer_->EnterExterior(world_);
+    REC_INFO("door: returned to the exterior worldspace");
+  }
+
+  // Bethesda -> engine (mirrors CellStreamer): meters, axes (x, z, -y).
+  constexpr f32 kToMeters = 0.01428f;
+  const Vec3 landing{pos[0] * kToMeters, pos[2] * kToMeters, -pos[1] * kToMeters};
+  TeleportPlayer(landing.x, landing.y, landing.z);
+  // Face the way the door points (rot[2] is the yaw about the Bethesda up axis,
+  // which maps directly to the walk camera yaw) and re-anchor streaming at the
+  // landing so the destination cells load next tick.
+  cam_yaw_ = rot[2];
+  camera_.set_position(Vec3{landing.x, landing.y + 1.6f, landing.z});
+}
+
+bool Engine::TryOpenContainer(u64 handle) {
+  bethesda::GlobalFormId refr{static_cast<u16>(handle >> 32),
+                              static_cast<u32>(handle & 0xffffffffu)};
+  const bethesda::RecordStore::StoredRecord* stored = records_.Find(refr);
+  if (!stored) return false;
+  bethesda::Record record;
+  if (!records_.Parse(refr, &record)) return false;
+  const bethesda::Subrecord* nm = record.Find(FourCc('N', 'A', 'M', 'E'));
+  if (!nm || nm->data.size() < 4) return false;
+  u32 base_raw;
+  std::memcpy(&base_raw, nm->data.data(), 4);
+  bethesda::GlobalFormId base = records_.ResolveFrom(bethesda::RawFormId{base_raw},
+                                                     stored->winning_plugin);
+  const bethesda::RecordStore::StoredRecord* bstored = records_.Find(base);
+  if (!bstored || bstored->header.type != FourCc('C', 'O', 'N', 'T')) return false;
+  bethesda::Record cont;
+  if (!records_.Parse(base, &cont)) return false;
+
+  ContainerSession s;
+  s.open = true;
+  s.container = handle;
+  s.name = RecordName(base);
+  if (s.name.empty()) s.name = "Container";
+  // CNTO holds the contents: item form id (4) + count (4). Names resolve against
+  // the base record's owning plugin; the row pool caps how many we show.
+  for (const bethesda::Subrecord& sub : cont.subrecords) {
+    if (s.items.size() >= 14) break;
+    if (sub.type != FourCc('C', 'N', 'T', 'O') || sub.data.size() < 8) continue;
+    u32 item_raw;
+    i32 count;
+    std::memcpy(&item_raw, sub.data.data(), 4);
+    std::memcpy(&count, sub.data.data() + 4, 4);
+    bethesda::GlobalFormId item = records_.ResolveFrom(bethesda::RawFormId{item_raw},
+                                                       bstored->winning_plugin);
+    ContainerItem ci;
+    ci.count = count;
+    ci.name = RecordName(item);
+    if (ci.name.empty()) ci.name = "(item)";
+    s.items.push_back(std::move(ci));
+  }
+  container_session_ = std::move(s);
+  REC_INFO("container: opened '{}' ({} items)", container_session_.name,
+           container_session_.items.size());
+  return true;
+}
+
+void Engine::CloseContainer() { container_session_ = ContainerSession{}; }
+
+void Engine::UpdateContainerInput(const InputState& input) {
+  if (!container_session_.open) return;
+  if (input.key_pressed(Key::kEscape)) CloseContainer();
 }
 
 void Engine::RefreshQuestPanel(f32 dt) {
@@ -2288,12 +2421,39 @@ void Engine::RefreshQuestPanel(f32 dt) {
 }
 
 void Engine::UpdateQuestHud(const std::vector<quest::QuestStatus>& running) {
-  // Track the most recently changed running quest, the one the player is
-  // actively progressing.
+  // The tracked quest is the player's pinned one (from the journal) if it is
+  // still running, otherwise the most recently changed.
   const quest::QuestStatus* tracked = nullptr;
+  const quest::QuestStatus* pinned = nullptr;
   for (const quest::QuestStatus& q : running) {
     if (!tracked || q.revision > tracked->revision) tracked = &q;
+    if (pinned_quest_ != 0 && q.handle == pinned_quest_) pinned = &q;
   }
+  if (pinned) tracked = pinned;
+
+  // Player journal: the active quests, most recent first, capped to the HUD's
+  // row pool; the tracked quest is the highlighted entry.
+  std::vector<const quest::QuestStatus*> sorted;
+  sorted.reserve(running.size());
+  for (const quest::QuestStatus& q : running) sorted.push_back(&q);
+  std::sort(sorted.begin(), sorted.end(),
+            [](const quest::QuestStatus* a, const quest::QuestStatus* b) {
+              return a->revision > b->revision;
+            });
+  std::vector<HudQuest> journal;
+  journal_handles_.clear();
+  int journal_selected = -1;
+  for (const quest::QuestStatus* q : sorted) {
+    if (journal.size() >= 6) break;
+    HudQuest hq;
+    hq.title = q->name;
+    for (const quest::ObjectiveStatus& o : q->objectives)
+      if (o.displayed || o.completed) hq.objectives.push_back({o.text, o.completed});
+    if (tracked && q->handle == tracked->handle) journal_selected = static_cast<int>(journal.size());
+    journal_handles_.push_back(q->handle);
+    journal.push_back(std::move(hq));
+  }
+  game_ui_.SetJournal(journal_open_, journal, journal_selected);
 
   if (!tracked) {
     if (hud_tracked_quest_ != 0) {
@@ -2915,16 +3075,32 @@ void Engine::UpdateCamera(f32 frame_delta) {
   // The pause menu freezes the camera and frees the cursor so it can click.
   bool menu = game_ui_.menu_open();
   bool kb = debug_ui_.wants_keyboard();
+  // Modal overlays that consume Esc; captured before the branches below so the
+  // Esc that closes one does not also open the pause menu this frame.
+  bool modal = dialogue_session_.open || container_session_.open;
 
-  if (input.key_pressed(Key::kT) && !menu && !kb && !dialogue_session_.open && player_actor_ >= 0) {
+  if (input.key_pressed(Key::kT) && !menu && !kb && !modal && player_actor_ >= 0) {
     walk_mode_ = !walk_mode_;
     REC_INFO("walk mode {}", walk_mode_ ? "on (WASD move, Shift run, Space jump, C view)" : "off");
   }
-  if (input.key_pressed(Key::kC) && !menu && !kb) third_person_ = !third_person_;
+  if (input.key_pressed(Key::kC) && !menu && !kb && !modal) third_person_ = !third_person_;
+  if (input.key_pressed(Key::kJ) && !menu && !kb && !modal)
+    journal_open_ = !journal_open_;
 
-  if (dialogue_session_.open) {
+  if (container_session_.open) {
+    UpdateContainerInput(input);  // Esc closes the loot view
+    UpdateInteraction(false);     // freeze movement/activation while looting
+  } else if (dialogue_session_.open) {
     UpdateDialogueInput(input);  // 1-4 select a topic, Esc to leave
     UpdateInteraction(false);    // freeze movement/activation while talking
+  } else if (journal_open_) {
+    // The journal is a modal overlay: a number key pins that quest to track;
+    // movement is frozen while it is open.
+    const Key num[4] = {Key::k1, Key::k2, Key::k3, Key::k4};
+    for (int i = 0; i < 4; ++i)
+      if (input.key_pressed(num[i]) && i < static_cast<int>(journal_handles_.size()))
+        pinned_quest_ = journal_handles_[i];
+    UpdateInteraction(false);
   } else if (walk_mode_ && player_actor_ >= 0) {
     WalkUpdate(frame_delta, !menu && !kb);
     UpdateInteraction(input.key_pressed(Key::kE) && !menu && !kb);
@@ -2943,13 +3119,21 @@ void Engine::UpdateCamera(f32 frame_delta) {
   dv.npc_line = dialogue_session_.npc_line;
   for (const DialogueOption& o : dialogue_session_.options) dv.options.push_back(o.player_line);
   game_ui_.SetDialogue(dv);
+
+  // Mirror the open container's contents into the HUD loot panel.
+  ContainerView cv;
+  cv.open = container_session_.open;
+  cv.name = container_session_.name;
+  for (const ContainerItem& it : container_session_.items)
+    cv.items.push_back({it.name, it.count});
+  game_ui_.SetContainer(cv);
   DriveCamera(frame_delta);  // orbit / replay overrides + record
 
   if (input.key_pressed(Key::kF1) && !kb) debug_ui_.ToggleVisible();
   if (input.key_pressed(Key::kF2) && !kb) debug_ui_.ToggleTrace();
   if (input.key_pressed(Key::kF3) && !kb) debug_ui_.ToggleQuests();
   if (input.key_pressed(Key::kF) && !menu && !kb && !walk_mode_) ThrowPhysicsCube();
-  if (input.key_pressed(Key::kEscape) && !kb) game_ui_.ToggleMenu();
+  if (input.key_pressed(Key::kEscape) && !kb && !modal) game_ui_.ToggleMenu();
   if (game_ui_.quit_requested()) RequestQuit();
 }
 

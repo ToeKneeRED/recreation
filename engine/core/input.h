@@ -24,10 +24,11 @@ enum class Key : u8 {
   kF1,
   kF2,
   kF3,
-  k1,  // dialogue option select
+  k1,  // dialogue option select; also journal pick when the journal is open
   k2,
   k3,
   k4,
+  kJ,  // toggle the quest journal
   kCount,
 };
 

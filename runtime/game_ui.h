@@ -37,6 +37,18 @@ struct DialogueView {
   std::vector<std::string> options;
 };
 
+// The open container the loot panel shows: its name and the items inside (name
+// + count). open == false hides the panel.
+struct ContainerView {
+  struct Item {
+    std::string name;
+    int count = 0;
+  };
+  bool open = false;
+  std::string name;
+  std::vector<Item> items;
+};
+
 // libultragui-driven HUD and pause menu. Runs ultragui in draw-data mode and
 // records its draw list into the renderer's ui pass, alongside the debug ImGui
 // overlay. Compiles to a stub when ultragui is unavailable (RECREATION_HAS_UGUI
@@ -71,6 +83,12 @@ class GameUi {
   void SetObjectiveMarker(bool active, float bearing_deg, float distance_m);
   // The dialogue panel (speaker line + NPC reply + numbered player topics).
   void SetDialogue(const DialogueView& dialogue);
+  // The container loot panel (a chest/barrel's name and the items inside).
+  void SetContainer(const ContainerView& container);
+  // Quest journal overlay: `open` shows a numbered list of the player's active
+  // quests; `selected` (a 0-based index into `quests`, or < 0) highlights the
+  // tracked one and lists its objectives. Pressing its number pins that quest.
+  void SetJournal(bool open, const std::vector<HudQuest>& quests, int selected);
 
   void ToggleMenu();
   bool menu_open() const;
