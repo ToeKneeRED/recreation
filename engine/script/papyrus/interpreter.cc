@@ -33,8 +33,8 @@ ValueType TargetType(const std::string& type_name) {
 class Frame {
  public:
   Frame(const PexFile& pex, const Object& object, const Function& fn, ObjectRef self,
-        std::vector<Value>& args, VmInterface& vm)
-      : pex_(pex), object_(object), fn_(fn), self_(self), vm_(vm) {
+        std::vector<Value>& args, VmInterface& vm, std::string_view fn_name)
+      : pex_(pex), object_(object), fn_(fn), self_(self), vm_(vm), fn_name_(fn_name) {
     for (size_t i = 0; i < fn.params.size(); ++i) {
       const std::string& name = pex.Str(fn.params[i].name);
       decl_types_[name] = pex.Str(fn.params[i].type);
@@ -175,6 +175,7 @@ class Frame {
   const Function& fn_;
   ObjectRef self_;
   VmInterface& vm_;
+  std::string_view fn_name_;
   std::unordered_map<std::string, Value> regs_;
   std::unordered_map<std::string, std::string> decl_types_;
 };
@@ -188,7 +189,8 @@ Value Frame::Run() {
   u64 executed = 0;
   while (ip < code.size()) {
     if (++executed > kMaxInstructions) {
-      REC_WARN("papyrus: function exceeded {} instructions, aborting", kMaxInstructions);
+      REC_WARN("papyrus: {}.{} exceeded {} instructions, aborting", pex_.Str(object_.name),
+               fn_name_.empty() ? "?" : fn_name_, kMaxInstructions);
       return Value();
     }
     const Instruction& in = code[ip];
@@ -381,8 +383,8 @@ Value Frame::Run() {
 }  // namespace
 
 Value ExecuteFunction(const PexFile& pex, const Object& object, const Function& fn, ObjectRef self,
-                      std::vector<Value> args, VmInterface& vm) {
-  Frame frame(pex, object, fn, self, args, vm);
+                      std::vector<Value> args, VmInterface& vm, std::string_view function_name) {
+  Frame frame(pex, object, fn, self, args, vm, function_name);
   return frame.Run();
 }
 

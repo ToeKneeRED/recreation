@@ -62,7 +62,8 @@ class VmInterface {
 // implemented here. object is the script that defines fn, used for member
 // variable types; self is the instance the function runs on.
 Value ExecuteFunction(const PexFile& pex, const Object& object, const Function& fn, ObjectRef self,
-                      std::vector<Value> args, VmInterface& vm);
+                      std::vector<Value> args, VmInterface& vm,
+                      std::string_view function_name = {});
 
 }  // namespace rec::script::papyrus
 

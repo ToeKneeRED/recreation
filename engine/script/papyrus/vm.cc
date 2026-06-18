@@ -177,7 +177,7 @@ Value VirtualMachine::Invoke(const Resolved& target, ObjectRef self, std::vector
   }
   call_stack_.push_back(target.defining_type);
   Value result = ExecuteFunction(target.script->pex, *target.script->object, *target.fn, self,
-                                 std::move(args), *this);
+                                 std::move(args), *this, method_name);
   call_stack_.pop_back();
   return result;
 }
