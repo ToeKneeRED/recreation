@@ -102,7 +102,81 @@ bool Engine::StartNetworking() {
   return true;
 }
 
+void Engine::CreateWaterDemoScene() {
+  // Empty map with just water and a few reflectors: the fastest loop for
+  // iterating water shading without streaming a game world.
+  asset::Material water_material;
+  water_material.id = asset::MakeAssetId("demo/water_material");
+  water_material.base_color_factor[0] = 0.08f;
+  water_material.base_color_factor[1] = 0.12f;
+  water_material.base_color_factor[2] = 0.16f;
+  water_material.base_color_factor[3] = 0.75f;
+  water_material.metallic_factor = 0;
+  water_material.roughness_factor = 0.05f;
+  water_material.alpha_mode = asset::AlphaMode::kBlend;
+  water_material.two_sided = true;
+  water_material.is_water = true;
+
+  asset::Mesh water;
+  water.id = asset::MakeAssetId("demo/water");
+  water.lods.emplace_back();
+  asset::MeshLod& lod = water.lods[0];
+  constexpr f32 kHalf = 120.0f;
+  for (u32 i = 0; i < 4; ++i) {
+    asset::Vertex v{};
+    v.position[0] = (i & 1) ? kHalf : -kHalf;
+    v.position[1] = 0;
+    v.position[2] = (i & 2) ? kHalf : -kHalf;
+    v.normal[1] = 1;
+    v.tangent[0] = 1;
+    v.tangent[3] = 1;
+    v.uv[0] = v.position[0] / 8.0f;
+    v.uv[1] = v.position[2] / 8.0f;
+    v.color = 0xffffffff;
+    lod.vertices.push_back(v);
+  }
+  for (u32 index : {0u, 1u, 2u, 1u, 3u, 2u}) lod.indices.push_back(index);
+  asset::Submesh submesh;
+  submesh.index_count = 6;
+  submesh.material = water_material.id;
+  lod.submeshes.push_back(submesh);
+  water.bounds_radius = kHalf * 1.5f;
+
+  asset::Mesh cube = asset::MakeCube(1.0f, asset::MakeAssetId("demo/cube"));
+  asset::Mesh ground = asset::MakeCube(40.0f, asset::MakeAssetId("demo/ground"));
+  if (!config_.headless) {
+    renderer_.UploadMaterial(water_material);
+    renderer_.UploadMesh(water);
+    renderer_.UploadMesh(cube);
+    renderer_.UploadMesh(ground);
+  }
+
+  // Sea floor far below, water sheet at origin, an island of cubes.
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, world::Transform{.position = {0, -48.0f, 0}});
+  world_.Add(floor, world::Renderable{ground.id});
+  ecs::Entity sheet = world_.Create();
+  world_.Add(sheet, world::Transform{});
+  world_.Add(sheet, world::Renderable{water.id});
+  for (int i = 0; i < 6; ++i) {
+    ecs::Entity block = world_.Create();
+    f32 angle = static_cast<f32>(i) * 1.047f;
+    world_.Add(block, world::Transform{.position = {std::cos(angle) * 6.0f,
+                                                    (i % 2) ? 1.5f : -0.4f,
+                                                    std::sin(angle) * 6.0f}});
+    world_.Add(block, world::Renderable{cube.id});
+  }
+
+  camera_.set_position({-14.0f, 3.0f, 0.0f});
+  camera_.set_yaw_pitch(1.5708f, -0.25f);
+  REC_INFO("water demo scene");
+}
+
 void Engine::CreateDemoScene() {
+  if (config_.demo_scene == "water") {
+    CreateWaterDemoScene();
+    return;
+  }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
   asset::Mesh ground = asset::MakeCube(2.5f, asset::MakeAssetId("builtin/ground"));
   if (!config_.headless) {

@@ -213,7 +213,7 @@ const LandBaker::Layer* LandBaker::LayerFor(u64 ltex_packed) {
     }
   }
   if (layer->size == 0) {
-    REC_DEBUG("land texture missing for ltex {:x}, using default", ltex_packed);
+    REC_WARN("land texture missing for ltex {:x} path '{}', using default", ltex_packed, path);
     return DefaultLayer();
   }
   return layer;

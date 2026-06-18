@@ -1,6 +1,7 @@
 #include "world/cell_streaming.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 

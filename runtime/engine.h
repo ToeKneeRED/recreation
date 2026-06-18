@@ -28,6 +28,7 @@ struct EngineConfig {
   std::string data_dir;
   std::string plugins_txt;
   std::string gltf_path;  // standalone gltf/glb scene (e.g. sponza)
+  std::string demo_scene;  // "water" = empty map with a water sheet
   bethesda::Game game = bethesda::Game::kUnknown;  // kUnknown = autodetect
   // Exterior cell the camera starts in. The default is the Whiterun plains.
   i32 start_cell_x = 5;
@@ -61,6 +62,7 @@ class Engine {
   void MountArchives();
   bool StartNetworking();
   void CreateDemoScene();
+  void CreateWaterDemoScene();
   bool LoadGltfScene();
   void UpdateCamera(f32 frame_delta);
 
