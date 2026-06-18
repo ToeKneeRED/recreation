@@ -351,6 +351,99 @@ const Function* FindFunction(const PexFile& pex, const Object& obj, const std::s
   return nullptr;
 }
 
+const char* OpMnemonic(Op op) {
+  switch (op) {
+    case Op::kNop: return "nop";
+    case Op::kIAdd: return "iadd";
+    case Op::kFAdd: return "fadd";
+    case Op::kISub: return "isub";
+    case Op::kFSub: return "fsub";
+    case Op::kIMul: return "imul";
+    case Op::kFMul: return "fmul";
+    case Op::kIDiv: return "idiv";
+    case Op::kFDiv: return "fdiv";
+    case Op::kIMod: return "imod";
+    case Op::kNot: return "not";
+    case Op::kINeg: return "ineg";
+    case Op::kFNeg: return "fneg";
+    case Op::kAssign: return "assign";
+    case Op::kCast: return "cast";
+    case Op::kCmpEq: return "cmp_eq";
+    case Op::kCmpLt: return "cmp_lt";
+    case Op::kCmpLe: return "cmp_le";
+    case Op::kCmpGt: return "cmp_gt";
+    case Op::kCmpGe: return "cmp_ge";
+    case Op::kJmp: return "jmp";
+    case Op::kJmpT: return "jmpt";
+    case Op::kJmpF: return "jmpf";
+    case Op::kCallMethod: return "callmethod";
+    case Op::kCallParent: return "callparent";
+    case Op::kCallStatic: return "callstatic";
+    case Op::kReturn: return "return";
+    case Op::kStrCat: return "strcat";
+    case Op::kPropGet: return "propget";
+    case Op::kPropSet: return "propset";
+    case Op::kArrayCreate: return "array_create";
+    case Op::kArrayLength: return "array_length";
+    case Op::kArrayGetElement: return "array_get";
+    case Op::kArraySetElement: return "array_set";
+    case Op::kArrayFindElement: return "array_find";
+    case Op::kArrayRFindElement: return "array_rfind";
+    default: return "op";
+  }
+}
+
+std::string FmtArg(const PexFile& pex, const VariableData& v) {
+  switch (v.type) {
+    case VariableData::Type::kIdentifier: return pex.Str(v.string_index);
+    case VariableData::Type::kString: return "\"" + pex.Str(v.string_index) + "\"";
+    case VariableData::Type::kInteger: return std::to_string(v.int_value);
+    case VariableData::Type::kFloat: return std::to_string(v.float_value);
+    case VariableData::Type::kBool: return v.bool_value ? "true" : "false";
+    default: return "None";
+  }
+}
+
+// Prints one non-native function's bytecode so a runaway loop (a backward jump)
+// and what it polls (the call targets inside it) can be read off directly.
+int DisasmReal(const std::string& data_dir, const std::string& script, const std::string& function) {
+  asset::Vfs vfs;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(data_dir, ec))
+    if (auto p = bethesda::OpenArchive(entry.path().string())) vfs.Mount(std::move(p));
+  auto blob = vfs.Read("scripts/" + script + ".pex");
+  if (!blob) {
+    std::printf("not found: scripts/%s.pex\n", script.c_str());
+    return 1;
+  }
+  PexFile pex;
+  if (!ParsePex(ByteSpan(blob->data(), blob->size()), &pex) || pex.objects.empty()) {
+    std::printf("parse failed\n");
+    return 1;
+  }
+  const Object& obj = pex.objects[0];
+  const Object* owner = nullptr;
+  const Function* fn = FindFunction(pex, obj, function, &owner);
+  if (!fn) {
+    std::printf("no function %s in %s\n", function.c_str(), script.c_str());
+    return 1;
+  }
+  std::printf("%s.%s  (%zu instructions)\n", script.c_str(), function.c_str(), fn->code.size());
+  for (size_t i = 0; i < fn->code.size(); ++i) {
+    const Instruction& in = fn->code[i];
+    std::string line = "  " + std::to_string(i) + ": " + OpMnemonic(in.op);
+    for (const VariableData& a : in.args) line += " " + FmtArg(pex, a);
+    if (!in.var_args.empty()) {
+      line += " [";
+      for (size_t j = 0; j < in.var_args.size(); ++j)
+        line += (j ? ", " : "") + FmtArg(pex, in.var_args[j]);
+      line += "]";
+    }
+    std::printf("%s\n", line.c_str());
+  }
+  return 0;
+}
+
 int RunReal(const std::string& data_dir, const std::string& script, const std::string& function) {
   asset::Vfs vfs;
   std::error_code ec;
@@ -915,12 +1008,14 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::string(argv[1]) == "tracetest") return TraceTest();
   if (argc == 3 && std::string(argv[1]) == "vmtest") return VmTest(argv[2]);
   if (argc == 4 && std::string(argv[1]) == "hosttest") return HostTest(argv[2], argv[3]);
+  if (argc == 5 && std::string(argv[1]) == "disasm") return DisasmReal(argv[2], argv[3], argv[4]);
   if (argc == 4) return RunReal(argv[1], argv[2], argv[3]);
   std::fprintf(stderr,
                "usage: %s [selftest|skyrimtest|guesttest|conctest|separationtest]\n"
                "       %s vmtest <data_dir>\n"
                "       %s hosttest <runtimeconfig.json> <assembly.dll>\n"
+               "       %s disasm <data_dir> <Script> <Function>\n"
                "       %s <data_dir> <Script> <Function>\n",
-               argv[0], argv[0], argv[0], argv[0]);
+               argv[0], argv[0], argv[0], argv[0], argv[0]);
   return 2;
 }
