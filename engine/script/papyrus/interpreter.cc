@@ -180,13 +180,37 @@ class Frame {
   std::unordered_map<std::string, std::string> decl_types_;
 };
 
+namespace {
+bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i)
+    if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+      return false;
+  return true;
+}
+
+// Utility.Wait* suspends the script in the real game; this VM has no latent
+// suspension, so a fragment that polls a condition behind Wait() (e.g. "wait
+// until the actors are 3D loaded") spins forever. Recognizing the call lets the
+// interpreter bail such a loop quickly instead of grinding to the ceiling.
+bool IsLatentWait(std::string_view object, std::string_view method) {
+  if (!EqualsIgnoreCase(object, "Utility")) return false;
+  return EqualsIgnoreCase(method, "Wait") || EqualsIgnoreCase(method, "WaitMenuMode") ||
+         EqualsIgnoreCase(method, "WaitGameTime");
+}
+}  // namespace
+
 Value Frame::Run() {
   // Guest scripts run on their own thread; a runaway loop must not wedge it.
   // The ceiling is far above any real function's instruction count.
   constexpr u64 kMaxInstructions = 4'000'000;
+  // A synchronous fragment that busy-waits on a latent Wait() makes no progress;
+  // bail after a small number of waits rather than spinning to kMaxInstructions.
+  constexpr u32 kMaxLatentWaits = 256;
   const std::vector<Instruction>& code = fn_.code;
   size_t ip = 0;
   u64 executed = 0;
+  u32 latent_waits = 0;
   while (ip < code.size()) {
     if (++executed > kMaxInstructions) {
       REC_WARN("papyrus: {}.{} exceeded {} instructions, aborting", pex_.Str(object_.name),
@@ -280,9 +304,18 @@ Value Frame::Run() {
       case Op::kCallParent:
         Write(a[1], vm_.CallParent(self_, OperandName(a[0]), CollectArgs(in)));
         break;
-      case Op::kCallStatic:
-        Write(a[2], vm_.CallStatic(OperandName(a[0]), OperandName(a[1]), CollectArgs(in)));
+      case Op::kCallStatic: {
+        const std::string object = OperandName(a[0]);
+        const std::string method = OperandName(a[1]);
+        if (IsLatentWait(object, method) && ++latent_waits > kMaxLatentWaits) {
+          REC_WARN("papyrus: {}.{} bailed a latent {}.{}() wait loop after {} waits",
+                   pex_.Str(object_.name), fn_name_.empty() ? "?" : fn_name_, object, method,
+                   kMaxLatentWaits);
+          return Value();
+        }
+        Write(a[2], vm_.CallStatic(object, method, CollectArgs(in)));
         break;
+      }
       case Op::kReturn:
         return a.empty() ? Value() : ReadOperand(a[0]);
       case Op::kStrCat:
