@@ -184,7 +184,24 @@ Value VirtualMachine::Invoke(const Resolved& target, ObjectRef self, std::vector
 
 Value VirtualMachine::Call(ObjectRef self, const std::string& method, std::vector<Value> args) {
   Instance* inst = FindInstance(self);
-  if (!inst) return Value();
+  if (!inst) {
+    // Most refs (and every quest alias) have no attached script, so they are not
+    // VM instances. Their methods are still engine-backed natives, so dispatch
+    // against the common base types: this is what makes ObjectReference/Actor
+    // calls (Is3DLoaded, GetDistance, ...) and ReferenceAlias.GetReference work
+    // on a bare ref instead of silently returning None.
+    if (self.handle != 0 && natives_) {
+      static constexpr const char* kBaseTypes[] = {"Actor", "ReferenceAlias", "ObjectReference",
+                                                   "Form"};
+      for (const char* type : kBaseTypes) {
+        if (const NativeFunction* nf = natives_->Find(type, method)) {
+          RecordNative(type, method);
+          return (*nf)(*this, self, args);
+        }
+      }
+    }
+    return Value();
+  }
   Resolved r;
   if (!ResolveMethod(*inst, method, inst->type, &r)) {
     WarnUnbound(inst->type, method);
