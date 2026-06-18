@@ -132,7 +132,7 @@ void CellStreamer::EnsureLandMaterial() {
 }
 
 void CellStreamer::Update(ecs::World& world, const Vec3& camera_position) {
-  if (!grid_) return;
+  if (interior_active_ || !grid_) return;
 
   // Engine -> Bethesda: x = ex / s, y = -ez / s (height ey is irrelevant).
   f32 beth_x = camera_position.x / kUnitsToMeters;
@@ -800,9 +800,12 @@ bool CellStreamer::LoadInterior(ecs::World& world, bethesda::GlobalFormId cell_i
     return false;
   }
 
-  // One shot, unbudgeted: an interior loads completely before the first
-  // frame and its entities never unload.
-  LoadedCell cell;
+  // One shot, unbudgeted: an interior loads completely. Its entities are
+  // tracked in interior_cell_ so a later transition (a door out) can unload
+  // them; exterior streaming stays suspended while it is active.
+  interior_cell_ = LoadedCell{};
+  interior_active_ = true;
+  LoadedCell& cell = interior_cell_;
   u32 mesh_budget = 0xffffffff;
   for (u64 ref_id : *refs) {
     SpawnReference(world, 0, 0, ref_id, cell, mesh_budget, true);
@@ -831,6 +834,40 @@ bool CellStreamer::LoadInterior(ecs::World& world, bethesda::GlobalFormId cell_i
   REC_INFO("interior {:04x}:{:06x}: {} refs, {} entities", cell_id.plugin, cell_id.local_id,
            refs->size(), cell.entities.size());
   return !cell.entities.empty();
+}
+
+void CellStreamer::UnloadInterior(ecs::World& world) {
+  for (ecs::Entity entity : interior_cell_.entities) {
+    if (quest_world_)
+      if (const FormLink* link = world.Get<FormLink>(entity))
+        quest_world_->Unregister(link->form.packed());
+    world.Destroy(entity);
+  }
+  if (physics_)
+    for (physics::BodyId body : interior_cell_.bodies) physics_->RemoveBody(body);
+  spawned_entities_ -= interior_cell_.entities.size();
+  interior_cell_ = LoadedCell{};
+}
+
+bool CellStreamer::EnterInterior(ecs::World& world, bethesda::GlobalFormId cell_id,
+                                 Vec3* camera_position) {
+  // Drop everything currently loaded (exterior cells and any prior interior),
+  // then load the destination interior. Collect keys before unloading: the
+  // unload erases from loaded_ as it goes.
+  base::Vector<u32> keys;
+  for (auto kv : loaded_) keys.push_back(kv.key);
+  for (u32 key : keys) UnloadCell(world, key);
+  UnloadInterior(world);
+  announced_idle_ = false;
+  return LoadInterior(world, cell_id, camera_position);
+}
+
+void CellStreamer::EnterExterior(ecs::World& world) {
+  UnloadInterior(world);
+  interior_active_ = false;
+  announced_idle_ = false;
+  // The exterior cells were unloaded on the way in; Update re-streams them
+  // around the camera on the next tick.
 }
 
 }  // namespace rec::world

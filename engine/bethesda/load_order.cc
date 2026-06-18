@@ -124,7 +124,9 @@ bool RecordStore::LoadAll(const std::string& data_dir, const LoadOrder& order,
         // (ACHR) are indexed alongside object refs so NPCs load with the cell.
         if ((header.type == kRefr || header.type == kAchr) && inserted &&
             (ctx.cell_group_type == 8 || ctx.cell_group_type == 9)) {
-          interior_[order.Resolve(ctx.cell, i, masters).packed()].push_back(id.packed());
+          u64 cell = order.Resolve(ctx.cell, i, masters).packed();
+          interior_[cell].push_back(id.packed());
+          ref_interior_cell_[id.packed()] = cell;
         }
       } else if ((header.type == kRefr || header.type == kAchr || header.type == kLand) &&
                  ctx.cell.value != 0 && ctx.cell_group_type == 9) {
@@ -228,6 +230,12 @@ GlobalFormId RecordStore::FindInteriorCell(std::string_view editor_id) const {
 
 const base::Vector<u64>* RecordStore::InteriorRefs(GlobalFormId cell) const {
   return interior_.find(cell.packed());
+}
+
+GlobalFormId RecordStore::InteriorCellOfRef(GlobalFormId ref) const {
+  if (const u64* cell = ref_interior_cell_.find(ref.packed()))
+    return GlobalFormId{static_cast<u16>(*cell >> 32), static_cast<u32>(*cell)};
+  return {};
 }
 
 const base::Vector<u64>* RecordStore::TopicInfos(GlobalFormId dial) const {

@@ -75,6 +75,16 @@ class CellStreamer {
   // receives a spawn point above the centroid of the placed references.
   bool LoadInterior(ecs::World& world, bethesda::GlobalFormId cell_id, Vec3* camera_position);
 
+  // Runtime cell transitions for load doors. EnterInterior unloads everything
+  // currently streamed, suspends exterior streaming, and loads `cell_id`
+  // completely (its spawn-point fallback goes to `camera_position`).
+  // EnterExterior unloads any active interior and lets Update resume streaming
+  // the worldspace around the camera on the next tick. `in_interior` reports
+  // whether streaming is currently suspended for an interior.
+  bool EnterInterior(ecs::World& world, bethesda::GlobalFormId cell_id, Vec3* camera_position);
+  void EnterExterior(ecs::World& world);
+  bool in_interior() const { return interior_active_; }
+
   // Terrain height (engine units) at an engine space x/z from LAND data.
   bool GroundHeight(f32 engine_x, f32 engine_z, f32* engine_y) const;
 
@@ -99,6 +109,8 @@ class CellStreamer {
   bool LoadCellIncremental(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell,
                            u32& mesh_budget, u32& ref_budget);
   void UnloadCell(ecs::World& world, u32 key);
+  // Destroys the active interior's entities and colliders (see interior_cell_).
+  void UnloadInterior(ecs::World& world);
   bool SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
   bool SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
   bool SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
@@ -124,6 +136,10 @@ class CellStreamer {
   bethesda::GlobalFormId worldspace_;
   const bethesda::RecordStore::ExteriorGrid* grid_ = nullptr;
   base::UnorderedMap<u32, LoadedCell> loaded_;
+  // While in an interior, exterior streaming is suspended and the interior's
+  // placed refs are tracked here so a later transition can unload them.
+  bool interior_active_ = false;
+  LoadedCell interior_cell_;
   // Base form id -> converted mesh (null when the base has no usable model),
   // so failures are only diagnosed once.
   base::UnorderedMap<u64, const asset::Mesh*> base_meshes_;

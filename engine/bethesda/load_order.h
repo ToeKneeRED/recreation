@@ -93,6 +93,11 @@ class RecordStore {
   // All REFR children (persistent and temporary) of an interior cell.
   const base::Vector<u64>* InteriorRefs(GlobalFormId cell) const;
 
+  // The interior cell a placed reference belongs to, or invalid (plugin
+  // 0xffff) when the ref is not an interior child (e.g. an exterior load
+  // door). Lets a load door discover the interior to stream on entry.
+  GlobalFormId InteriorCellOfRef(GlobalFormId ref) const;
+
   // The INFO response records under a DIAL topic, in file order (the order the
   // engine evaluates them). Null when the topic has no children.
   const base::Vector<u64>* TopicInfos(GlobalFormId dial) const;
@@ -111,6 +116,7 @@ class RecordStore {
   base::UnorderedMap<u64, ExteriorGrid> exterior_;       // worldspace -> grid
   base::UnorderedMap<u64, CellGridSlot> cell_grid_;      // CELL id -> grid slot
   base::UnorderedMap<u64, base::Vector<u64>> interior_;  // CELL id -> refs
+  base::UnorderedMap<u64, u64> ref_interior_cell_;       // interior REFR id -> CELL id
   base::UnorderedMap<u64, base::Vector<u64>> topic_infos_;  // DIAL id -> INFO ids
 };
 
