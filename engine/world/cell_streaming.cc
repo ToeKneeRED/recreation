@@ -231,6 +231,7 @@ void CellStreamer::UnloadCell(ecs::World& world, u32 key) {
   LoadedCell* cell = loaded_.find(key);
   if (!cell) return;
   for (ecs::Entity entity : cell->entities) world.Destroy(entity);
+  if (physics_ && cell->terrain_body) physics_->RemoveBody(cell->terrain_body);
   spawned_entities_ -= cell->entities.size();
   loaded_.erase(key);
 }
@@ -243,13 +244,14 @@ bool CellStreamer::SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, Loade
   std::string mesh_name =
       "land/" + std::to_string(grid_x) + "_" + std::to_string(grid_y);
   asset::AssetId mesh_id = asset::MakeAssetId(mesh_name);
+  bethesda::Record land;
+  if (!records_.Parse(land_id, &land)) return false;
+  f32 heights[kLandGridPoints * kLandGridPoints];
+  if (!DecodeLandHeights(land, heights)) return false;
+  AddTerrainCollider(grid_x, grid_y, cell, heights);
+
   const asset::Mesh* mesh = assets_.FindMesh(mesh_id);
   if (!mesh) {
-    bethesda::Record land;
-    if (!records_.Parse(land_id, &land)) return false;
-    f32 heights[kLandGridPoints * kLandGridPoints];
-    if (!DecodeLandHeights(land, heights)) return false;
-
     // Bake the cell's blended albedo; cells without texture layers keep the
     // shared default material.
     asset::AssetId material_id = land_material_;
@@ -400,6 +402,37 @@ const asset::Mesh* CellStreamer::EnsureWaterMesh() {
   built.bounds_center[1] = kCellSize * 0.5f;
   built.bounds_radius = kCellSize * 0.7072f;
   return assets_.AddMesh(std::move(built));
+}
+
+void CellStreamer::AddTerrainCollider(i16 grid_x, i16 grid_y, LoadedCell& cell,
+                                      const f32* heights) {
+  if (!physics_) return;
+  // Bethesda rows run north (+y); engine z runs south, so rows flip. Jolt
+  // heightfields need power-of-two-plus... any square sample count works.
+  f32 engine_heights[kLandGridPoints * kLandGridPoints];
+  for (u32 j = 0; j < kLandGridPoints; ++j) {
+    for (u32 i = 0; i < kLandGridPoints; ++i) {
+      u32 row = kLandGridPoints - 1 - j;
+      engine_heights[j * kLandGridPoints + i] = heights[row * kLandGridPoints + i] * kUnitsToMeters;
+    }
+  }
+  Vec3 origin{static_cast<f32>(grid_x) * kCellSize * kUnitsToMeters, 0,
+              -(static_cast<f32>(grid_y) + 1.0f) * kCellSize * kUnitsToMeters};
+  cell.terrain_body = physics_->AddHeightField(origin, engine_heights, kLandGridPoints,
+                                               kCellSize * kUnitsToMeters);
+}
+
+bool CellStreamer::WaterHeightAt(const Vec3& position, f32* height) {
+  f32 beth_x = position.x / kUnitsToMeters;
+  f32 beth_y = -position.z / kUnitsToMeters;
+  i16 grid_x = static_cast<i16>(std::floor(beth_x / kCellSize));
+  i16 grid_y = static_cast<i16>(std::floor(beth_y / kCellSize));
+  const LoadedCell* cell = loaded_.find(CellKey(grid_x, grid_y));
+  if (!cell || !cell->source) return false;
+  f32 game_height = 0;
+  if (!CellWaterHeight(*cell, &game_height)) return false;
+  *height = game_height * kUnitsToMeters;
+  return true;
 }
 
 bool CellStreamer::CellWaterHeight(const LoadedCell& cell, f32* height) const {

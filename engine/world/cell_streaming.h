@@ -11,6 +11,7 @@
 #include "bethesda/load_order.h"
 #include "core/math.h"
 #include "ecs/world.h"
+#include "physics/physics_world.h"
 #include "world/grass_baker.h"
 #include "world/land_baker.h"
 
@@ -28,6 +29,13 @@ namespace rec::world {
 // about X plus a uniform scale.
 class CellStreamer {
  public:
+  // Optional rigid body world: loaded cells then register terrain
+  // colliders and water answers buoyancy queries.
+  void set_physics(physics::PhysicsWorld* physics) { physics_ = physics; }
+
+  // Water surface height at an engine-space position, for buoyancy.
+  bool WaterHeightAt(const Vec3& position, f32* height);
+
   struct Uploads {
     std::function<bool(const asset::Mesh&)> mesh;
     std::function<bool(const asset::Texture&)> texture;
@@ -71,6 +79,7 @@ class CellStreamer {
   struct LoadedCell {
     base::Vector<ecs::Entity> entities;
     const bethesda::RecordStore::ExteriorCell* source = nullptr;
+    physics::BodyId terrain_body = 0;
     u32 next_ref = 0;
     bool terrain_done = false;
     bool grass_done = false;
@@ -86,6 +95,7 @@ class CellStreamer {
   bool SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
   // Water level of the cell in game units; false when the cell has none.
   bool CellWaterHeight(const LoadedCell& cell, f32* height) const;
+  void AddTerrainCollider(i16 grid_x, i16 grid_y, LoadedCell& cell, const f32* heights);
   bool SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64 ref_id, LoadedCell& cell,
                       u32& mesh_budget, bool interior);
   const asset::Mesh* MeshForBase(bethesda::GlobalFormId base_id, u32& mesh_budget,
@@ -100,6 +110,7 @@ class CellStreamer {
   GrassBaker grass_baker_;
   Settings settings_;
   Uploads uploads_;
+  physics::PhysicsWorld* physics_ = nullptr;
   bethesda::GlobalFormId worldspace_;
   const bethesda::RecordStore::ExteriorGrid* grid_ = nullptr;
   base::UnorderedMap<u32, LoadedCell> loaded_;
