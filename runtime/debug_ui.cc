@@ -541,11 +541,25 @@ void DebugUi::RenderQuestPanel(QuestPanel* quests) {
     quests->set_running(d.handle, true);
   }
   ImGui::SameLine();
-  static int set_stage = 0;
+  // The set-stage input is per-quest: reset it to the current stage whenever the
+  // expanded quest changes so a stale value never leaks across selections.
+  if (quest_stage_input_handle_ != d.handle) {
+    quest_stage_input_handle_ = d.handle;
+    quest_stage_input_ = q ? q->stage : 0;
+  }
   ImGui::SetNextItemWidth(70);
-  ImGui::InputInt("##setstage", &set_stage, 0, 0);
+  ImGui::InputInt("##setstage", &quest_stage_input_, 0, 0);
   ImGui::SameLine();
-  if (ImGui::SmallButton("Set stage") && quests->set_stage) quests->set_stage(d.handle, set_stage);
+  if (ImGui::SmallButton("Set stage") && quests->set_stage)
+    quests->set_stage(d.handle, quest_stage_input_);
+  ImGui::SameLine();
+  // Skip to the nearest defined stage strictly below the current one.
+  if (ImGui::SmallButton("Prev") && q && quests->set_stage) {
+    i32 prev = -1;
+    for (const QuestPanel::Stage& s : d.stages)
+      if (s.index < q->stage && s.index > prev) prev = s.index;
+    if (prev >= 0) quests->set_stage(d.handle, prev);
+  }
   ImGui::SameLine();
   // Skip to the next defined stage above the current one.
   if (ImGui::SmallButton("Next") && q && quests->set_stage) {

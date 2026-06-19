@@ -127,6 +127,10 @@ class DebugUi {
   bool quests_visible_ = true;  // the quest debugger window (F3 toggles)
   bool show_demo_ = false;
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
+  // The set-stage InputInt tracks the selected quest: switching selection resets
+  // it instead of carrying a stale stage from the previously expanded quest.
+  u64 quest_stage_input_handle_ = 0;
+  int quest_stage_input_ = 0;
   VkFormat swapchain_format_ = VK_FORMAT_UNDEFINED;  // outlives imgui init info
   f32 frame_times_[150] = {};
   u32 frame_time_cursor_ = 0;
