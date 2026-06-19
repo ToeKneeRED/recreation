@@ -97,8 +97,26 @@ papyrus::ObjectRef RecordBackedSkyrimBindings::GetForm(u32 form_id) {
   return papyrus::ObjectRef{id.packed()};
 }
 
+void RecordBackedSkyrimBindings::AliasForceRefTo(ObjectRef alias, ObjectRef ref) {
+  if (replica_mode_ || !papyrus::IsAliasHandle(alias.handle)) return;
+  if (ref.handle == 0)
+    alias_fills_.erase(alias.handle);
+  else
+    alias_fills_[alias.handle] = ref.handle;
+}
+
+void RecordBackedSkyrimBindings::AliasClear(ObjectRef alias) {
+  if (replica_mode_) return;
+  alias_fills_.erase(alias.handle);
+}
+
 papyrus::ObjectRef RecordBackedSkyrimBindings::AliasReference(ObjectRef alias) {
-  if (!records_ || !papyrus::IsAliasHandle(alias.handle)) return {};
+  if (!papyrus::IsAliasHandle(alias.handle)) return {};
+  // A runtime fill (ForceRefTo) wins over the authored rule; it was a valid ref
+  // when set, so it is returned without re-validating against records.
+  if (const auto it = alias_fills_.find(alias.handle); it != alias_fills_.end())
+    return papyrus::ObjectRef{it->second};
+  if (!records_) return {};
   const u64 quest = papyrus::AliasHandleQuest(alias.handle);
   const i32 alias_id = static_cast<i32>(papyrus::AliasHandleAliasId(alias.handle));
   const quest::QuestDef* def = quest_system_.Definition(quest);

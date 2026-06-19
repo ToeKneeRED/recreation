@@ -47,6 +47,10 @@ class SkyrimBindings {
   virtual papyrus::ObjectRef GetBaseObject(papyrus::ObjectRef ref) { return {}; }
   // The reference a quest alias is filled with (ReferenceAlias.GetReference).
   virtual papyrus::ObjectRef AliasReference(papyrus::ObjectRef alias) { return {}; }
+  // Runtime alias fill (ReferenceAlias.ForceRefTo / Clear): a script-set override
+  // that takes precedence over the authored fill rule until cleared.
+  virtual void AliasForceRefTo(papyrus::ObjectRef alias, papyrus::ObjectRef ref) {}
+  virtual void AliasClear(papyrus::ObjectRef alias) {}
 
   // Cell data (CELL record).
   virtual bool IsInterior(papyrus::ObjectRef cell) { return false; }

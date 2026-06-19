@@ -72,10 +72,13 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   papyrus::ObjectRef GetPlayer() override { return player_; }
   papyrus::ObjectRef GetForm(u32 form_id) override;
 
-  // The reference an alias handle is filled with (its quest's forced-reference
-  // alias, ALFR), or None. Backs ReferenceAlias.GetReference/GetActorRef so a
+  // The reference an alias handle is filled with: a script-set runtime fill
+  // (ForceRefTo) wins, else the authored forced-reference (ALFR) or unique-actor
+  // (ALUA) rule, else None. Backs ReferenceAlias.GetReference/GetActorRef so a
   // quest fragment's alias properties resolve to real refs. See alias_handle.h.
   papyrus::ObjectRef AliasReference(papyrus::ObjectRef alias) override;
+  void AliasForceRefTo(papyrus::ObjectRef alias, papyrus::ObjectRef ref) override;
+  void AliasClear(papyrus::ObjectRef alias) override;
 
   // Form data, from records.
   u32 GetFormId(papyrus::ObjectRef form) override;
@@ -193,6 +196,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::unordered_map<u64, LockState> locks_;
   std::unordered_map<u64, bool> open_;
   std::unordered_map<u64, bool> disabled_;  // Disable() state, for IsDisabled
+  std::unordered_map<u64, u64> alias_fills_;  // alias handle -> ForceRefTo override ref
   WorldEffectSink* world_sink_ = nullptr;
   bool replica_mode_ = false;  // true on a multiplayer client; see set_replica_mode
   // The quest whose fragment is currently running; world mutations made during

@@ -14,6 +14,7 @@
 #include "bethesda/load_order.h"
 #include "bethesda/record.h"
 #include "script/games/skyrim/skyrim_bindings.h"
+#include "script/papyrus/alias_handle.h"
 
 namespace {
 
@@ -74,6 +75,23 @@ int main(int argc, char** argv) {
   check("remove 60 -> 90", bindings.GetItemCount(chest, gold) == 90);
   bindings.RemoveItem(chest, gold, 1000);
   check("over-remove clamps to 0", bindings.GetItemCount(chest, gold) == 0);
+
+  // Runtime alias fill (ReferenceAlias.ForceRefTo / Clear). Uses a quest handle
+  // with no definition so only the runtime override is in play.
+  {
+    const ObjectRef alias{rec::script::papyrus::EncodeAliasHandle(0xDEAD, 5)};
+    const ObjectRef ref{0x000ABCDE};
+    check("unfilled alias is None", bindings.AliasReference(alias).handle == 0);
+    bindings.AliasForceRefTo(alias, ref);
+    check("ForceRefTo fills the alias", bindings.AliasReference(alias).handle == ref.handle);
+    bindings.AliasClear(alias);
+    check("Clear empties the alias", bindings.AliasReference(alias).handle == 0);
+    bindings.AliasForceRefTo(alias, ref);
+    bindings.set_replica_mode(true);
+    bindings.AliasForceRefTo(alias, ObjectRef{0x999});  // a client must not change the fill
+    check("client ForceRefTo is a no-op", bindings.AliasReference(alias).handle == ref.handle);
+    bindings.set_replica_mode(false);
+  }
 
   // Form data from the real RecordStore: first weapon's GetType and a keyword.
   std::optional<GlobalFormId> weapon;

@@ -299,6 +299,16 @@ void RegisterObjectReference(papyrus::NativeRegistry& reg, SkyrimBindings* bindi
   reg.Register("ReferenceAlias", "GetActorReference", alias_ref);
   reg.Register("ReferenceAlias", "GetActorRef", alias_ref);
   reg.Register("ReferenceAlias", "GetRef", alias_ref);
+  // Runtime fill: a script can point an alias at a specific ref (ForceRefTo) or
+  // empty it (Clear); the fill then wins in AliasReference until cleared.
+  reg.Register("ReferenceAlias", "ForceRefTo", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    Resolve(bindings).AliasForceRefTo(self, a.empty() ? ObjectRef{} : a[0].as_object());
+    return Value();
+  });
+  reg.Register("ReferenceAlias", "Clear", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).AliasClear(self);
+    return Value();
+  });
   // Lock(abLock=true,...): Lock(false) is the in-game way to unlock.
   reg.Register("ObjectReference", "Lock", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).SetLocked(self, ArgB(a, 0, true));
