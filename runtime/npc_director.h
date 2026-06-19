@@ -56,6 +56,9 @@ class NpcDirector {
   bool StepNpcSteering(ecs::Entity actor, const float goal[3], float pos[3], float rot[4],
                        float speed, float arrive_radius, float stop_radius, f32 dt);
   Vec3 NavigateTo(const Vec3& from, const Vec3& goal);
+  // Floor height under (x, z), found by a short downward ray; returns y_hint when
+  // nothing is beneath (a ledge / unloaded collision) so the caller holds height.
+  f32 GroundY(f32 x, f32 z, f32 y_hint) const;
   bool StartMq101Scene();
 
   EngineContext& ctx_;
@@ -77,7 +80,7 @@ class NpcDirector {
   Mq101Sink scene_sink_;
   bool mq101_scene_pending_ = false;
   bool mq101_scene_active_ = false;
-  i32 mq101_scene_stuck_ticks_ = 0;
+  f32 mq101_scene_stuck_time_ = 0;  // seconds the current beat has not progressed
 };
 
 }  // namespace rec

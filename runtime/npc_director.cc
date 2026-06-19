@@ -80,6 +80,16 @@ void NpcDirector::AvoidObstacles(const float self_pos[3], const float goal_dir[3
   world::SteerAroundObstacles(goal_dir, candidates, clearances, kFan, 1.5f, out_dir);
 }
 
+f32 NpcDirector::GroundY(f32 x, f32 z, f32 y_hint) const {
+  if (!physics_.initialized()) return y_hint;
+  // Cast down from just above the current height so a slightly embedded NPC still
+  // finds the floor; cap the reach so a gap or ledge leaves the NPC where it was
+  // rather than snapping it to a distant floor below.
+  physics::PhysicsWorld::RayHit hit;
+  if (physics_.Raycast(Vec3{x, y_hint + 1.5f, z}, Vec3{0, -1, 0}, 4.0f, &hit)) return hit.position.y;
+  return y_hint;
+}
+
 bool NpcDirector::StepNpcSteering(ecs::Entity actor, const float goal[3], float pos[3], float rot[4],
                              float speed, float arrive_radius, float stop_radius, f32 dt) {
   const world::SteerParams params{speed, arrive_radius, stop_radius};
@@ -105,6 +115,9 @@ bool NpcDirector::StepNpcSteering(ecs::Entity actor, const float goal[3], float 
     rot[2] = 0;
     rot[3] = std::cos(h);
   }
+  // Keep feet on the floor: ramps and the keep stairs would otherwise leave the
+  // NPC floating at its spawn height or sunk through the steps.
+  pos[1] = GroundY(pos[0], pos[2], pos[1]);
   // Drive the render actor's gait, if this NPC has a streamed-in instance.
   actors_->SetNpcGait(actor, out.arrived ? 0.0f : speed, !out.arrived, move_yaw);
   return !out.arrived;
@@ -158,6 +171,18 @@ void NpcDirector::UpdateFollowers(f32 dt) {
     goal[2] += sep[2] * 0.6f;
 
     world::Transform* t = followers[i].transform;
+    // A follower this far from the leader was stranded by a cell/load-door
+    // transition the player walked through (the door teleports only the player).
+    // Snap it to its slot behind the player so the escort regroups instead of
+    // leaving companions in the previous cell.
+    const f32 dx = t->position[0] - leader_pos[0], dz = t->position[2] - leader_pos[2];
+    if (dx * dx + dz * dz > 20.0f * 20.0f) {
+      t->position[0] = goal[0];
+      t->position[1] = GroundY(goal[0], goal[2], leader_pos[1]);
+      t->position[2] = goal[2];
+      continue;
+    }
+
     // Route the slot through pathfinding so a follower behind a wall rounds it
     // instead of pressing into it; close, clear slots resolve to a straight line.
     const Vec3 self{t->position[0], t->position[1], t->position[2]};
@@ -339,9 +364,12 @@ bool NpcDirector::StartMq101Scene() {
 
   Vec3 ppos{};
   actors_->PlayerWorldPos(&ppos);
-  // Pick the nearest NPC as the guide who leads the escort.
+  // Pick the nearest NPC within reach as the guide who leads the escort. The
+  // companion who shares the player's start (Ralof / Hadvar in the keep) is the
+  // closest actor, so nearest-within-radius resolves to the right one without
+  // hard-coding a form id.
   u64 guide = 0;
-  float best = 1e18f;
+  float best = 30.0f * 30.0f;  // ignore actors across the cell
   world_.Each<world::Npc, world::FormLink, world::Transform>(
       [&](ecs::Entity, world::Npc&, world::FormLink& link, world::Transform& t) {
         const float dx = t.position[0] - ppos.x, dz = t.position[2] - ppos.z;
@@ -353,36 +381,48 @@ bool NpcDirector::StartMq101Scene() {
       });
   if (guide == 0) return false;  // NPCs not streamed in yet, retry
 
-  // The guide walks a path ahead of the player; each leg advances the journal.
+  // The guide leads to each mark, then the stage advances only once the player
+  // has caught up: the player's own movement drives the journal, with the guide
+  // showing the way. Marks step forward from the start along the player's
+  // facing and are dropped onto the floor so they sit where feet can reach.
   const Vec3 fwd{std::sin(ctx_.cam_yaw), 0.0f, -std::cos(ctx_.cam_yaw)};
   mq101_scene_.actions.clear();
-  auto add_set_stage = [&](i32 s) {
+  auto add = [&](quest::SceneAction a) { mq101_scene_.actions.push_back(a); };
+  auto set_stage = [&](i32 s) {
     quest::SceneAction a;
     a.kind = quest::SceneAction::Kind::kSetStage;
     a.quest = mq;
     a.stage = s;
-    mq101_scene_.actions.push_back(a);
+    add(a);
   };
-  auto add_guide_to = [&](const Vec3& p) {
-    quest::SceneAction a;
-    a.kind = quest::SceneAction::Kind::kGuideTo;
-    a.actor = guide;
-    a.pos[0] = p.x;
-    a.pos[1] = p.y;
-    a.pos[2] = p.z;
-    a.radius = 2.5f;
-    mq101_scene_.actions.push_back(a);
+  auto lead_to = [&](const Vec3& p, i32 stage) {
+    Vec3 mark{p.x, GroundY(p.x, p.z, p.y), p.z};
+    quest::SceneAction guide_to;
+    guide_to.kind = quest::SceneAction::Kind::kGuideTo;
+    guide_to.actor = guide;
+    guide_to.pos[0] = mark.x;
+    guide_to.pos[1] = mark.y;
+    guide_to.pos[2] = mark.z;
+    guide_to.radius = 2.5f;
+    add(guide_to);
+    quest::SceneAction wait;
+    wait.kind = quest::SceneAction::Kind::kWaitPlayerNear;
+    wait.pos[0] = mark.x;
+    wait.pos[1] = mark.y;
+    wait.pos[2] = mark.z;
+    wait.radius = 3.0f;
+    add(wait);
+    set_stage(stage);
   };
-  add_set_stage(160);
-  const i32 stages[3] = {300, 500, 900};
-  for (int i = 0; i < 3; ++i) {
-    add_guide_to(ppos + fwd * (8.0f * static_cast<f32>(i + 1)));
-    add_set_stage(stages[i]);
-  }
+
+  set_stage(160);  // "Make your way to the Keep"
+  const i32 stages[4] = {300, 500, 700, 900};
+  for (int i = 0; i < 4; ++i) lead_to(ppos + fwd * (8.0f * static_cast<f32>(i + 1)), stages[i]);
+
   scene_sink_.d = this;
   scene_runner_.Reset(&mq101_scene_);
   mq101_scene_active_ = true;
-  mq101_scene_stuck_ticks_ = 0;
+  mq101_scene_stuck_time_ = 0;
   REC_INFO("scene: MQ101 escort armed, guide 0x{:x} leads the player to completion", guide);
   return true;
 }
@@ -396,15 +436,15 @@ void NpcDirector::Mq101SceneTick(f32 dt) {
 
   const size_t before = scene_runner_.current_action();
   const bool running = scene_runner_.Tick(scene_sink_, dt);
-  // Stall recovery: a guide has no global pathfinding, so a leg can wedge on
-  // geometry. If a beat makes no progress for a while, warp the guide to its
-  // mark so the escort always finishes (it reads as the guide catching up).
-  // kGuideTo legs run the steering for ~kWalkTicks before giving up (kept short
-  // because these streamed cells run at a low, variable frame rate).
-  constexpr i32 kWalkTicks = 90;
+  // Stall recovery so the guided playthrough always finishes even on terrain a
+  // guide wedges on or a player who cannot reach a mark: after a beat has made
+  // no progress for a while, nudge whoever the beat is waiting on to the mark. A
+  // kGuideTo waits on the guide; a kWaitPlayerNear waits on the player.
+  constexpr f32 kStallSeconds = 20.0f;
   if (scene_runner_.current_action() != before) {
-    mq101_scene_stuck_ticks_ = 0;
-  } else if (++mq101_scene_stuck_ticks_ > kWalkTicks && before < mq101_scene_.actions.size()) {
+    mq101_scene_stuck_time_ = 0;
+  } else if ((mq101_scene_stuck_time_ += dt) > kStallSeconds &&
+             before < mq101_scene_.actions.size()) {
     const quest::SceneAction& a = mq101_scene_.actions[before];
     if (a.kind == quest::SceneAction::Kind::kGuideTo) {
       const float wx = a.pos[0], wy = a.pos[1], wz = a.pos[2];
@@ -416,8 +456,11 @@ void NpcDirector::Mq101SceneTick(f32 dt) {
             t.position[2] = wz;
           });
       REC_INFO("scene: guide reached the next mark");
+    } else if (a.kind == quest::SceneAction::Kind::kWaitPlayerNear) {
+      actors_->TeleportPlayer(a.pos[0], a.pos[1], a.pos[2]);
+      REC_INFO("scene: player caught up to the next mark");
     }
-    mq101_scene_stuck_ticks_ = 0;
+    mq101_scene_stuck_time_ = 0;
   }
   if (!running) {
     mq101_scene_active_ = false;
