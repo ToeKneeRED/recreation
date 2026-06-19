@@ -156,7 +156,12 @@ std::string RecordBackedSkyrimBindings::GetName(ObjectRef form) {
   bethesda::Record record;
   if (!records_->Parse(ToFormId(form), &record)) return "";
   const bethesda::Subrecord* full = record.Find(FourCc('F', 'U', 'L', 'L'));
-  if (!full) return "";
+  if (!full) {
+    // A placed reference (REFR/ACHR) carries no FULL of its own; the displayed
+    // name lives on its base object, reached through NAME.
+    ObjectRef base = GetBaseObject(form);
+    return base.handle != form.handle && base.handle != 0 ? GetName(base) : "";
+  }
   if (strings_ && full->data.size() >= 4) {
     u32 string_id;
     std::memcpy(&string_id, full->data.data(), 4);
