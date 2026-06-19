@@ -3,6 +3,11 @@
 # when those middlewares are absent, so the same translation units serve all.
 set(RECREATION_RUNTIME_SOURCES
   engine.cc
+  actor_system.cc
+  demo_scenes.cc
+  interaction_system.cc
+  npc_director.cc
+  quest_director.cc
   fly_camera.cc
   debug_ui.cc
   game_ui.cc
