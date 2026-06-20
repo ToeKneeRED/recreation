@@ -114,6 +114,13 @@ public sealed class FakeBackend : IEngineBackend
     public void SetHasKeyword(ulong item, ulong keyword) => _keywords.Add((item, keyword));
     private readonly List<ulong> _keywordCache = new();
 
+    // An actor's authored factions (faction handle, rank) and the cache the
+    // enumeration accessors read after a GetFactionCount.
+    private readonly Dictionary<ulong, List<(ulong Faction, int Rank)>> _factions = new();
+    private readonly List<(ulong Faction, int Rank)> _factionCache = new();
+    public void SetActorFactions(ulong actor, params (ulong faction, int rank)[] factions) =>
+        _factions[actor] = factions.Select(f => (f.faction, f.rank)).ToList();
+
     public void SetPosition(ulong reference, float x, float y, float z) =>
         _positions[reference] = (x, y, z);
 
@@ -243,6 +250,22 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.Bool(_essential.Contains(self));
             case "HasKeyword":
                 return Value.Bool(_keywords.Contains((self, args[0].AsHandle())));
+            case "GetFactionCount":
+                _factionCache.Clear();
+                if (_factions.TryGetValue(self, out var facs)) _factionCache.AddRange(facs);
+                return Value.Int(_factionCache.Count);
+            case "GetNthFaction":
+            {
+                int idx = args[0].AsInt();
+                return idx >= 0 && idx < _factionCache.Count
+                    ? Value.Object(_factionCache[idx].Faction) : Value.Object(0);
+            }
+            case "GetNthFactionRank":
+            {
+                int idx = args[0].AsInt();
+                return idx >= 0 && idx < _factionCache.Count
+                    ? Value.Int(_factionCache[idx].Rank) : Value.Int(0);
+            }
             case "GetKeywordCount":
                 _keywordCache.Clear();
                 _keywordCache.AddRange(_keywords.Where(k => k.Item1 == self).Select(k => k.Item2));

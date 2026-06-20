@@ -15,6 +15,7 @@ recreation_add_module(script
   games/skyrim/skyrim_bindings_item_data.cc
   games/skyrim/skyrim_bindings_crafting.cc
   games/skyrim/skyrim_bindings_leveled.cc
+  games/skyrim/skyrim_bindings_faction.cc
   games/skyrim/skyrim_condition_context.cc
 )
 

@@ -193,6 +193,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void SetOpen(papyrus::ObjectRef ref, bool open) override;
 
   // Factions (new system): membership/rank, reactions, crime gold.
+  i32 GetFactionCount(papyrus::ObjectRef actor) override;
+  papyrus::ObjectRef GetNthFaction(i32 index) override;
+  i32 GetNthFactionRank(i32 index) override;
   i32 GetFactionRank(papyrus::ObjectRef actor, papyrus::ObjectRef faction) override;
   void SetFactionRank(papyrus::ObjectRef actor, papyrus::ObjectRef faction, i32 rank) override;
   bool IsInFaction(papyrus::ObjectRef actor, papyrus::ObjectRef faction) override;
@@ -293,6 +296,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // Reads a 4-byte form-id subrecord off `from`'s record and resolves it
   // against the load order. Used for record fields that point at another form.
   papyrus::ObjectRef ResolveFormRef(papyrus::ObjectRef from, u32 subrecord_type);
+  // The rank an actor is authored into `faction` (its NPC_ SNAM), or -2 if it is
+  // not authored into it. Backs GetFactionRank when no runtime override is set.
+  i32 AuthoredFactionRank(papyrus::ObjectRef actor, papyrus::ObjectRef faction);
   std::array<f32, 3> Position(papyrus::ObjectRef ref);
   ActorValue& Av(papyrus::ObjectRef actor, const std::string& av);
 
@@ -364,6 +370,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void MaybeNotifyDeath(papyrus::ObjectRef actor);
   std::unordered_set<u64> dead_;  // actors that have already announced OnDeath
   std::unordered_map<u64, std::unordered_map<u64, i32>> faction_ranks_;  // actor -> faction -> rank
+  // Last GetFactionCount result (authored faction handle + rank), read by the
+  // GetNthFaction* accessors.
+  std::vector<std::pair<u64, i32>> faction_cache_;
   std::unordered_map<u64, std::unordered_map<u64, i32>> reactions_;      // faction -> other
   std::unordered_map<u64, i32> crime_gold_;                             // faction -> gold
   std::array<bool, SkyrimBindings::kControlCount> player_controls_{};   // true = enabled

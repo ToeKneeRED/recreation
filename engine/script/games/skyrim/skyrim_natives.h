@@ -183,6 +183,14 @@ class SkyrimBindings {
   virtual void EquipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) {}
   virtual void AddSpell(papyrus::ObjectRef actor, papyrus::ObjectRef spell) {}
 
+  // Enumerates an actor's authored faction memberships (its NPC_ record's SNAM
+  // entries). GetFactionCount parses them into a cache and returns the count;
+  // GetNthFaction / GetNthFactionRank read it by index. Runtime changes
+  // (Add/Remove/SetFactionRank) override these but do not change the listing.
+  virtual i32 GetFactionCount(papyrus::ObjectRef actor) { return 0; }
+  virtual papyrus::ObjectRef GetNthFaction(i32 index) { return {}; }
+  virtual i32 GetNthFactionRank(i32 index) { return 0; }
+
   // Faction membership (actor side) and faction-wide reaction / crime state.
   virtual i32 GetFactionRank(papyrus::ObjectRef actor, papyrus::ObjectRef faction) { return -2; }
   virtual void SetFactionRank(papyrus::ObjectRef actor, papyrus::ObjectRef faction, i32 rank) {}

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Recreation.Interop;
 
 namespace Recreation;
@@ -7,6 +8,13 @@ public enum Sex
 {
     Male,
     Female,
+}
+
+// One of an actor's authored faction memberships: the faction and the rank held.
+public readonly struct FactionMembership(Faction faction, int rank)
+{
+    public Faction Faction { get; } = faction;
+    public int Rank { get; } = rank;
 }
 
 // A living reference (Papyrus Actor): the player, NPCs and creatures. Adds
@@ -63,6 +71,22 @@ public class Actor : ObjectReference
     public void SetFactionRank(Faction faction, int rank) =>
         Call("SetFactionRank", faction, rank);
     public bool IsInFaction(Faction faction) => Call("IsInFaction", faction).AsBool();
+
+    // The factions the actor is authored into (its record's memberships), with the
+    // rank held in each. Runtime Add/Remove/SetFactionRank change membership and
+    // rank but not this listing.
+    public IReadOnlyList<FactionMembership> Factions
+    {
+        get
+        {
+            int count = Call("GetFactionCount").AsInt();
+            var result = new FactionMembership[count];
+            for (int i = 0; i < count; i++)
+                result[i] = new FactionMembership(Faction.From(Call("GetNthFaction", i).AsHandle()),
+                                                  Call("GetNthFactionRank", i).AsInt());
+            return result;
+        }
+    }
     public void AddToFaction(Faction faction) => Call("AddToFaction", faction);
     public void RemoveFromFaction(Faction faction) => Call("RemoveFromFaction", faction);
 }

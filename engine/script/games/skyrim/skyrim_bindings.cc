@@ -317,10 +317,15 @@ i32 RecordBackedSkyrimBindings::GetOpenState(ObjectRef ref) {
 void RecordBackedSkyrimBindings::SetOpen(ObjectRef ref, bool open) { open_[ref.handle] = open; }
 
 i32 RecordBackedSkyrimBindings::GetFactionRank(ObjectRef actor, ObjectRef faction) {
+  // A runtime override (Add/Remove/SetFactionRank) wins; otherwise fall back to
+  // the membership authored in the NPC_ record. A removed faction is stored as the
+  // -2 sentinel so the override can hide an authored membership.
   auto it = faction_ranks_.find(actor.handle);
-  if (it == faction_ranks_.end()) return -2;  // not in faction
-  auto rank_it = it->second.find(faction.handle);
-  return rank_it == it->second.end() ? -2 : rank_it->second;
+  if (it != faction_ranks_.end()) {
+    auto rank_it = it->second.find(faction.handle);
+    if (rank_it != it->second.end()) return rank_it->second;
+  }
+  return AuthoredFactionRank(actor, faction);
 }
 
 void RecordBackedSkyrimBindings::SetFactionRank(ObjectRef actor, ObjectRef faction, i32 rank) {
@@ -328,8 +333,7 @@ void RecordBackedSkyrimBindings::SetFactionRank(ObjectRef actor, ObjectRef facti
 }
 
 bool RecordBackedSkyrimBindings::IsInFaction(ObjectRef actor, ObjectRef faction) {
-  auto it = faction_ranks_.find(actor.handle);
-  return it != faction_ranks_.end() && it->second.count(faction.handle);
+  return GetFactionRank(actor, faction) > -2;  // -2 means not a member
 }
 
 void RecordBackedSkyrimBindings::AddToFaction(ObjectRef actor, ObjectRef faction) {
@@ -337,8 +341,9 @@ void RecordBackedSkyrimBindings::AddToFaction(ObjectRef actor, ObjectRef faction
 }
 
 void RecordBackedSkyrimBindings::RemoveFromFaction(ObjectRef actor, ObjectRef faction) {
-  auto it = faction_ranks_.find(actor.handle);
-  if (it != faction_ranks_.end()) it->second.erase(faction.handle);
+  // Store the -2 sentinel rather than erase, so the removal also hides an authored
+  // membership the NPC_ record would otherwise report.
+  faction_ranks_[actor.handle][faction.handle] = -2;
 }
 
 i32 RecordBackedSkyrimBindings::GetReaction(ObjectRef faction, ObjectRef other) {

@@ -635,6 +635,15 @@ void RegisterActor(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
     Resolve(bindings).AddSpell(self, ArgO(a, 0));
     return Value();
   });
+  reg.Register("Actor", "GetFactionCount", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetFactionCount(self));
+  });
+  reg.Register("Actor", "GetNthFaction", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Object(Resolve(bindings).GetNthFaction(ArgI(a, 0)));
+  });
+  reg.Register("Actor", "GetNthFactionRank", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Int(Resolve(bindings).GetNthFactionRank(ArgI(a, 0)));
+  });
   reg.Register("Actor", "GetFactionRank", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     return Value::Int(Resolve(bindings).GetFactionRank(self, ArgO(a, 0)));
   });
