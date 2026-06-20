@@ -48,8 +48,8 @@ class RuntimeWorldSink : public script::WorldEffectSink {
   void MoveReference(u64 quest, u64 handle, f32 x, f32 y, f32 z) override {
     Emit(world::WorldOp::kMove, quest, handle, x, y, z);
   }
-  void MovePlayer(u64 quest, f32 x, f32 y, f32 z) override {
-    Emit(world::WorldOp::kMovePlayer, quest, 0, x, y, z);
+  void MovePlayer(u64 quest, u64 dest_ref, f32 x, f32 y, f32 z) override {
+    Emit(world::WorldOp::kMovePlayer, quest, dest_ref, x, y, z);
   }
   void SetEnabled(u64 quest, u64 handle, bool enabled) override {
     world::WorldCommand c;

@@ -64,7 +64,9 @@ class QuestWorld {
   // The player is not a registry entity; quests that MoveTo the player route
   // through this hook (the runtime teleports the player actor/capsule).
   void set_player_handle(u64 handle) { player_handle_ = handle; }
-  void set_on_move_player(std::function<void(f32, f32, f32)> fn) {
+  // `dest_ref` is the reference the player was moved to (0 = raw coordinates),
+  // so the runtime can switch cells when it names an interior.
+  void set_on_move_player(std::function<void(u64 dest_ref, f32, f32, f32)> fn) {
     on_move_player_ = std::move(fn);
   }
 
@@ -103,7 +105,7 @@ class QuestWorld {
   ecs::World& world_;
   std::unordered_map<u64, ecs::Entity> registry_;
   std::unordered_map<u64, std::vector<Effect>> provenance_;
-  std::function<void(f32, f32, f32)> on_move_player_;
+  std::function<void(u64, f32, f32, f32)> on_move_player_;
   u64 player_handle_ = 0x14;
 };
 

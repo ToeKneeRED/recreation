@@ -483,7 +483,25 @@ bool Engine::LoadGameData() {
   // through the provenance layer; the player teleports through a host hook since
   // it is an actor/capsule, not a registry entity.
   script_bindings_->set_world_sink(&runtime_world_sink_);
-  quest_world_.set_on_move_player([this](f32 x, f32 y, f32 z) { actors_->TeleportPlayer(x, y, z); });
+  quest_world_.set_on_move_player([this](u64 dest_ref, f32 x, f32 y, f32 z) {
+    // When a quest warps the player to a reference inside an interior cell (the
+    // Helgen keep, say), stream that cell first so the player lands in a loaded
+    // world rather than at interior-local coordinates floating in the exterior.
+    if (dest_ref != 0 && streamer_) {
+      const bethesda::GlobalFormId ref{static_cast<u16>(dest_ref >> 32),
+                                       static_cast<u32>(dest_ref & 0xffffffffu)};
+      const bethesda::GlobalFormId interior = records_.InteriorCellOfRef(ref);
+      if (interior.plugin != 0xffff) {
+        Vec3 spawn;
+        if (streamer_->EnterInterior(world_, interior, &spawn))
+          REC_INFO("quest: entered interior {:04x}:{:06x} to move the player",
+                   interior.plugin, interior.local_id);
+      } else if (streamer_->in_interior()) {
+        streamer_->EnterExterior(world_);  // a move back out to the worldspace
+      }
+    }
+    actors_->TeleportPlayer(x, y, z);
+  });
   // A connecting client is a passive replica: the server runs the scripts and is
   // authoritative for quest and quest-driven world state; the client mirrors it
   // through replicated quest snapshots and world commands. Definitions still load

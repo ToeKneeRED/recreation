@@ -81,7 +81,7 @@ void QuestWorld::ApplyOne(const WorldCommand& cmd) {
       break;
     }
     case WorldOp::kMovePlayer:
-      if (on_move_player_) on_move_player_(cmd.pos[0], cmd.pos[1], cmd.pos[2]);
+      if (on_move_player_) on_move_player_(cmd.handle, cmd.pos[0], cmd.pos[1], cmd.pos[2]);
       break;
     case WorldOp::kCleanupQuest:
       CleanupQuest(cmd.quest);

@@ -116,19 +116,24 @@ int main() {
   Check("pre-existing ref restored, not destroyed",
         world.IsAlive(pre) && PosX(world, pre) == 100.0f);
 
-  // Player move routes through the host hook.
+  // Player move routes through the host hook, carrying the destination ref so
+  // the runtime can switch cells when it names an interior.
   bool moved = false;
   f32 player_x = 0;
-  qw.set_on_move_player([&](f32 x, f32, f32) {
+  rec::u64 dest_ref = 0;
+  qw.set_on_move_player([&](rec::u64 ref, f32 x, f32, f32) {
     moved = true;
     player_x = x;
+    dest_ref = ref;
   });
   WorldCommand pm;
   pm.op = WorldOp::kMovePlayer;
+  pm.handle = 0xABCD;  // destination reference handle
   pm.pos = {42, 0, 0};
   q.Push(pm);
   qw.Apply(q);
-  Check("player-move hook fired with target", moved && player_x == 42.0f);
+  Check("player-move hook fired with target + dest ref",
+        moved && player_x == 42.0f && dest_ref == 0xABCD);
 
   if (g_failures) {
     std::printf("FAILED: %d check(s)\n", g_failures);

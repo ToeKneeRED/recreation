@@ -212,7 +212,7 @@ void RecordBackedSkyrimBindings::SetPosition(ObjectRef ref, f32 x, f32 y, f32 z)
   positions_[ref.handle] = {x, y, z};  // logical position for script reads
   if (!world_sink_) return;
   if (ref.handle == player_.handle)
-    world_sink_->MovePlayer(active_quest_, x, y, z);
+    world_sink_->MovePlayer(active_quest_, 0, x, y, z);  // raw coords, no dest ref
   else
     world_sink_->MoveReference(active_quest_, ref.handle, x, y, z);
 }
@@ -230,7 +230,7 @@ void RecordBackedSkyrimBindings::MoveTo(ObjectRef ref, ObjectRef target) {
   positions_[ref.handle] = p;
   if (!world_sink_) return;
   if (ref.handle == player_.handle)
-    world_sink_->MovePlayer(active_quest_, p[0], p[1], p[2]);
+    world_sink_->MovePlayer(active_quest_, target.handle, p[0], p[1], p[2]);
   else
     world_sink_->MoveReference(active_quest_, ref.handle, p[0], p[1], p[2]);
 }

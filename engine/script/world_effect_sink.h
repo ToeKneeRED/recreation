@@ -19,7 +19,10 @@ class WorldEffectSink {
 
   virtual u64 SpawnReference(u64 quest, u64 base, f32 x, f32 y, f32 z) = 0;
   virtual void MoveReference(u64 quest, u64 handle, f32 x, f32 y, f32 z) = 0;
-  virtual void MovePlayer(u64 quest, f32 x, f32 y, f32 z) = 0;
+  // `dest_ref` is the reference the player was moved to (0 for a raw SetPosition).
+  // When it lives in an interior cell, the runtime streams that cell so a quest
+  // that warps the player indoors (e.g. into the Helgen keep) lands them there.
+  virtual void MovePlayer(u64 quest, u64 dest_ref, f32 x, f32 y, f32 z) = 0;
   virtual void SetEnabled(u64 quest, u64 handle, bool enabled) = 0;
   virtual void DeleteReference(u64 quest, u64 handle) = 0;
   virtual void CleanupQuest(u64 quest) = 0;
