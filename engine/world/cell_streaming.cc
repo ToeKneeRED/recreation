@@ -367,7 +367,7 @@ bool CellStreamer::SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, Loade
   ecs::Entity entity = world.Create();
   Transform transform;
   Vec3 position = ToWorld(static_cast<f32>(grid_x) * kCellSize,
-                           static_cast<f32>(grid_y) * kCellSize, 0.0f);
+                          static_cast<f32>(grid_y) * kCellSize, 0.0f);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
   transform.position[2] = position.z;
@@ -538,7 +538,7 @@ bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   ecs::Entity entity = world.Create();
   Transform transform;
   Vec3 position = ToWorld(static_cast<f32>(grid_x) * kCellSize,
-                           static_cast<f32>(grid_y) * kCellSize, height);
+                          static_cast<f32>(grid_y) * kCellSize, height);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
   transform.position[2] = position.z;
@@ -574,7 +574,7 @@ bool CellStreamer::SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   ecs::Entity entity = world.Create();
   Transform transform;
   Vec3 position = ToWorld(static_cast<f32>(grid_x) * kCellSize,
-                           static_cast<f32>(grid_y) * kCellSize, 0.0f);
+                          static_cast<f32>(grid_y) * kCellSize, 0.0f);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
   transform.position[2] = position.z;

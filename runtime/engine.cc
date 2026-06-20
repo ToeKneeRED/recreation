@@ -797,14 +797,27 @@ void Engine::SetupExtraStreamers() {
   if (const char* env = std::getenv("REC_DOMAIN_OFFSET")) {
     std::sscanf(env, "%f,%f,%f", &step.x, &step.y, &step.z);
   }
-  i32 region_x = -18, region_y = 7;  // Commonwealth coast: highway, rocks, trees
-  if (const char* env = std::getenv("REC_DOMAIN_CELL")) {
-    std::sscanf(env, "%d,%d", &region_x, &region_y);
-  }
+  // REC_DOMAIN_CELL forces the region for every secondary; otherwise each game
+  // defaults to a content-dense cell of its own (the primary camera's raw
+  // coordinates usually land in empty ocean in the secondary world).
+  i32 forced_x = 0, forced_y = 0;
+  const bool forced = std::getenv("REC_DOMAIN_CELL") &&
+                      std::sscanf(std::getenv("REC_DOMAIN_CELL"), "%d,%d", &forced_x, &forced_y) == 2;
   const Vec3 cam = camera_.position();
 
   for (size_t i = 0; i < extra_domains_.size(); ++i) {
     ContentDomain& domain = *extra_domains_[i];
+    // A content-dense default cell per game (Whiterun for Skyrim, the
+    // Commonwealth coast for Fallout 4); the forced override wins when set.
+    i32 region_x = -18, region_y = 7;  // Commonwealth coast: highway, rocks, trees
+    if (domain.profile().game == bethesda::Game::kSkyrimSe) {
+      region_x = 5;
+      region_y = -3;  // Whiterun
+    }
+    if (forced) {
+      region_x = forced_x;
+      region_y = forced_y;
+    }
     auto streamer = std::make_unique<world::CellStreamer>(domain.records(), domain.assets());
 
     // Namespace this domain's mesh ids so they cannot collide with the primary
@@ -819,8 +832,10 @@ void Engine::SetupExtraStreamers() {
     f32 region_by = (static_cast<f32>(region_y) + 0.5f) * kCellSize;
     Vec3 anchor{region_bx * kUnitsToMeters, 0.0f, -region_by * kUnitsToMeters};
     streamer->set_fixed_anchor(anchor);
-    // Offset so that region center lands `step*(i+1)` east of the primary camera.
-    Vec3 place{cam.x + step.x * static_cast<f32>(i + 1), step.y * static_cast<f32>(i + 1),
+    // Offset so the region center lands `step*(i+1)` from the primary camera,
+    // at the camera's height by default so the secondary world sits beside the
+    // primary instead of floating far above or sunk below it.
+    Vec3 place{cam.x + step.x * static_cast<f32>(i + 1), cam.y + step.y * static_cast<f32>(i + 1),
                cam.z + step.z * static_cast<f32>(i + 1)};
     streamer->set_world_offset({place.x - anchor.x, place.y - anchor.y, place.z - anchor.z});
 
