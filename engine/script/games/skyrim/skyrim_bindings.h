@@ -202,6 +202,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void AddToFaction(papyrus::ObjectRef actor, papyrus::ObjectRef faction) override;
   void RemoveFromFaction(papyrus::ObjectRef actor, papyrus::ObjectRef faction) override;
   i32 GetReaction(papyrus::ObjectRef faction, papyrus::ObjectRef other) override;
+  i32 GetFactionFlags(papyrus::ObjectRef faction) override;
   void SetReaction(papyrus::ObjectRef faction, papyrus::ObjectRef other, i32 reaction) override;
   i32 GetCrimeGold(papyrus::ObjectRef faction) override;
   void SetCrimeGold(papyrus::ObjectRef faction, i32 gold) override;

@@ -52,6 +52,7 @@ internal static class Program
         RelationshipsTests.Run(check);
         FactionsTests.Run(check);
         FactionRelationsTests.Run(check);
+        CrimeTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;

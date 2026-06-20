@@ -198,6 +198,10 @@ class SkyrimBindings {
   virtual void AddToFaction(papyrus::ObjectRef actor, papyrus::ObjectRef faction) {}
   virtual void RemoveFromFaction(papyrus::ObjectRef actor, papyrus::ObjectRef faction) {}
   virtual i32 GetReaction(papyrus::ObjectRef faction, papyrus::ObjectRef other) { return 0; }
+  // A faction's DATA flags (FACT record). Bit 0x40 marks a crime faction (it
+  // tracks the player's bounty). Lets managed code find the hold an actor reports
+  // crimes to.
+  virtual i32 GetFactionFlags(papyrus::ObjectRef faction) { return 0; }
   virtual void SetReaction(papyrus::ObjectRef faction, papyrus::ObjectRef other, i32 reaction) {}
   virtual i32 GetCrimeGold(papyrus::ObjectRef faction) { return 0; }
   virtual void SetCrimeGold(papyrus::ObjectRef faction, i32 gold) {}

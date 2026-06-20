@@ -87,6 +87,18 @@ i32 RecordBackedSkyrimBindings::AuthoredFactionRank(ObjectRef actor, ObjectRef f
   return -2;
 }
 
+i32 RecordBackedSkyrimBindings::GetFactionFlags(ObjectRef faction) {
+  if (!records_) return 0;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(faction), &rec) || rec.header.type != FourCc('F', 'A', 'C', 'T'))
+    return 0;
+  const bethesda::Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+  if (!data || data->data.size() < 4) return 0;
+  u32 flags;
+  std::memcpy(&flags, data->data.data(), 4);
+  return static_cast<i32>(flags);
+}
+
 i32 RecordBackedSkyrimBindings::AuthoredFactionReaction(ObjectRef faction, ObjectRef other) {
   if (!records_) return 0;  // 0 = neutral
   const bethesda::GlobalFormId id = ToFormId(faction);

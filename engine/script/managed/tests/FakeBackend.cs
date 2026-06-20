@@ -126,6 +126,11 @@ public sealed class FakeBackend : IEngineBackend
     public void SetFactionReaction(ulong faction, ulong other, int reaction) =>
         _reactions[(faction, other)] = reaction;
 
+    // Faction DATA flags and per-faction crime gold (bounty).
+    private readonly Dictionary<ulong, int> _factionFlags = new();
+    private readonly Dictionary<ulong, int> _crimeGold = new();
+    public void SetFactionFlags(ulong faction, int flags) => _factionFlags[faction] = flags;
+
     public void SetPosition(ulong reference, float x, float y, float z) =>
         _positions[reference] = (x, y, z);
 
@@ -257,6 +262,16 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.Bool(_keywords.Contains((self, args[0].AsHandle())));
             case "GetReaction":
                 return Value.Int(_reactions.GetValueOrDefault((self, args[0].AsHandle())));
+            case "GetFactionFlags":
+                return Value.Int(_factionFlags.GetValueOrDefault(self));
+            case "GetCrimeGold":
+                return Value.Int(_crimeGold.GetValueOrDefault(self));
+            case "SetCrimeGold":
+                _crimeGold[self] = args[0].AsInt();
+                return Value.None;
+            case "ModCrimeGold":
+                _crimeGold[self] = _crimeGold.GetValueOrDefault(self) + args[0].AsInt();
+                return Value.None;
             case "GetFactionCount":
                 _factionCache.Clear();
                 if (_factions.TryGetValue(self, out var facs)) _factionCache.AddRange(facs);

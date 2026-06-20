@@ -26,6 +26,13 @@ public class Faction : Form
     // The reaction toward another faction as a typed value.
     public CombatReaction ReactionToward(Faction other) => (CombatReaction)GetReaction(other);
 
+    // The faction's DATA flags (FACT record).
+    public int Flags => Call("GetFactionFlags").AsInt();
+
+    // True if this faction tracks the player's bounty (the Track Crime flag): a
+    // hold's guards, in other words.
+    public bool IsCrimeFaction => (Flags & 0x40) != 0;
+
     public int CrimeGold
     {
         get => Call("GetCrimeGold").AsInt();
