@@ -339,9 +339,11 @@ void DecodePackedVertices(const VertexLayout& layout, const u8* base, u32 vertex
   }
 }
 
-bool ReadBsTriShapeGeometry(Reader& r, Geometry* out) {
+// FO4 (BS stream >= 130) widened the triangle count to u32; SSE (100) keeps it
+// u16. Everything else in the geometry header is shared.
+bool ReadBsTriShapeGeometry(Reader& r, u32 bs_version, Geometry* out) {
   u64 desc = r.Read<u64>();
-  u32 triangle_count = r.Read<u16>();
+  u32 triangle_count = bs_version >= 130 ? r.Read<u32>() : r.Read<u16>();
   u32 vertex_count = r.Read<u16>();
   u32 data_size = r.Read<u32>();
   if (!r.ok || data_size == 0 || vertex_count == 0) return false;
@@ -370,9 +372,9 @@ bool ReadBsTriShapeGeometry(Reader& r, Geometry* out) {
 // BSDynamicTriShape (head, hair): the BSTriShape data carries normals/uv/
 // triangles (positions may be zero), then a dynamic Vector4 array holds the
 // real positions. Skinned layouts are fine; the caller rigid-attaches the mesh.
-bool ReadBsDynamicTriShape(Reader& r, Geometry* out) {
+bool ReadBsDynamicTriShape(Reader& r, u32 bs_version, Geometry* out) {
   u64 desc = r.Read<u64>();
-  u32 triangle_count = r.Read<u16>();
+  u32 triangle_count = bs_version >= 130 ? r.Read<u32>() : r.Read<u16>();
   u32 vertex_count = r.Read<u16>();
   u32 data_size = r.Read<u32>();
   if (!r.ok || vertex_count == 0) return false;
@@ -717,7 +719,11 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
         r.ok = true;
       }
       if (r.ok) nodes.emplace(i, std::move(node));
-    } else if (type == "BSTriShape" || type == "BSMeshLODTriShape") {
+    } else if (type == "BSTriShape" || type == "BSMeshLODTriShape" ||
+               type == "BSSubIndexTriShape") {
+      // BSSubIndexTriShape (FO4 static meshes) shares the BSTriShape geometry
+      // header; its trailing segment table sits after the triangles, which the
+      // geometry read stops short of, so we treat it identically.
       Shape shape;
       shape.local = ReadAvObject(r, &shape.hidden);
       r.Skip(16);  // bounding sphere
@@ -725,7 +731,8 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
       shape.shader = r.Read<i32>();
       shape.alpha = r.Read<i32>();
       if (!r.ok) continue;
-      if (!ReadBsTriShapeGeometry(r, &shape.geometry) && shape.skin < 0) shape.skipped = true;
+      if (!ReadBsTriShapeGeometry(r, header->bs_version, &shape.geometry) && shape.skin < 0)
+        shape.skipped = true;
       shapes.emplace(i, std::move(shape));
     } else if (type == "BSDynamicTriShape") {
       // Head and hair: positions live in a dynamic array, so the geometry is
@@ -737,7 +744,7 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
       shape.shader = r.Read<i32>();
       shape.alpha = r.Read<i32>();
       if (!r.ok) continue;
-      if (!ReadBsDynamicTriShape(r, &shape.geometry)) shape.skipped = true;
+      if (!ReadBsDynamicTriShape(r, header->bs_version, &shape.geometry)) shape.skipped = true;
       shapes.emplace(i, std::move(shape));
     } else if (type == "NiTriShape") {
       Shape shape;
