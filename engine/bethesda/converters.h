@@ -4,10 +4,19 @@
 #include <string>
 
 #include "asset/asset_database.h"
+#include "asset/texture.h"
+#include "base/memory/unique_pointer.h"
 #include "bethesda/game_profile.h"
 #include "core/types.h"
 
 namespace rec::bethesda {
+
+// Decodes a DDS blob (DX10 or legacy FourCC header) into an engine texture,
+// passing BCn block data straight through. `path` drives the sRGB-vs-linear
+// decision for the ambiguous UNORM color formats. Returns null on an
+// unsupported or truncated source. Exposed for the asset layer and tests.
+base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
+                                               std::string_view path);
 
 // The subset of a Fallout 4 BGSM (lighting) / BGEM (effect) material file the
 // engine uses: the base-colour and normal texture paths (normalized vfs paths;

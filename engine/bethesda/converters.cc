@@ -44,6 +44,8 @@ bool PathIsLinearData(std::string_view path) {
   return stem.ends_with("_n") || stem.ends_with("_msn") || stem.ends_with("_normal");
 }
 
+}  // namespace
+
 base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
                                                std::string_view path) {
   if (data.size() < 128) return nullptr;
@@ -66,28 +68,42 @@ base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
 
   size_t data_offset = 128;
   bool srgb_from_format = false;
-  bool linear_from_format = false;
   if ((pf_flags & kDdpfFourCc) && fourcc == FourCc('D', 'X', '1', '0')) {
     if (data.size() < 148) return nullptr;
     u32 dxgi;
     std::memcpy(&dxgi, data.data() + 128, 4);
     data_offset = 148;
+    // Bethesda authors color maps (albedo, glow) as the plain UNORM DXGI
+    // formats, not the _SRGB variants, and relies on the texture's usage to
+    // know they are sRGB. So a UNORM color-capable format is ambiguous: it may
+    // be an sRGB albedo or a linear normal/data map stored in the same block
+    // format. Only the explicit _SRGB variants are unambiguously sRGB; the
+    // rest defer to the path heuristic below (matching the FourCC path).
     switch (dxgi) {
-      case 71: texture->format = asset::TextureFormat::kBc1; linear_from_format = true; break;
+      case 71: texture->format = asset::TextureFormat::kBc1; break;
       case 72: texture->format = asset::TextureFormat::kBc1; srgb_from_format = true; break;
-      case 74: texture->format = asset::TextureFormat::kBc2; linear_from_format = true; break;
+      case 74: texture->format = asset::TextureFormat::kBc2; break;
       case 75: texture->format = asset::TextureFormat::kBc2; srgb_from_format = true; break;
-      case 77: texture->format = asset::TextureFormat::kBc3; linear_from_format = true; break;
+      case 77: texture->format = asset::TextureFormat::kBc3; break;
       case 78: texture->format = asset::TextureFormat::kBc3; srgb_from_format = true; break;
       case 80: texture->format = asset::TextureFormat::kBc4; break;
       case 83: texture->format = asset::TextureFormat::kBc5; break;
-      case 98: texture->format = asset::TextureFormat::kBc7; linear_from_format = true; break;
-      case 99: texture->format = asset::TextureFormat::kBc7; srgb_from_format = true; break;
-      case 28: texture->format = asset::TextureFormat::kRgba8; linear_from_format = true; break;
+      case 87:  // B8G8R8A8_UNORM: swizzled to RGBA below
+      case 28: texture->format = asset::TextureFormat::kRgba8; break;
+      case 91:  // B8G8R8A8_UNORM_SRGB
       case 29: texture->format = asset::TextureFormat::kRgba8; srgb_from_format = true; break;
+      case 98: texture->format = asset::TextureFormat::kBc7; break;
+      case 99: texture->format = asset::TextureFormat::kBc7; srgb_from_format = true; break;
       default:
         REC_WARN("unsupported dxgi format {} in {}", dxgi, path);
         return nullptr;
+    }
+    // B8G8R8A8 ships blue and red swapped relative to the RGBA8 Vulkan format.
+    if (dxgi == 87 || dxgi == 91) {
+      texture->data.assign(data.begin() + static_cast<std::ptrdiff_t>(data_offset), data.end());
+      for (size_t i = 0; i + 3 < texture->data.size(); i += 4) {
+        std::swap(texture->data[i], texture->data[i + 2]);
+      }
     }
   } else if (pf_flags & kDdpfFourCc) {
     if (fourcc == FourCc('D', 'X', 'T', '1')) texture->format = asset::TextureFormat::kBc1;
@@ -142,11 +158,12 @@ base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
                texture->format == asset::TextureFormat::kBc7 ||
                texture->format == asset::TextureFormat::kRgba8;
   if (srgb_from_format) texture->is_srgb = true;
-  else if (linear_from_format) texture->is_srgb = false;
   else texture->is_srgb = color && !PathIsLinearData(path);
   if (!color) texture->is_srgb = false;
   return texture;
 }
+
+namespace {
 
 std::string NormalizeTexturePathLocal(std::string_view raw) {
   if (raw.empty()) return {};
@@ -238,14 +255,16 @@ void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profi
         for (const std::string& texture : conversion.texture_paths) {
           database.LoadTexture(texture);
         }
-        // Fallout 4 binds most textures through a .bgsm/.bgem material file
-        // rather than an inline texture set; resolve those the shader did not
-        // already fill from an inline set.
+        // Fallout 4 binds textures through a .bgsm/.bgem material file; the
+        // material file is authoritative, so it overrides the inline texture
+        // set the lighting shader may also carry (FO4 NIFs ship both, and the
+        // inline slots are unreliable -- e.g. architecture meshes bind a normal
+        // map there, which would render as a purple albedo).
         for (size_t i = 0; i < conversion.materials.size(); ++i) {
           asset::Material& material = conversion.materials[i];
           const std::string& material_file =
               i < conversion.material_files.size() ? conversion.material_files[i] : std::string();
-          if (material_file.empty() || material.base_color) continue;
+          if (material_file.empty()) continue;
           auto bytes = database.vfs().Read(material_file);
           if (!bytes) continue;
           BgsmMaterial parsed;
