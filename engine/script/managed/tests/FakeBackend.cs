@@ -112,6 +112,7 @@ public sealed class FakeBackend : IEngineBackend
 
     // Marks `item` as carrying `keyword`, for HasKeyword.
     public void SetHasKeyword(ulong item, ulong keyword) => _keywords.Add((item, keyword));
+    private readonly List<ulong> _keywordCache = new();
 
     public void SetPosition(ulong reference, float x, float y, float z) =>
         _positions[reference] = (x, y, z);
@@ -242,6 +243,16 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.Bool(_essential.Contains(self));
             case "HasKeyword":
                 return Value.Bool(_keywords.Contains((self, args[0].AsHandle())));
+            case "GetKeywordCount":
+                _keywordCache.Clear();
+                _keywordCache.AddRange(_keywords.Where(k => k.Item1 == self).Select(k => k.Item2));
+                return Value.Int(_keywordCache.Count);
+            case "GetNthKeyword":
+            {
+                int idx = args[0].AsInt();
+                return idx >= 0 && idx < _keywordCache.Count
+                    ? Value.Object(_keywordCache[idx]) : Value.Object(0);
+            }
             case "GetPositionX":
                 return Value.Float(GetPosition(self).X);
             case "GetPositionY":

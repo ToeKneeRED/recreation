@@ -125,6 +125,8 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   i32 GetFormType(papyrus::ObjectRef form) override;
   std::string GetName(papyrus::ObjectRef form) override;
   bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) override;
+  i32 GetKeywordCount(papyrus::ObjectRef form) override;
+  papyrus::ObjectRef GetNthKeyword(i32 index) override;
   papyrus::ObjectRef GetHarvestIngredient(papyrus::ObjectRef flora) override;
   papyrus::ObjectRef GetBookSpell(papyrus::ObjectRef book) override;
   std::string GetBookSkill(papyrus::ObjectRef book) override;
@@ -378,6 +380,8 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // Last GetMagicEffectCount result, read by the GetNthMagicEffect* accessors.
   // Guest-thread only (record parsing), so it needs no lock.
   std::vector<MagicEffectData> magic_effect_cache_;
+  // Last GetKeywordCount result (resolved keyword handles), read by GetNthKeyword.
+  std::vector<u64> keyword_cache_;
   // Every COBJ recipe, built lazily on first GetRecipeCount and reused after.
   std::vector<Recipe> recipe_cache_;
   bool recipes_built_ = false;

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Recreation.Interop;
 
 namespace Recreation;
@@ -36,6 +37,21 @@ public class Form
     public int FormType => Call("GetType").AsInt();
 
     public bool HasKeyword(Form keyword) => Call("HasKeyword", keyword).AsBool();
+
+    // Every keyword on the form (its KWDA), resolved. Mods filter by these to
+    // categorise forms: weapon types, vendor categories, armor materials, edible
+    // food, and so on. Empty if the form carries none.
+    public IReadOnlyList<Form> Keywords
+    {
+        get
+        {
+            int count = Call("GetKeywordCount").AsInt();
+            var result = new Form[count];
+            for (int i = 0; i < count; i++)
+                result[i] = From(Call("GetNthKeyword", i).AsHandle());
+            return result;
+        }
+    }
 
     // Item weight and gold value from the form's record. Available for the common
     // inventory item types (weapons, armor, misc, ingredients, soul gems, keys,

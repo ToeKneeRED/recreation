@@ -47,6 +47,7 @@ internal static class Program
         SpellTests.Run(check);
         PowersTests.Run(check);
         AbilitiesTests.Run(check);
+        KeywordsTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;

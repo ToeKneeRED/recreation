@@ -29,6 +29,11 @@ class SkyrimBindings {
   virtual i32 GetFormType(papyrus::ObjectRef form) { return 0; }
   virtual std::string GetName(papyrus::ObjectRef form) { return ""; }
   virtual bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) { return false; }
+  // Enumerates a form's keywords (KWDA), so mods can categorise items by every
+  // keyword they carry. GetKeywordCount parses them into a cache and returns the
+  // count; GetNthKeyword reads that cache by index.
+  virtual i32 GetKeywordCount(papyrus::ObjectRef form) { return 0; }
+  virtual papyrus::ObjectRef GetNthKeyword(i32 index) { return {}; }
   // Item weight and gold value, read from the form's record. Supported for the
   // common inventory item types (weapons, armor, misc, ingredients, soul gems,
   // keys, potions); other forms report 0.

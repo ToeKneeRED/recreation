@@ -266,6 +266,32 @@ i32 SpitField(const bethesda::RecordStore* records, bethesda::GlobalFormId id, s
 }
 }  // namespace
 
+i32 RecordBackedSkyrimBindings::GetKeywordCount(ObjectRef form) {
+  keyword_cache_.clear();
+  if (!records_) return 0;
+  const bethesda::GlobalFormId id = ToFormId(form);
+  const bethesda::RecordStore::StoredRecord* stored = records_->Find(id);
+  if (!stored) return 0;
+  bethesda::Record rec;
+  if (!records_->Parse(id, &rec)) return 0;
+  // KWDA is a packed array of keyword form ids (KSIZ gives the count, but the
+  // subrecord size already implies it). Each is local to the form's plugin.
+  const bethesda::Subrecord* kwda = rec.Find(FourCc('K', 'W', 'D', 'A'));
+  if (!kwda) return 0;
+  for (size_t offset = 0; offset + 4 <= kwda->data.size(); offset += 4) {
+    u32 raw;
+    std::memcpy(&raw, kwda->data.data() + offset, 4);
+    keyword_cache_.push_back(
+        records_->ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin).packed());
+  }
+  return static_cast<i32>(keyword_cache_.size());
+}
+
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetNthKeyword(i32 index) {
+  if (index < 0 || static_cast<size_t>(index) >= keyword_cache_.size()) return {};
+  return papyrus::ObjectRef{keyword_cache_[static_cast<size_t>(index)]};
+}
+
 i32 RecordBackedSkyrimBindings::GetSpellCost(ObjectRef spell) {
   return SpitField(records_, ToFormId(spell), 0);
 }
