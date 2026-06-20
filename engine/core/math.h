@@ -35,6 +35,78 @@ inline Vec3 Normalize(const Vec3& v) {
   return length > 0 ? Vec3{v.x / length, v.y / length, v.z / length} : v;
 }
 
+inline f32 Length(const Vec3& v) { return std::sqrt(Dot(v, v)); }
+
+inline Vec3 Lerp(const Vec3& a, const Vec3& b, f32 t) { return a + (b - a) * t; }
+
+// Quaternion (x, y, z, w), matching the engine Transform layout. Used for bone
+// local rotations: blendable, then converted to a matrix for skinning.
+struct Quat {
+  f32 x = 0, y = 0, z = 0, w = 1;
+};
+
+inline Quat operator*(const Quat& a, const Quat& b) {
+  return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+          a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+          a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+          a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+inline Quat Normalize(const Quat& q) {
+  f32 len = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+  if (len <= 0) return {0, 0, 0, 1};
+  f32 inv = 1.0f / len;
+  return {q.x * inv, q.y * inv, q.z * inv, q.w * inv};
+}
+
+inline Quat QuatFromAxisAngle(const Vec3& axis, f32 radians) {
+  Vec3 n = Normalize(axis);
+  f32 s = std::sin(radians * 0.5f);
+  return {n.x * s, n.y * s, n.z * s, std::cos(radians * 0.5f)};
+}
+
+inline Quat Conjugate(const Quat& q) { return {-q.x, -q.y, -q.z, q.w}; }
+
+// Rotate a vector by a unit quaternion: v + 2 s (u x v) + 2 (u x (u x v)).
+inline Vec3 Rotate(const Quat& q, const Vec3& v) {
+  Vec3 u{q.x, q.y, q.z};
+  Vec3 t = Cross(u, v) * 2.0f;
+  return v + t * q.w + Cross(u, t);
+}
+
+// Shortest-arc rotation taking `from` onto `to`.
+inline Quat QuatBetween(const Vec3& from, const Vec3& to) {
+  Vec3 f = Normalize(from);
+  Vec3 t = Normalize(to);
+  f32 d = Dot(f, t);
+  if (d >= 1.0f - 1e-6f) return {0, 0, 0, 1};
+  if (d <= -1.0f + 1e-6f) {
+    Vec3 axis = Cross({1, 0, 0}, f);
+    if (Length(axis) < 1e-4f) axis = Cross({0, 1, 0}, f);
+    return QuatFromAxisAngle(axis, 3.14159265358979f);
+  }
+  Vec3 axis = Cross(f, t);
+  return Normalize(Quat{axis.x, axis.y, axis.z, 1.0f + d});
+}
+
+// Shortest-arc interpolation. Falls back to nlerp for nearly parallel inputs.
+inline Quat Slerp(const Quat& a, Quat b, f32 t) {
+  f32 cos_theta = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+  if (cos_theta < 0) {
+    b = {-b.x, -b.y, -b.z, -b.w};
+    cos_theta = -cos_theta;
+  }
+  if (cos_theta > 0.9995f) {
+    return Normalize(Quat{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t,
+                          a.w + (b.w - a.w) * t});
+  }
+  f32 theta = std::acos(cos_theta);
+  f32 sin_theta = std::sin(theta);
+  f32 wa = std::sin((1 - t) * theta) / sin_theta;
+  f32 wb = std::sin(t * theta) / sin_theta;
+  return {wa * a.x + wb * b.x, wa * a.y + wb * b.y, wa * a.z + wb * b.z, wa * a.w + wb * b.w};
+}
+
 // Column major, m[column * 4 + row]. Matches std140/std430 mat4 layout so
 // the struct can go straight into push constants.
 struct Mat4 {
@@ -87,6 +159,18 @@ inline Mat4 MakeFromQuat(f32 x, f32 y, f32 z, f32 w) {
   return r;
 }
 
+inline Mat4 MakeFromQuat(const Quat& q) { return MakeFromQuat(q.x, q.y, q.z, q.w); }
+
+// Affine bone/node transform: translate * rotate * uniform scale, column major.
+inline Mat4 MakeTransform(const Vec3& translation, const Quat& rotation, f32 scale) {
+  Mat4 m = MakeFromQuat(rotation);
+  for (int i = 0; i < 12; ++i) m.m[i] *= scale;  // scale the 3x3 columns
+  m.m[12] = translation.x;
+  m.m[13] = translation.y;
+  m.m[14] = translation.z;
+  return m;
+}
+
 // General 4x4 inverse via the adjugate. Fine for per-frame camera matrices.
 inline Mat4 Inverse(const Mat4& m) {
   const f32* a = m.m;
@@ -125,6 +209,59 @@ inline Mat4 Inverse(const Mat4& m) {
   r.m[14] = (a[13] * b01 - a[12] * b03 - a[14] * b00) * inv;
   r.m[15] = (a[8] * b03 - a[9] * b01 + a[10] * b00) * inv;
   return r;
+}
+
+inline Vec3 Translation(const Mat4& m) { return {m.m[12], m.m[13], m.m[14]}; }
+
+inline Vec3 TransformPoint(const Mat4& m, const Vec3& p) {
+  return {m.m[0] * p.x + m.m[4] * p.y + m.m[8] * p.z + m.m[12],
+          m.m[1] * p.x + m.m[5] * p.y + m.m[9] * p.z + m.m[13],
+          m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]};
+}
+
+inline Vec3 TransformDir(const Mat4& m, const Vec3& d) {
+  return {m.m[0] * d.x + m.m[4] * d.y + m.m[8] * d.z,
+          m.m[1] * d.x + m.m[5] * d.y + m.m[9] * d.z,
+          m.m[2] * d.x + m.m[6] * d.y + m.m[10] * d.z};
+}
+
+// Rotation of the upper-left 3x3 of a column-major matrix, columns normalized
+// to drop uniform scale. m[col*4+row] == R[row][col].
+inline Quat QuatFromMat4(const Mat4& m) {
+  Vec3 c0 = Normalize(Vec3{m.m[0], m.m[1], m.m[2]});
+  Vec3 c1 = Normalize(Vec3{m.m[4], m.m[5], m.m[6]});
+  Vec3 c2 = Normalize(Vec3{m.m[8], m.m[9], m.m[10]});
+  f32 r00 = c0.x, r10 = c0.y, r20 = c0.z;
+  f32 r01 = c1.x, r11 = c1.y, r21 = c1.z;
+  f32 r02 = c2.x, r12 = c2.y, r22 = c2.z;
+  f32 trace = r00 + r11 + r22;
+  Quat q;
+  if (trace > 0) {
+    f32 s = 0.5f / std::sqrt(trace + 1.0f);
+    q.w = 0.25f / s;
+    q.x = (r21 - r12) * s;
+    q.y = (r02 - r20) * s;
+    q.z = (r10 - r01) * s;
+  } else if (r00 > r11 && r00 > r22) {
+    f32 s = 2.0f * std::sqrt(1.0f + r00 - r11 - r22);
+    q.w = (r21 - r12) / s;
+    q.x = 0.25f * s;
+    q.y = (r01 + r10) / s;
+    q.z = (r02 + r20) / s;
+  } else if (r11 > r22) {
+    f32 s = 2.0f * std::sqrt(1.0f + r11 - r00 - r22);
+    q.w = (r02 - r20) / s;
+    q.x = (r01 + r10) / s;
+    q.y = 0.25f * s;
+    q.z = (r12 + r21) / s;
+  } else {
+    f32 s = 2.0f * std::sqrt(1.0f + r22 - r00 - r11);
+    q.w = (r10 - r01) / s;
+    q.x = (r02 + r20) / s;
+    q.y = (r12 + r21) / s;
+    q.z = 0.25f * s;
+  }
+  return Normalize(q);
 }
 
 // Right handed, camera looks down -z in view space.
