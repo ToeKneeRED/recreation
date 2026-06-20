@@ -52,6 +52,7 @@ internal static class Program
         StandingStonesTests.Run(check);
         DiseasesTests.Run(check);
         ShrinesTests.Run(check);
+        VampirismTests.Run(check);
         KeywordsTests.Run(check);
         FormDataTests.Run(check);
         RelationshipsTests.Run(check);
