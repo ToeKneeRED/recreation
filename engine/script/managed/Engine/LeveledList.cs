@@ -82,6 +82,17 @@ public sealed class LeveledList : Form
     // reproducible roll.
     public IReadOnlyList<LeveledItem> Resolve(int level) => Resolve(level, Random.Shared);
 
+    // Resolves the list at `level` and spawns each result at `origin` via
+    // PlaceAtMe, returning the spawned references. An item list drops loot; an
+    // actor list (LVLN) spawns an encounter -- the same machinery for both.
+    public IReadOnlyList<ObjectReference> SpawnAt(ObjectReference origin, int level)
+    {
+        var spawned = new List<ObjectReference>();
+        foreach (LeveledItem item in Resolve(level))
+            spawned.Add(origin.PlaceAtMe(item.Item, item.Count));
+        return spawned;
+    }
+
     private void Resolve(int level, Random rng, List<LeveledItem> into, int depth)
     {
         if (depth > MaxDepth) return;

@@ -132,6 +132,12 @@ public sealed class FakeBackend : IEngineBackend
     public void SetActorFactions(ulong actor, params (ulong faction, int rank)[] factions) =>
         _factions[actor] = factions.Select(f => (f.faction, f.rank)).ToList();
 
+    // References spawned via PlaceAtMe (origin, base form, count), for asserting
+    // what a spawn produced.
+    private readonly List<(ulong Origin, ulong Base, int Count)> _spawned = new();
+    public IReadOnlyList<(ulong Origin, ulong Base, int Count)> Spawned => _spawned;
+    private ulong _nextSpawn = 0xF0000;
+
     // Faction-to-faction combat reactions (0 neutral, 1 enemy, 2 ally, 3 friend).
     private readonly Dictionary<(ulong, ulong), int> _reactions = new();
     public void SetFactionReaction(ulong faction, ulong other, int reaction) =>
@@ -403,6 +409,13 @@ public sealed class FakeBackend : IEngineBackend
                     else inv2.Remove(args[0].AsHandle());
                 }
                 return Value.None;
+            }
+            case "PlaceAtMe":
+            {
+                ulong baseForm = args[0].AsHandle();
+                int count = args.Length > 1 ? args[1].AsInt() : 1;
+                _spawned.Add((self, baseForm, count));
+                return Value.Object(_nextSpawn++);  // a fresh spawned-reference handle
             }
             case "GetWeight":
                 return Value.Float(_weights.GetValueOrDefault(self));

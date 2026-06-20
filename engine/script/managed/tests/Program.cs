@@ -40,6 +40,7 @@ internal static class Program
         AlchemyTests.Run(check);
         CraftingTests.Run(check);
         LeveledListTests.Run(check);
+        LeveledSpawnTests.Run(check);
         BookTests.Run(check);
         PotionTests.Run(check);
         EnchantingTests.Run(check);

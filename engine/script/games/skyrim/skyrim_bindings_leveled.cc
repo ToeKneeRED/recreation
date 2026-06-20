@@ -20,7 +20,10 @@ i32 RecordBackedSkyrimBindings::GetLeveledListCount(ObjectRef list) {
   if (!stored) return 0;
   bethesda::Record rec;
   if (!records_->Parse(id, &rec)) return 0;
-  if (rec.header.type != FourCc('L', 'V', 'L', 'I')) return 0;
+  // Leveled item lists (LVLI) and leveled actor lists (LVLN) share the format, so
+  // one resolver serves loot and encounter spawns alike.
+  if (rec.header.type != FourCc('L', 'V', 'L', 'I') && rec.header.type != FourCc('L', 'V', 'L', 'N'))
+    return 0;
 
   // LVLD is the percent chance of nothing, LVLF the flags, and each LVLO is a
   // 12-byte entry { uint16 level; uint16 pad; uint32 reference; uint16 count }.
