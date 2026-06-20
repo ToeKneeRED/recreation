@@ -88,6 +88,28 @@ public class ObjectReference : Form
             yield return Form.From(Call("GetNthForm", i).AsHandle());
     }
 
+    // The total gold value of everything held (each item's value times how many).
+    public int TotalValue
+    {
+        get
+        {
+            int total = 0;
+            foreach (Form item in Items()) total += item.GoldValue * GetItemCount(item);
+            return total;
+        }
+    }
+
+    // The total weight carried (each item's weight times how many).
+    public float TotalWeight
+    {
+        get
+        {
+            float total = 0f;
+            foreach (Form item in Items()) total += item.Weight * GetItemCount(item);
+            return total;
+        }
+    }
+
     // Moves up to `count` of `item` into `destination` (a negative count moves
     // all held). The basis for loot and container-management mods.
     public void TransferItemTo(ObjectReference destination, Form item, int count = -1)
