@@ -39,6 +39,8 @@ public sealed class FakeBackend : IEngineBackend
 
     public void SetWeaponDamage(ulong weapon, int damage) => _weaponDamage[weapon] = damage;
     public void SetArmorRating(ulong armor, float rating) => _armorRating[armor] = rating;
+    private readonly Dictionary<ulong, int> _goldValue = new();   // item -> record value
+    public void SetGoldValue(ulong item, int value) => _goldValue[item] = value;
     private readonly HashSet<(ulong, ulong)> _keywords = new();
     private readonly Dictionary<ulong, (float X, float Y, float Z)> _positions = new();
     private readonly List<(ulong Handle, float Distance)> _nearbyCache = new();
@@ -240,6 +242,8 @@ public sealed class FakeBackend : IEngineBackend
             }
             case "GetWeight":
                 return Value.Float(_weights.GetValueOrDefault(self));
+            case "GetGoldValue":
+                return Value.Int(_goldValue.GetValueOrDefault(self));
             case "GetSex":
                 return Value.Int(_sex.GetValueOrDefault(self));
             case "GetRace":

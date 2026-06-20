@@ -36,6 +36,7 @@ internal static class Program
         LocationDiscoveryTests.Run(check);
         HarvestingTests.Run(check);
         MeditationPowerTests.Run(check);
+        BarteringTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;
