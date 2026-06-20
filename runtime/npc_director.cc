@@ -284,10 +284,18 @@ void NpcDirector::Mq101DemoTick(f32 dt) {
   const bool first = mq101_demo_next_ == 1;
   ++mq101_demo_next_;
 
-  // Drop the next waypoint a few meters ahead along the player's facing.
+  // Drop the next waypoint a few meters ahead, heading toward the quest's real
+  // current-objective location when one is known (so the player walks the actual
+  // route to the keep / exit), else along the player's facing.
   Vec3 ppos{};
   actors_->PlayerWorldPos(&ppos);
-  const Vec3 fwd{std::sin(ctx_.cam_yaw), 0.0f, -std::cos(ctx_.cam_yaw)};
+  Vec3 fwd{std::sin(ctx_.cam_yaw), 0.0f, -std::cos(ctx_.cam_yaw)};
+  Vec3 target;
+  if (quest_->CurrentObjectiveTarget(&target)) {
+    const Vec3 to{target.x - ppos.x, 0.0f, target.z - ppos.z};
+    const f32 len = Length(to);
+    if (len > 1.0f) fwd = to * (1.0f / len);
+  }
   QuestMarker m;
   m.quest = mq101_demo_quest_;
   m.advance_stage = advance_to;

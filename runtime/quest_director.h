@@ -62,6 +62,15 @@ class QuestDirector {
   base::Vector<QuestMarker>& markers() { return quest_markers_; }
   void Select(u64 handle) { quest_panel_.selected = handle; }
 
+  // World position of the tracked quest's current displayed objective (its
+  // forced-reference target), in the player's current space, for the guided
+  // playthrough to head toward instead of a blind facing direction. False when
+  // no resolvable target exists (the caller then falls back to facing).
+  bool CurrentObjectiveTarget(Vec3* out) const {
+    if (cur_objective_valid_) *out = cur_objective_target_;
+    return cur_objective_valid_;
+  }
+
   // The host's replicated objective marker, mirrored onto this client's compass.
   void SetRemoteMarker(bool active, const Vec3& pos) {
     remote_marker_active_ = active;
@@ -117,6 +126,10 @@ class QuestDirector {
   u64 sent_marker_quest_ = 0;
   bool remote_marker_active_ = false;
   Vec3 remote_marker_pos_{};
+  // Cached world target of the tracked quest's current objective (same-space),
+  // refreshed each panel update for the guided playthrough to walk toward.
+  bool cur_objective_valid_ = false;
+  Vec3 cur_objective_target_{};
   NativeTracePanel native_trace_panel_;
   f32 trace_ui_timer_ = 0;
   bool native_trace_on_ = false;

@@ -596,6 +596,23 @@ void QuestDirector::UpdateObjectiveMarkers(const std::vector<quest::QuestStatus>
     }
   }
 
+  // Cache the tracked quest's current objective world target (independent of
+  // any armed demo marker) so the guided playthrough can head toward the real
+  // location rather than a blind facing direction.
+  cur_objective_valid_ = false;
+  if (hud_tracked_quest_ != 0)
+    for (const quest::QuestStatus& q : running) {
+      if (q.handle != hud_tracked_quest_) continue;
+      for (const quest::ObjectiveStatus& o : q.objectives) {
+        if (!o.displayed || o.completed) continue;
+        if (ObjectiveTargetFor(q.handle, o.index, &cur_objective_target_)) {
+          cur_objective_valid_ = true;
+          break;
+        }
+      }
+      break;
+    }
+
   const bool active = armed != nullptr || guide_active;
   const Vec3 pos = armed ? armed->pos : guide_pos;
   const u64 marker_quest = armed ? armed->quest : (guide_active ? hud_tracked_quest_ : 0);
