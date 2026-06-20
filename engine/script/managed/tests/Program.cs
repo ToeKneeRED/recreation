@@ -57,6 +57,7 @@ internal static class Program
         LycanthropyTests.Run(check);
         PickpocketingTests.Run(check);
         DamageMitigationTests.Run(check);
+        SoulTrapTests.Run(check);
         KeywordsTests.Run(check);
         FormDataTests.Run(check);
         RelationshipsTests.Run(check);
