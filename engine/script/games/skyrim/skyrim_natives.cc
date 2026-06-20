@@ -188,6 +188,29 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Game", "UsingGamepad",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
 
+  // Constructible-object recipes (COBJ), exposed to the managed crafting system.
+  reg.Register("Game", "GetRecipeCount", [bindings](VirtualMachine&, ObjectRef, Args&) {
+    return Value::Int(Resolve(bindings).GetRecipeCount());
+  });
+  reg.Register("Game", "GetNthRecipeOutput", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Object(Resolve(bindings).GetNthRecipeOutput(ArgI(a, 0)));
+  });
+  reg.Register("Game", "GetNthRecipeOutputQuantity", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Int(Resolve(bindings).GetNthRecipeOutputQuantity(ArgI(a, 0)));
+  });
+  reg.Register("Game", "GetNthRecipeWorkbench", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Object(Resolve(bindings).GetNthRecipeWorkbench(ArgI(a, 0)));
+  });
+  reg.Register("Game", "GetNthRecipeInputCount", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Int(Resolve(bindings).GetNthRecipeInputCount(ArgI(a, 0)));
+  });
+  reg.Register("Game", "GetNthRecipeInput", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Object(Resolve(bindings).GetNthRecipeInput(ArgI(a, 0), ArgI(a, 1)));
+  });
+  reg.Register("Game", "GetNthRecipeInputQuantity", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Int(Resolve(bindings).GetNthRecipeInputQuantity(ArgI(a, 0), ArgI(a, 1)));
+  });
+
   reg.Register("Form", "GetFormID", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Int(static_cast<i32>(Resolve(bindings).GetFormId(self)));
   });

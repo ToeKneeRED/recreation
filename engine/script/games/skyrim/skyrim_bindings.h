@@ -135,6 +135,13 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   papyrus::ObjectRef GetNthIngredientEffectId(i32 index) override;
   f32 GetNthIngredientEffectMagnitude(i32 index) override;
   i32 GetNthIngredientEffectDuration(i32 index) override;
+  i32 GetRecipeCount() override;
+  papyrus::ObjectRef GetNthRecipeOutput(i32 recipe) override;
+  i32 GetNthRecipeOutputQuantity(i32 recipe) override;
+  papyrus::ObjectRef GetNthRecipeWorkbench(i32 recipe) override;
+  i32 GetNthRecipeInputCount(i32 recipe) override;
+  papyrus::ObjectRef GetNthRecipeInput(i32 recipe, i32 input) override;
+  i32 GetNthRecipeInputQuantity(i32 recipe, i32 input) override;
   i32 GetSex(papyrus::ObjectRef actor_base) override;
   bool IsUnique(papyrus::ObjectRef actor_base) override;
   bool IsEssential(papyrus::ObjectRef actor_base) override;
@@ -242,6 +249,19 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
     f32 magnitude = 0;
     i32 duration = 0;
   };
+  // A constructible-object recipe (COBJ), parsed once into recipe_cache_.
+  struct CraftingInput {
+    u64 item = 0;
+    i32 count = 0;
+  };
+  struct Recipe {
+    u64 output = 0;
+    i32 output_count = 1;
+    u64 workbench = 0;  // BNAM keyword (the station type that crafts it)
+    std::vector<CraftingInput> inputs;
+  };
+  void BuildRecipes();  // fills recipe_cache_ from every COBJ record
+  const Recipe* RecipeAt(i32 index) const;  // bounds-checked, nullptr if out of range
   bethesda::GlobalFormId ToFormId(papyrus::ObjectRef ref) const;
   // Reads a 4-byte form-id subrecord off `from`'s record and resolves it
   // against the load order. Used for record fields that point at another form.
@@ -333,6 +353,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // Last GetIngredientEffectCount result, read by the GetNthIngredientEffect*
   // accessors. Guest-thread only (record parsing), so it needs no lock.
   std::vector<IngredientEffect> ingredient_effect_cache_;
+  // Every COBJ recipe, built lazily on first GetRecipeCount and reused after.
+  std::vector<Recipe> recipe_cache_;
+  bool recipes_built_ = false;
 };
 
 }  // namespace rec::script::skyrim

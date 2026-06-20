@@ -13,6 +13,7 @@ recreation_add_module(script
   games/skyrim/skyrim_natives.cc
   games/skyrim/skyrim_bindings.cc
   games/skyrim/skyrim_bindings_item_data.cc
+  games/skyrim/skyrim_bindings_crafting.cc
   games/skyrim/skyrim_condition_context.cc
 )
 

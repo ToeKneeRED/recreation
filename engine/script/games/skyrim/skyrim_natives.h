@@ -55,6 +55,18 @@ class SkyrimBindings {
   virtual f32 GetNthIngredientEffectMagnitude(i32 index) { return 0; }
   virtual i32 GetNthIngredientEffectDuration(i32 index) { return 0; }
 
+  // Constructible-object recipes (COBJ): the data behind smithing, cooking,
+  // tempering and tanning. GetRecipeCount parses every recipe once into a cache
+  // and returns the total; the GetNthRecipe* accessors read it by index, inputs
+  // addressed by (recipe, input). All form ids come back as resolved handles.
+  virtual i32 GetRecipeCount() { return 0; }
+  virtual papyrus::ObjectRef GetNthRecipeOutput(i32 recipe) { return {}; }
+  virtual i32 GetNthRecipeOutputQuantity(i32 recipe) { return 0; }
+  virtual papyrus::ObjectRef GetNthRecipeWorkbench(i32 recipe) { return {}; }
+  virtual i32 GetNthRecipeInputCount(i32 recipe) { return 0; }
+  virtual papyrus::ObjectRef GetNthRecipeInput(i32 recipe, i32 input) { return {}; }
+  virtual i32 GetNthRecipeInputQuantity(i32 recipe, i32 input) { return 0; }
+
   // ActorBase (NPC_ record data).
   virtual i32 GetSex(papyrus::ObjectRef actor_base) { return 0; }  // 0 male, 1 female
   virtual bool IsUnique(papyrus::ObjectRef actor_base) { return false; }

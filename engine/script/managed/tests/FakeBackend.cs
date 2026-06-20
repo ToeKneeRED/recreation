@@ -51,6 +51,14 @@ public sealed class FakeBackend : IEngineBackend
     public void SetIngredientEffects(ulong ingredient,
         params (ulong effect, float magnitude, int duration)[] effects) =>
         _ingredientEffects[ingredient] = effects.Select(e => (e.effect, e.magnitude, e.duration)).ToList();
+
+    // Constructible-object recipes the global recipe accessors read back.
+    private readonly List<(ulong Output, int OutputQty, ulong Workbench,
+                           List<(ulong Item, int Qty)> Inputs)> _recipes = new();
+
+    public void AddRecipe(ulong output, int outputQty, ulong workbench,
+                          params (ulong item, int qty)[] inputs) =>
+        _recipes.Add((output, outputQty, workbench, inputs.Select(i => (i.item, i.qty)).ToList()));
     private readonly HashSet<(ulong, ulong)> _keywords = new();
     private readonly Dictionary<ulong, (float X, float Y, float Z)> _positions = new();
     private readonly List<(ulong Handle, float Distance)> _nearbyCache = new();
@@ -133,6 +141,19 @@ public sealed class FakeBackend : IEngineBackend
             return Value.Int(args.Length > 0 ? args[0].AsInt() : 0);  // deterministic: the min
         if (type == "Utility" && function == "RandomFloat")
             return Value.Float(args.Length > 0 ? args[0].AsFloat() : 0f);  // deterministic: the min
+        if (type == "Game" && function == "GetRecipeCount") return Value.Int(_recipes.Count);
+        if (type == "Game" && function == "GetNthRecipeOutput")
+            return Value.Object(_recipes[args[0].AsInt()].Output);
+        if (type == "Game" && function == "GetNthRecipeOutputQuantity")
+            return Value.Int(_recipes[args[0].AsInt()].OutputQty);
+        if (type == "Game" && function == "GetNthRecipeWorkbench")
+            return Value.Object(_recipes[args[0].AsInt()].Workbench);
+        if (type == "Game" && function == "GetNthRecipeInputCount")
+            return Value.Int(_recipes[args[0].AsInt()].Inputs.Count);
+        if (type == "Game" && function == "GetNthRecipeInput")
+            return Value.Object(_recipes[args[0].AsInt()].Inputs[args[1].AsInt()].Item);
+        if (type == "Game" && function == "GetNthRecipeInputQuantity")
+            return Value.Int(_recipes[args[0].AsInt()].Inputs[args[1].AsInt()].Qty);
         return Value.None;
     }
 
