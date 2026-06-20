@@ -288,6 +288,9 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Form", "GetSpellCost", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Int(Resolve(bindings).GetSpellCost(self));
   });
+  reg.Register("Form", "GetSpellType", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetSpellType(self));
+  });
   reg.Register("Form", "GetSpellCastType", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Int(Resolve(bindings).GetSpellCastType(self));
   });

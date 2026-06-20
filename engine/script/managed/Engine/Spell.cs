@@ -2,6 +2,18 @@ using System.Collections.Generic;
 
 namespace Recreation;
 
+// What kind of spell this is (SPIT type).
+public enum SpellType
+{
+    Spell = 0,
+    Disease = 1,
+    Power = 2,
+    LesserPower = 3,
+    Ability = 4,
+    Poison = 5,
+    Voice = 11,
+}
+
 // How a spell is cast (SPIT cast type).
 public enum SpellCastType
 {
@@ -34,6 +46,7 @@ public sealed class Spell : Form
 
     // The magicka the spell costs to cast.
     public int Cost => Call("GetSpellCost").AsInt();
+    public SpellType Type => (SpellType)Call("GetSpellType").AsInt();
     public SpellCastType CastType => (SpellCastType)Call("GetSpellCastType").AsInt();
     public SpellDelivery Delivery => (SpellDelivery)Call("GetSpellDelivery").AsInt();
 

@@ -140,6 +140,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) override;
   bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) override;
   i32 GetSpellCost(papyrus::ObjectRef spell) override;
+  i32 GetSpellType(papyrus::ObjectRef spell) override;
   i32 GetSpellCastType(papyrus::ObjectRef spell) override;
   i32 GetSpellDelivery(papyrus::ObjectRef spell) override;
   i32 GetRecipeCount() override;

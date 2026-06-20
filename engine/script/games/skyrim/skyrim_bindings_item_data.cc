@@ -270,6 +270,10 @@ i32 RecordBackedSkyrimBindings::GetSpellCost(ObjectRef spell) {
   return SpitField(records_, ToFormId(spell), 0);
 }
 
+i32 RecordBackedSkyrimBindings::GetSpellType(ObjectRef spell) {
+  return SpitField(records_, ToFormId(spell), 8);
+}
+
 i32 RecordBackedSkyrimBindings::GetSpellCastType(ObjectRef spell) {
   return SpitField(records_, ToFormId(spell), 16);
 }

@@ -68,10 +68,10 @@ public sealed class FakeBackend : IEngineBackend
         else _effectDetrimental.Remove(effect);
     }
 
-    // A spell's SPIT fields: cost, cast type and delivery.
-    private readonly Dictionary<ulong, (int Cost, int CastType, int Delivery)> _spellInfo = new();
-    public void SetSpellInfo(ulong spell, int cost, int castType = 1, int delivery = 2) =>
-        _spellInfo[spell] = (cost, castType, delivery);
+    // A spell's SPIT fields: cost, type, cast type and delivery.
+    private readonly Dictionary<ulong, (int Cost, int Type, int CastType, int Delivery)> _spellInfo = new();
+    public void SetSpellInfo(ulong spell, int cost, int type = 0, int castType = 1, int delivery = 2) =>
+        _spellInfo[spell] = (cost, type, castType, delivery);
 
     // Constructible-object recipes the global recipe accessors read back.
     private readonly List<(ulong Output, int OutputQty, ulong Workbench,
@@ -358,6 +358,8 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.Bool(_effectDetrimental.Contains(self));
             case "GetSpellCost":
                 return Value.Int(_spellInfo.TryGetValue(self, out var sc) ? sc.Cost : 0);
+            case "GetSpellType":
+                return Value.Int(_spellInfo.TryGetValue(self, out var st) ? st.Type : 0);
             case "GetSpellCastType":
                 return Value.Int(_spellInfo.TryGetValue(self, out var sct) ? sct.CastType : 0);
             case "GetSpellDelivery":

@@ -68,10 +68,12 @@ class SkyrimBindings {
   virtual std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) { return ""; }
   virtual bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) { return false; }
 
-  // A spell's SPIT fields: the magicka cost, the cast type (0 constant effect,
+  // A spell's SPIT fields: the magicka cost, the type (0 spell, 2 power, 3 lesser
+  // power, 4 ability, 5 poison, 11 voice), the cast type (0 constant effect,
   // 1 fire-and-forget, 2 concentration) and the delivery (0 self, 1 touch, 2 aimed,
-  // 3 target actor, 4 target location). Let managed code model casting.
+  // 3 target actor, 4 target location). Let managed code model casting and powers.
   virtual i32 GetSpellCost(papyrus::ObjectRef spell) { return 0; }
+  virtual i32 GetSpellType(papyrus::ObjectRef spell) { return 0; }
   virtual i32 GetSpellCastType(papyrus::ObjectRef spell) { return 0; }
   virtual i32 GetSpellDelivery(papyrus::ObjectRef spell) { return 0; }
 
