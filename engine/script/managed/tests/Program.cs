@@ -38,6 +38,7 @@ internal static class Program
         MeditationPowerTests.Run(check);
         BarteringTests.Run(check);
         AlchemyTests.Run(check);
+        IngredientDiscoveryTests.Run(check);
         CraftingTests.Run(check);
         LeveledListTests.Run(check);
         LeveledSpawnTests.Run(check);
