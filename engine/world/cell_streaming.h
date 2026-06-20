@@ -65,6 +65,29 @@ class CellStreamer {
   void Configure(const Settings& settings) { settings_ = settings; }
   void SetUploads(Uploads uploads) { uploads_ = std::move(uploads); }
 
+  // Translates all spawned content (and the camera anchor) by a fixed engine
+  // space vector. Zero for the primary game; a secondary content domain
+  // (a Fallout 4 worldspace streamed next to Skyrim) is offset so the two
+  // worlds sit side by side in the shared scene instead of overlapping.
+  void set_world_offset(const Vec3& offset) { world_offset_ = offset; }
+  const Vec3& world_offset() const { return world_offset_; }
+
+  // Streams cells around a fixed engine-space point instead of the live camera,
+  // so a secondary worldspace shows one chosen region (set in that domain's own
+  // pre-offset engine coordinates) held in place as a diorama.
+  void set_fixed_anchor(const Vec3& anchor) {
+    fixed_anchor_ = anchor;
+    has_fixed_anchor_ = true;
+  }
+
+  // Namespaces this streamer's mesh ids in the shared renderer. Asset paths
+  // collide across games (Skyrim and Fallout 4 both ship "meshes/..."), so two
+  // domains streaming at once would otherwise hash to the same renderer mesh and
+  // BLAS key, overwriting each other's GPU buffers and corrupting ray tracing.
+  // The matching upload callback must salt the same way (see engine wiring).
+  // Zero (the default) leaves the primary game's ids untouched.
+  void set_mesh_id_salt(u64 salt) { mesh_id_salt_ = salt; }
+
   // Notified on a load-door cell transition with the destination interior cell
   // id (0 when going outside) and whether it is interior. The runtime forwards
   // it to the managed world as a LocationChanged event.
@@ -131,6 +154,10 @@ class CellStreamer {
   bool EnsureUploaded(const asset::Mesh& mesh);
   void EnsureLandMaterial();
   const asset::Mesh* EnsureWaterMesh();
+  // Bethesda game-space (x, y, z) to engine space, including world_offset_.
+  Vec3 ToWorld(f32 bethesda_x, f32 bethesda_y, f32 bethesda_z) const;
+  // The renderer-side mesh key for a converted asset, salted for this domain.
+  asset::AssetId RenderMeshId(asset::AssetId id) const { return {id.hash ^ mesh_id_salt_}; }
 
   const bethesda::RecordStore& records_;
   asset::AssetDatabase& assets_;
@@ -140,6 +167,10 @@ class CellStreamer {
   Uploads uploads_;
   physics::PhysicsWorld* physics_ = nullptr;
   QuestWorld* quest_world_ = nullptr;
+  Vec3 world_offset_{0.0f, 0.0f, 0.0f};  // engine-space shift of all spawned content
+  Vec3 fixed_anchor_{0.0f, 0.0f, 0.0f};  // streaming center when has_fixed_anchor_
+  bool has_fixed_anchor_ = false;
+  u64 mesh_id_salt_ = 0;  // namespaces mesh ids in the shared renderer (per domain)
   bethesda::GlobalFormId worldspace_;
   const bethesda::RecordStore::ExteriorGrid* grid_ = nullptr;
   base::UnorderedMap<u32, LoadedCell> loaded_;

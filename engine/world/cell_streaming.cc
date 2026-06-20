@@ -133,12 +133,23 @@ void CellStreamer::EnsureLandMaterial() {
   land_material_ = material.id;
 }
 
+Vec3 CellStreamer::ToWorld(f32 bethesda_x, f32 bethesda_y, f32 bethesda_z) const {
+  Vec3 e = ToEngine(bethesda_x, bethesda_y, bethesda_z);
+  return {e.x + world_offset_.x, e.y + world_offset_.y, e.z + world_offset_.z};
+}
+
 void CellStreamer::Update(ecs::World& world, const Vec3& camera_position) {
   if (interior_active_ || !grid_) return;
 
-  // Engine -> Bethesda: x = ex / s, y = -ez / s (height ey is irrelevant).
-  f32 beth_x = camera_position.x / kUnitsToMeters;
-  f32 beth_y = -camera_position.z / kUnitsToMeters;
+  // The anchor selects which cells load (by this domain's own cell coordinates);
+  // world_offset_ then shifts where they spawn, so a secondary worldspace sits
+  // beside the primary rather than on top of it. A secondary domain streams a
+  // fixed region (a chosen Commonwealth cell) regardless of the shared camera,
+  // so its content stays put as a diorama beside the primary world. Engine ->
+  // Bethesda: x = ex / s, y = -ez / s (height ey is irrelevant).
+  const Vec3& anchor = has_fixed_anchor_ ? fixed_anchor_ : camera_position;
+  f32 beth_x = anchor.x / kUnitsToMeters;
+  f32 beth_y = -anchor.z / kUnitsToMeters;
   i16 center_x = static_cast<i16>(std::floor(beth_x / kCellSize));
   i16 center_y = static_cast<i16>(std::floor(beth_y / kCellSize));
   i32 radius = settings_.load_radius;
@@ -355,7 +366,7 @@ bool CellStreamer::SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, Loade
 
   ecs::Entity entity = world.Create();
   Transform transform;
-  Vec3 position = ToEngine(static_cast<f32>(grid_x) * kCellSize,
+  Vec3 position = ToWorld(static_cast<f32>(grid_x) * kCellSize,
                            static_cast<f32>(grid_y) * kCellSize, 0.0f);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
@@ -363,7 +374,7 @@ bool CellStreamer::SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, Loade
   std::memcpy(transform.rotation, kAxisChange, sizeof(transform.rotation));
   transform.scale = kUnitsToMeters;
   world.Add(entity, transform);
-  world.Add(entity, Renderable{mesh->id});
+  world.Add(entity, Renderable{RenderMeshId(mesh->id)});
   world.Add(entity, CellMembership{grid_x, grid_y, false});
   cell.entities.push_back(entity);
   ++spawned_entities_;
@@ -427,8 +438,9 @@ void CellStreamer::AddTerrainCollider(i16 grid_x, i16 grid_y, LoadedCell& cell,
       engine_heights[j * kLandGridPoints + i] = heights[row * kLandGridPoints + i] * kUnitsToMeters;
     }
   }
-  Vec3 origin{static_cast<f32>(grid_x) * kCellSize * kUnitsToMeters, 0,
-              -(static_cast<f32>(grid_y) + 1.0f) * kCellSize * kUnitsToMeters};
+  Vec3 origin{static_cast<f32>(grid_x) * kCellSize * kUnitsToMeters + world_offset_.x,
+              world_offset_.y,
+              -(static_cast<f32>(grid_y) + 1.0f) * kCellSize * kUnitsToMeters + world_offset_.z};
   cell.terrain_body = physics_->AddHeightField(origin, engine_heights, kLandGridPoints,
                                                kCellSize * kUnitsToMeters);
 }
@@ -525,7 +537,7 @@ bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
 
   ecs::Entity entity = world.Create();
   Transform transform;
-  Vec3 position = ToEngine(static_cast<f32>(grid_x) * kCellSize,
+  Vec3 position = ToWorld(static_cast<f32>(grid_x) * kCellSize,
                            static_cast<f32>(grid_y) * kCellSize, height);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
@@ -533,7 +545,7 @@ bool CellStreamer::SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   std::memcpy(transform.rotation, kAxisChange, sizeof(transform.rotation));
   transform.scale = kUnitsToMeters;
   world.Add(entity, transform);
-  world.Add(entity, Renderable{mesh->id});
+  world.Add(entity, Renderable{RenderMeshId(mesh->id)});
   world.Add(entity, CellMembership{grid_x, grid_y, false});
   cell.entities.push_back(entity);
   ++spawned_entities_;
@@ -561,7 +573,7 @@ bool CellStreamer::SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   // cell-local Bethesda space.
   ecs::Entity entity = world.Create();
   Transform transform;
-  Vec3 position = ToEngine(static_cast<f32>(grid_x) * kCellSize,
+  Vec3 position = ToWorld(static_cast<f32>(grid_x) * kCellSize,
                            static_cast<f32>(grid_y) * kCellSize, 0.0f);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
@@ -569,7 +581,7 @@ bool CellStreamer::SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedC
   std::memcpy(transform.rotation, kAxisChange, sizeof(transform.rotation));
   transform.scale = kUnitsToMeters;
   world.Add(entity, transform);
-  world.Add(entity, Renderable{mesh->id});
+  world.Add(entity, Renderable{RenderMeshId(mesh->id)});
   world.Add(entity, CellMembership{grid_x, grid_y, false});
   cell.entities.push_back(entity);
   ++spawned_entities_;
@@ -602,7 +614,7 @@ bool CellStreamer::SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64
     std::memcpy(placement, data->data.data(), 24);
     ecs::Entity entity = world.Create();
     Transform transform;
-    Vec3 position = ToEngine(placement[0], placement[1], placement[2]);
+    Vec3 position = ToWorld(placement[0], placement[1], placement[2]);
     transform.position[0] = position.x;
     transform.position[1] = position.y;
     transform.position[2] = position.z;
@@ -632,7 +644,7 @@ bool CellStreamer::SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64
       std::memcpy(placement, data->data.data(), 24);
       ecs::Entity entity = world.Create();
       Transform transform;
-      Vec3 position = ToEngine(placement[0], placement[1], placement[2]);
+      Vec3 position = ToWorld(placement[0], placement[1], placement[2]);
       transform.position[0] = position.x;
       transform.position[1] = position.y;
       transform.position[2] = position.z;
@@ -662,14 +674,14 @@ bool CellStreamer::SpawnReference(ecs::World& world, i16 grid_x, i16 grid_y, u64
 
   ecs::Entity entity = world.Create();
   Transform transform;
-  Vec3 position = ToEngine(placement[0], placement[1], placement[2]);
+  Vec3 position = ToWorld(placement[0], placement[1], placement[2]);
   transform.position[0] = position.x;
   transform.position[1] = position.y;
   transform.position[2] = position.z;
   RefrRotationToEngine(placement + 3, transform.rotation);
   transform.scale = scale * kUnitsToMeters;
   world.Add(entity, transform);
-  world.Add(entity, Renderable{mesh->id});
+  world.Add(entity, Renderable{RenderMeshId(mesh->id)});
   world.Add(entity, FormLink{id});
   world.Add(entity, CellMembership{grid_x, grid_y, interior});
   cell.entities.push_back(entity);

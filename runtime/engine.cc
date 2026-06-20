@@ -129,6 +129,9 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
     Vec3 ppos;
     if (ctx_.walk_mode && actors_->PlayerWorldPos(&ppos)) anchor = ppos;
     streamer_->Update(world, anchor);
+    // Secondary worldspaces follow the same anchor; each applies its own offset
+    // internally so it streams the region that lands beside the primary world.
+    for (auto& extra : extra_streamers_) extra->Update(world, anchor);
   });
 
   return true;
@@ -510,6 +513,7 @@ void Engine::Shutdown() {
   // the guest thread holds, valid until the guest is joined.
   if (managed_) managed_->Shutdown();
   scripts_.reset();
+  extra_streamers_.clear();  // reference domain records/assets; drop before the domains
   extra_domains_.clear();  // joins each secondary guest thread before teardown
   managed_.reset();
   if (!config_.headless) {
@@ -775,8 +779,76 @@ bool Engine::LoadGameData() {
   REC_INFO("camera start: cell {},{} at ({:.1f}, {:.1f}, {:.1f})", config_.start_cell_x,
            config_.start_cell_y, start.x, start.y, start.z);
   actors_->MaybeSpawnWorldPlayer({start.x, ground, start.z});  // on the terrain, not 10m up
+  SetupExtraStreamers();
   return true;
 }
+
+void Engine::SetupExtraStreamers() {
+  if (config_.headless || extra_domains_.empty()) return;
+  constexpr f32 kUnitsToMeters = 0.01428f;
+  constexpr f32 kCellSize = 4096.0f;
+
+  // Each secondary worldspace is a fixed diorama placed this far east of the
+  // primary camera, stepped per domain so several never overlap. REC_DOMAIN_OFFSET
+  // tunes the seam; REC_DOMAIN_CELL="x,y" picks which region of the secondary
+  // world to show (its default is a content-dense cell, not the empty ocean the
+  // primary camera's own coordinates would land on).
+  Vec3 step{450.0f, 0.0f, 0.0f};
+  if (const char* env = std::getenv("REC_DOMAIN_OFFSET")) {
+    std::sscanf(env, "%f,%f,%f", &step.x, &step.y, &step.z);
+  }
+  i32 region_x = -18, region_y = 7;  // Commonwealth coast: highway, rocks, trees
+  if (const char* env = std::getenv("REC_DOMAIN_CELL")) {
+    std::sscanf(env, "%d,%d", &region_x, &region_y);
+  }
+  const Vec3 cam = camera_.position();
+
+  for (size_t i = 0; i < extra_domains_.size(); ++i) {
+    ContentDomain& domain = *extra_domains_[i];
+    auto streamer = std::make_unique<world::CellStreamer>(domain.records(), domain.assets());
+
+    // Namespace this domain's mesh ids so they cannot collide with the primary
+    // game's (shared asset paths hash the same). A large odd multiplier keeps
+    // the salts distinct and non-zero. The streamer salts its Renderable ids;
+    // the upload callback below salts the matching renderer/BLAS keys.
+    const u64 salt = 0x9E3779B97F4A7C15ull * static_cast<u64>(i + 1);
+    streamer->set_mesh_id_salt(salt);
+
+    // The region's center in the secondary world's own (pre-offset) engine space.
+    f32 region_bx = (static_cast<f32>(region_x) + 0.5f) * kCellSize;
+    f32 region_by = (static_cast<f32>(region_y) + 0.5f) * kCellSize;
+    Vec3 anchor{region_bx * kUnitsToMeters, 0.0f, -region_by * kUnitsToMeters};
+    streamer->set_fixed_anchor(anchor);
+    // Offset so that region center lands `step*(i+1)` east of the primary camera.
+    Vec3 place{cam.x + step.x * static_cast<f32>(i + 1), step.y * static_cast<f32>(i + 1),
+               cam.z + step.z * static_cast<f32>(i + 1)};
+    streamer->set_world_offset({place.x - anchor.x, place.y - anchor.y, place.z - anchor.z});
+
+    world::CellStreamer::Settings settings;
+    settings.grass_density = config_.grass_density;
+    streamer->Configure(settings);
+    world::CellStreamer::Uploads uploads;
+    uploads.mesh = [this, salt](const asset::Mesh& mesh) {
+      return renderer_.UploadMesh(mesh, salt);
+    };
+    uploads.texture = [this](const asset::Texture& texture) {
+      return renderer_.UploadTexture(texture);
+    };
+    uploads.material = [this](const asset::Material& material) {
+      return renderer_.UploadMaterial(material);
+    };
+    streamer->SetUploads(std::move(uploads));
+    if (!streamer->SelectWorldspace(domain.profile().exterior_worldspace)) {
+      REC_WARN("secondary domain {} has no worldspace '{}', not rendered", domain.profile().name,
+               domain.profile().exterior_worldspace);
+      continue;
+    }
+    REC_INFO("secondary worldspace rendering: {} cell {},{} placed at ({:.0f}, {:.0f}, {:.0f})",
+             domain.profile().name, region_x, region_y, place.x, place.y, place.z);
+    extra_streamers_.push_back(std::move(streamer));
+  }
+}
+
 bool Engine::LoadInterior() {
   bethesda::GlobalFormId cell_id;
   if (config_.interior.starts_with("0x") || config_.interior.starts_with("0X")) {
@@ -933,6 +1005,16 @@ void Engine::LookCameraAt(const Vec3& eye, const Vec3& center) {
 void Engine::DriveCamera(f32 dt) {
   if (!cam_init_) {
     cam_init_ = true;
+    // REC_CAM="x,y,z,yaw,pitch" pins the camera for a framed capture (handy for
+    // screenshots that must show a specific vantage, e.g. two worlds side by side).
+    if (const char* c = std::getenv("REC_CAM")) {
+      Vec3 p{};
+      f32 yaw = 0, pitch = 0;
+      if (std::sscanf(c, "%f,%f,%f,%f,%f", &p.x, &p.y, &p.z, &yaw, &pitch) >= 3) {
+        camera_.set_position(p);
+        camera_.set_yaw_pitch(yaw, pitch);
+      }
+    }
     cam_orbit_ = std::getenv("REC_ORBIT") != nullptr;
     if (const char* r = std::getenv("REC_RECORD")) cam_record_ = std::fopen(r, "wb");
     if (const char* p = std::getenv("REC_REPLAY")) {

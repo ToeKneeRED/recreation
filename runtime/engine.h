@@ -134,6 +134,9 @@ class Engine {
   // Loads each --add-game as a live secondary content domain: its own data,
   // records and Papyrus microvm, run alongside the primary (rendered) game.
   void LoadExtraDomains();
+  // Builds a CellStreamer for each secondary domain so its worldspace renders
+  // into the shared scene, offset from the primary world. Exterior only.
+  void SetupExtraStreamers();
   bool LoadInterior();
   void MountArchives();
   bool LoadGltfScene();
@@ -189,6 +192,11 @@ class Engine {
   // DIAL topics indexed by quest, for NPC dialogue.
   dialogue::DialogueDb dialogue_;
   std::unique_ptr<world::CellStreamer> streamer_;
+  // One streamer per --add-game that renders, each streaming its own worldspace
+  // into the shared scene at a fixed offset (so Fallout 4's Commonwealth sits
+  // beside Skyrim's Tamriel instead of overlapping it). Parallel to the matching
+  // entries in extra_domains_; cleared before them in Shutdown.
+  base::Vector<std::unique_ptr<world::CellStreamer>> extra_streamers_;
   // Declared before scripts_ so the guest thread (which calls into the bindings)
   // is joined in ScriptSystem's destructor before the bindings are torn down.
   std::unique_ptr<rec::script::skyrim::RecordBackedSkyrimBindings> script_bindings_;
