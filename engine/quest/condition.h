@@ -49,6 +49,7 @@ enum class Func : u16 {
   kGetActorValue, // CK 14: actor value param1 of the run-on ref
   kGetItemCount,  // CK 47: count of item param1 held by the run-on ref
   kGetStage,      // CK 58: current journal stage of quest param1
+  kGetIsId,       // CK 228: the run-on ref's base form equals param1
 };
 
 // One CTDA comparison: function(params...) <op> value.

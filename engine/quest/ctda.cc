@@ -24,6 +24,8 @@ Func MapFunction(u16 id) {
       return Func::kGetItemCount;
     case 58:
       return Func::kGetStage;
+    case 228:
+      return Func::kGetIsId;
     default:
       return Func::kRaw;
   }
@@ -94,7 +96,8 @@ void ResolveConditionForms(ConditionList& conditions, const bethesda::RecordStor
       case Func::kGetStage:
       case Func::kGetItemCount:
       case Func::kGetDistance:
-        c.param1 = remap(c.param1);  // a form id (quest / item / target)
+      case Func::kGetIsId:
+        c.param1 = remap(c.param1);  // a form id (quest / item / target / base)
         break;
       default:
         break;  // kGetActorValue param1 is an AV index; kRaw is unknown

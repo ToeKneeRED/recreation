@@ -177,25 +177,42 @@ void InteractionSystem::OpenDialogue(u64 npc) {
             s.npc = npc;
             s.open = true;
             s.speaker = binds->GetName(script::papyrus::ObjectRef{npc});
+            // The actor's base form, to gate lines keyed to a speaker by GetIsID.
+            const u64 speaker_base = binds->GetBaseObject(script::papyrus::ObjectRef{npc}).handle;
+            // A response is offered to this NPC when it carries no GetIsID
+            // speaker condition (a line anyone may say) or one that names this
+            // actor's base; otherwise it belongs to a different speaker.
+            auto for_speaker = [&](const dialogue::Response& r) {
+              bool keyed = false;
+              for (const quest::Comparison& c : r.conditions.comparisons) {
+                if (c.func != quest::Func::kGetIsId) continue;
+                keyed = true;
+                if (c.param1 == speaker_base) return true;
+              }
+              return !keyed;
+            };
             script::skyrim::SkyrimConditionContext ctx(binds);
             for (const quest::QuestStatus& q : binds->quest_system().AllStatuses()) {
               if (!q.running) continue;
-              std::vector<dialogue::Topic> topics;
               for (dialogue::Handle dial : dialogue_.TopicsForQuest(q.handle)) {
                 bethesda::GlobalFormId id{static_cast<u16>(dial >> 32),
                                           static_cast<u32>(dial & 0xffffffffu)};
                 dialogue::Topic t = dialogue::ParseTopic(records_, id, &strings_);
-                if (t.dial != 0) topics.push_back(std::move(t));
-              }
-              for (const dialogue::Response& r : dialogue::AvailableResponses(topics, ctx)) {
+                if (t.dial == 0) continue;
+                for (const dialogue::Response& r : t.responses) {
+                  if (s.options.size() >= 4) break;
+                  // Gate by speaker, then by the conditions we can judge
+                  // (Allows shows the line unless an understood check fails).
+                  if (!for_speaker(r) || !ctx.Allows(r.conditions)) continue;
+                  DialogueOption opt;
+                  opt.player_line = r.player_line;
+                  opt.npc_line = r.npc_line;
+                  opt.info = r.info;
+                  opt.quest = q.handle;
+                  opt.fragment_function = r.fragment_function;
+                  s.options.push_back(std::move(opt));
+                }
                 if (s.options.size() >= 4) break;
-                DialogueOption opt;
-                opt.player_line = r.player_line;
-                opt.npc_line = r.npc_line;
-                opt.info = r.info;
-                opt.quest = q.handle;
-                opt.fragment_function = r.fragment_function;
-                s.options.push_back(std::move(opt));
               }
               if (s.options.size() >= 4) break;
             }
