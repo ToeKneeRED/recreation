@@ -172,10 +172,11 @@ i32 RecordBackedSkyrimBindings::GetMagicEffectCount(ObjectRef item) {
   if (!stored) return 0;
   bethesda::Record rec;
   if (!records_->Parse(id, &rec)) return 0;
-  // Ingredients and potions/food/poisons (ALCH) both list their effects the same
-  // way, so one accessor serves alchemy (matching shared effects) and consumables
-  // (applying them).
-  if (rec.header.type != FourCc('I', 'N', 'G', 'R') && rec.header.type != FourCc('A', 'L', 'C', 'H'))
+  // Ingredients, potions/food/poisons (ALCH) and enchantments (ENCH) all list
+  // their effects the same way, so one accessor serves alchemy (matching shared
+  // effects), consumables (applying them) and enchanting (inspecting them).
+  if (rec.header.type != FourCc('I', 'N', 'G', 'R') && rec.header.type != FourCc('A', 'L', 'C', 'H') &&
+      rec.header.type != FourCc('E', 'N', 'C', 'H'))
     return 0;
 
   // The effects are ordered EFID (effect form id) / EFIT ({ float magnitude;

@@ -42,6 +42,7 @@ internal static class Program
         LeveledListTests.Run(check);
         BookTests.Run(check);
         PotionTests.Run(check);
+        EnchantingTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;
