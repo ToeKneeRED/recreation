@@ -20,6 +20,10 @@ public sealed class MagicEffect : Form
 
     // True if the effect damages rather than restores or fortifies its value.
     public bool IsDetrimental => Call("GetMagicEffectDetrimental").AsBool();
+
+    // The effect's base cost (MGEF DATA): the unit price that scales the magicka
+    // cost of a spell carrying it and the gold value of a potion brewed with it.
+    public float BaseCost => Call("GetMagicEffectBaseCost").AsFloat();
 }
 
 // One magic effect carried by an ingredient, potion, enchantment or spell: the

@@ -62,7 +62,44 @@ public static class AlchemyTests
         check.That("actor brew uses the brewer's skill",
                    Math.Abs(byActor.Effects.Single().Magnitude - 21f) < 0.01f);
 
+        Value(check, fake, alchemy);
         Native.Backend = null;
+    }
+
+    // The brew's worth and whether it is a potion or a poison, both read off the
+    // shared effects' base costs and which one is the most valuable.
+    private static void Value(Check check, FakeBackend fake, Alchemy alchemy)
+    {
+        // The unit curve on its own: base cost times the magnitude/duration factor,
+        // with no base cost meaning no worth.
+        check.Equal("unit effect at magnitude 1", 10, AlchemyValue.OfEffect(10f, 1f, 0));
+        check.Equal("a 10s duration carries no extra factor", 10, AlchemyValue.OfEffect(10f, 1f, 10));
+        check.Equal("longer duration raises worth", 21, AlchemyValue.OfEffect(10f, 1f, 20));
+        check.Equal("no base cost is worthless", 0, AlchemyValue.OfEffect(0f, 100f, 100));
+
+        // A beneficial Restore-Health effect and a harmful Damage-Health one, the
+        // latter worth more, so a brew sharing both is a poison named by it.
+        const ulong cure = 0xA10, harm = 0xA11;
+        fake.SetMagicEffectInfo(cure, "Health", detrimental: false, baseCost: 2f);
+        fake.SetMagicEffectInfo(harm, "Health", detrimental: true, baseCost: 4f);
+        const ulong ingP = 0x310, ingQ = 0x311;
+        fake.SetIngredientEffects(ingP, (cure, 10, 0), (harm, 7, 0));
+        fake.SetIngredientEffects(ingQ, (cure, 8, 0), (harm, 5, 0));
+
+        BrewedPotion brew = alchemy.Combine(new[] { Ingredient.From(ingP), Ingredient.From(ingQ) }, 0);
+        check.Equal("brew shares both effects", 2, brew.Effects.Count);
+        check.Equal("primary effect is the most valuable (harm)", harm, brew.PrimaryEffect.Effect.Handle);
+        check.That("harmful primary makes it a poison", brew.IsPoison);
+        check.That("a poison is not a potion", !brew.IsPotion);
+        int expected = AlchemyValue.OfEffect(2f, 10, 0) + AlchemyValue.OfEffect(4f, 7, 0);
+        check.Equal("gold value sums the effects' worth", expected, brew.GoldValue);
+
+        // Drop the harmful effect and the same mix brews a (beneficial) potion.
+        fake.SetIngredientEffects(ingP, (cure, 10, 0));
+        fake.SetIngredientEffects(ingQ, (cure, 8, 0));
+        BrewedPotion potion = alchemy.Combine(new[] { Ingredient.From(ingP), Ingredient.From(ingQ) }, 0);
+        check.That("beneficial primary makes it a potion", potion.IsPotion);
+        check.That("a potion is not a poison", !potion.IsPoison);
     }
 
     private static PotionEffect Effect(BrewedPotion potion, ulong effectHandle) =>

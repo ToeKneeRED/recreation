@@ -312,6 +312,9 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Form", "GetMagicEffectDetrimental", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Bool(Resolve(bindings).GetMagicEffectDetrimental(self));
   });
+  reg.Register("Form", "GetMagicEffectBaseCost", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Float(Resolve(bindings).GetMagicEffectBaseCost(self));
+  });
   reg.Register("Form", "GetSpellCost", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Int(Resolve(bindings).GetSpellCost(self));
   });

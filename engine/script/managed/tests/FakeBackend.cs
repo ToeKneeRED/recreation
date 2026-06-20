@@ -63,11 +63,14 @@ public sealed class FakeBackend : IEngineBackend
     // The actor value a magic effect modifies, and whether it is detrimental.
     private readonly Dictionary<ulong, string> _effectAv = new();
     private readonly HashSet<ulong> _effectDetrimental = new();
-    public void SetMagicEffectInfo(ulong effect, string actorValue, bool detrimental)
+    private readonly Dictionary<ulong, float> _effectBaseCost = new();
+    public void SetMagicEffectInfo(ulong effect, string actorValue, bool detrimental,
+                                   float baseCost = 0f)
     {
         _effectAv[effect] = actorValue;
         if (detrimental) _effectDetrimental.Add(effect);
         else _effectDetrimental.Remove(effect);
+        _effectBaseCost[effect] = baseCost;
     }
 
     // A spell's SPIT fields: cost, type, cast type and delivery.
@@ -468,6 +471,8 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.String(_effectAv.GetValueOrDefault(self, ""));
             case "GetMagicEffectDetrimental":
                 return Value.Bool(_effectDetrimental.Contains(self));
+            case "GetMagicEffectBaseCost":
+                return Value.Float(_effectBaseCost.GetValueOrDefault(self));
             case "GetSpellCost":
                 return Value.Int(_spellInfo.TryGetValue(self, out var sc) ? sc.Cost : 0);
             case "GetSpellType":

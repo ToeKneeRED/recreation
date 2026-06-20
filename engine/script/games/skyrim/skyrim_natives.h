@@ -78,6 +78,7 @@ class SkyrimBindings {
   // apply a consumable's effects.
   virtual std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) { return ""; }
   virtual bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) { return false; }
+  virtual f32 GetMagicEffectBaseCost(papyrus::ObjectRef effect) { return 0.0f; }
 
   // A spell's SPIT fields: the magicka cost, the type (0 spell, 2 power, 3 lesser
   // power, 4 ability, 5 poison, 11 voice), the cast type (0 constant effect,

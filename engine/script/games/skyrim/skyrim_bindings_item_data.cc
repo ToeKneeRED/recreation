@@ -291,6 +291,21 @@ bool RecordBackedSkyrimBindings::GetMagicEffectDetrimental(ObjectRef effect) {
   return (flags & 0x04) != 0;
 }
 
+f32 RecordBackedSkyrimBindings::GetMagicEffectBaseCost(ObjectRef effect) {
+  if (!records_) return 0.0f;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(effect), &rec)) return 0.0f;
+  if (rec.header.type != FourCc('M', 'G', 'E', 'F')) return 0.0f;
+  // MGEF DATA holds the base cost (the effect's unit price) as a float at 0x04,
+  // right after the flags. It anchors the magicka cost of a spell and the gold
+  // value of a brewed potion that carries the effect.
+  const bethesda::Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+  if (!data || data->data.size() < 0x08) return 0.0f;
+  f32 cost;
+  std::memcpy(&cost, data->data.data() + 0x04, 4);
+  return cost;
+}
+
 namespace {
 // Reads a uint32 from a spell's SPIT subrecord at `offset`. SPIT is { uint32 cost;
 // uint32 flags; uint32 type; float chargeTime; uint32 castType; uint32 delivery;
