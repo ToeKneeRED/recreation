@@ -265,20 +265,26 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Form", "GetNthLeveledCount", [bindings](VirtualMachine&, ObjectRef, Args& a) {
     return Value::Int(Resolve(bindings).GetNthLeveledCount(ArgI(a, 0)));
   });
-  reg.Register("Form", "GetIngredientEffectCount", [bindings](VirtualMachine&, ObjectRef self, Args&) {
-    return Value::Int(Resolve(bindings).GetIngredientEffectCount(self));
+  reg.Register("Form", "GetMagicEffectCount", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetMagicEffectCount(self));
   });
-  reg.Register("Form", "GetNthIngredientEffectId", [bindings](VirtualMachine&, ObjectRef, Args& a) {
-    return Value::Object(Resolve(bindings).GetNthIngredientEffectId(ArgI(a, 0)));
+  reg.Register("Form", "GetNthMagicEffectId", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    return Value::Object(Resolve(bindings).GetNthMagicEffectId(ArgI(a, 0)));
   });
-  reg.Register("Form", "GetNthIngredientEffectMagnitude",
+  reg.Register("Form", "GetNthMagicEffectMagnitude",
                [bindings](VirtualMachine&, ObjectRef, Args& a) {
-                 return Value::Float(Resolve(bindings).GetNthIngredientEffectMagnitude(ArgI(a, 0)));
+                 return Value::Float(Resolve(bindings).GetNthMagicEffectMagnitude(ArgI(a, 0)));
                });
-  reg.Register("Form", "GetNthIngredientEffectDuration",
+  reg.Register("Form", "GetNthMagicEffectDuration",
                [bindings](VirtualMachine&, ObjectRef, Args& a) {
-                 return Value::Int(Resolve(bindings).GetNthIngredientEffectDuration(ArgI(a, 0)));
+                 return Value::Int(Resolve(bindings).GetNthMagicEffectDuration(ArgI(a, 0)));
                });
+  reg.Register("Form", "GetMagicEffectActorValue", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Str(Resolve(bindings).GetMagicEffectActorValue(self));
+  });
+  reg.Register("Form", "GetMagicEffectDetrimental", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(Resolve(bindings).GetMagicEffectDetrimental(self));
+  });
 
   // ActorBase (and Actor, which delegates) read the NPC_ record.
   for (const char* type : {"ActorBase", "Actor"}) {

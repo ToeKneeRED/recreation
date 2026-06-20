@@ -58,6 +58,16 @@ public sealed class FakeBackend : IEngineBackend
         params (ulong effect, float magnitude, int duration)[] effects) =>
         _ingredientEffects[ingredient] = effects.Select(e => (e.effect, e.magnitude, e.duration)).ToList();
 
+    // The actor value a magic effect modifies, and whether it is detrimental.
+    private readonly Dictionary<ulong, string> _effectAv = new();
+    private readonly HashSet<ulong> _effectDetrimental = new();
+    public void SetMagicEffectInfo(ulong effect, string actorValue, bool detrimental)
+    {
+        _effectAv[effect] = actorValue;
+        if (detrimental) _effectDetrimental.Add(effect);
+        else _effectDetrimental.Remove(effect);
+    }
+
     // Constructible-object recipes the global recipe accessors read back.
     private readonly List<(ulong Output, int OutputQty, ulong Workbench,
                            List<(ulong Item, int Qty)> Inputs)> _recipes = new();
@@ -212,6 +222,13 @@ public sealed class FakeBackend : IEngineBackend
                 _current[(self, av)] = MathF.Min(cap, cur + args[1].AsFloat());
                 return Value.None;
             }
+            case "DamageActorValue":
+            {
+                string av = Norm(args[0].AsString());
+                float cur = _current.TryGetValue((self, av), out float cv) ? cv : 0f;
+                _current[(self, av)] = MathF.Max(0f, cur - args[1].AsFloat());
+                return Value.None;
+            }
             case "IsInCombat":
                 return Value.Bool(_inCombat.Contains(self));
             case "GetBaseObject":
@@ -326,23 +343,27 @@ public sealed class FakeBackend : IEngineBackend
                 return idx >= 0 && idx < _leveledCache.Entries.Count
                     ? Value.Int(_leveledCache.Entries[idx].Count) : Value.Int(0);
             }
-            case "GetIngredientEffectCount":
+            case "GetMagicEffectCount":
                 _effectCache.Clear();
                 if (_ingredientEffects.TryGetValue(self, out var effs)) _effectCache.AddRange(effs);
                 return Value.Int(_effectCache.Count);
-            case "GetNthIngredientEffectId":
+            case "GetMagicEffectActorValue":
+                return Value.String(_effectAv.GetValueOrDefault(self, ""));
+            case "GetMagicEffectDetrimental":
+                return Value.Bool(_effectDetrimental.Contains(self));
+            case "GetNthMagicEffectId":
             {
                 int idx = args[0].AsInt();
                 return idx >= 0 && idx < _effectCache.Count
                     ? Value.Object(_effectCache[idx].Effect) : Value.Object(0);
             }
-            case "GetNthIngredientEffectMagnitude":
+            case "GetNthMagicEffectMagnitude":
             {
                 int idx = args[0].AsInt();
                 return idx >= 0 && idx < _effectCache.Count
                     ? Value.Float(_effectCache[idx].Magnitude) : Value.Float(0);
             }
-            case "GetNthIngredientEffectDuration":
+            case "GetNthMagicEffectDuration":
             {
                 int idx = args[0].AsInt();
                 return idx >= 0 && idx < _effectCache.Count

@@ -71,6 +71,18 @@ const char* SkillAvName(u32 index) {
   }
 }
 
+// The actor-value name a magic effect modifies (MGEF primary AV index): the three
+// pools plus the skills. Empty for values the actor-value store does not model, so
+// the managed consumable logic skips effects it cannot apply.
+const char* EffectAvName(i32 index) {
+  switch (index) {
+    case 24: return "Health";
+    case 25: return "Magicka";
+    case 26: return "Stamina";
+    default: return SkillAvName(static_cast<u32>(index));
+  }
+}
+
 }  // namespace
 
 f32 RecordBackedSkyrimBindings::GetWeight(ObjectRef form) {
@@ -152,27 +164,30 @@ f32 RecordBackedSkyrimBindings::GetArmorRating(ObjectRef armor) {
   return scaled / 100.0f;
 }
 
-i32 RecordBackedSkyrimBindings::GetIngredientEffectCount(ObjectRef ingredient) {
-  ingredient_effect_cache_.clear();
+i32 RecordBackedSkyrimBindings::GetMagicEffectCount(ObjectRef item) {
+  magic_effect_cache_.clear();
   if (!records_) return 0;
-  const bethesda::GlobalFormId id = ToFormId(ingredient);
+  const bethesda::GlobalFormId id = ToFormId(item);
   const bethesda::RecordStore::StoredRecord* stored = records_->Find(id);
   if (!stored) return 0;
   bethesda::Record rec;
   if (!records_->Parse(id, &rec)) return 0;
-  if (rec.header.type != FourCc('I', 'N', 'G', 'R')) return 0;
+  // Ingredients and potions/food/poisons (ALCH) both list their effects the same
+  // way, so one accessor serves alchemy (matching shared effects) and consumables
+  // (applying them).
+  if (rec.header.type != FourCc('I', 'N', 'G', 'R') && rec.header.type != FourCc('A', 'L', 'C', 'H'))
+    return 0;
 
-  // INGR lists up to four effects as ordered EFID (effect form id) / EFIT
-  // ({ float magnitude; uint32 area; uint32 duration }) pairs. Each EFID's id is
-  // resolved against the ingredient's load order so managed code gets a real
-  // global handle it can compare across ingredients.
-  IngredientEffect pending;
+  // The effects are ordered EFID (effect form id) / EFIT ({ float magnitude;
+  // uint32 area; uint32 duration }) pairs. Each EFID's id is resolved against the
+  // item's load order so managed code gets a real global handle.
+  MagicEffectData pending;
   bool have_effect = false;
   for (const bethesda::Subrecord& sub : rec.subrecords) {
     if (sub.type == FourCc('E', 'F', 'I', 'D') && sub.data.size() >= 4) {
       u32 raw;
       std::memcpy(&raw, sub.data.data(), 4);
-      pending = IngredientEffect{};
+      pending = MagicEffectData{};
       pending.effect =
           records_->ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin).packed();
       have_effect = true;
@@ -181,26 +196,53 @@ i32 RecordBackedSkyrimBindings::GetIngredientEffectCount(ObjectRef ingredient) {
       u32 duration;
       std::memcpy(&duration, sub.data.data() + 8, 4);
       pending.duration = static_cast<i32>(duration);
-      ingredient_effect_cache_.push_back(pending);
+      magic_effect_cache_.push_back(pending);
       have_effect = false;
     }
   }
-  return static_cast<i32>(ingredient_effect_cache_.size());
+  return static_cast<i32>(magic_effect_cache_.size());
 }
 
-papyrus::ObjectRef RecordBackedSkyrimBindings::GetNthIngredientEffectId(i32 index) {
-  if (index < 0 || static_cast<size_t>(index) >= ingredient_effect_cache_.size()) return {};
-  return papyrus::ObjectRef{ingredient_effect_cache_[static_cast<size_t>(index)].effect};
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetNthMagicEffectId(i32 index) {
+  if (index < 0 || static_cast<size_t>(index) >= magic_effect_cache_.size()) return {};
+  return papyrus::ObjectRef{magic_effect_cache_[static_cast<size_t>(index)].effect};
 }
 
-f32 RecordBackedSkyrimBindings::GetNthIngredientEffectMagnitude(i32 index) {
-  if (index < 0 || static_cast<size_t>(index) >= ingredient_effect_cache_.size()) return 0.0f;
-  return ingredient_effect_cache_[static_cast<size_t>(index)].magnitude;
+f32 RecordBackedSkyrimBindings::GetNthMagicEffectMagnitude(i32 index) {
+  if (index < 0 || static_cast<size_t>(index) >= magic_effect_cache_.size()) return 0.0f;
+  return magic_effect_cache_[static_cast<size_t>(index)].magnitude;
 }
 
-i32 RecordBackedSkyrimBindings::GetNthIngredientEffectDuration(i32 index) {
-  if (index < 0 || static_cast<size_t>(index) >= ingredient_effect_cache_.size()) return 0;
-  return ingredient_effect_cache_[static_cast<size_t>(index)].duration;
+i32 RecordBackedSkyrimBindings::GetNthMagicEffectDuration(i32 index) {
+  if (index < 0 || static_cast<size_t>(index) >= magic_effect_cache_.size()) return 0;
+  return magic_effect_cache_[static_cast<size_t>(index)].duration;
+}
+
+std::string RecordBackedSkyrimBindings::GetMagicEffectActorValue(ObjectRef effect) {
+  if (!records_) return "";
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(effect), &rec)) return "";
+  if (rec.header.type != FourCc('M', 'G', 'E', 'F')) return "";
+  // MGEF DATA holds the primary actor value the effect modifies at offset 0x44.
+  const bethesda::Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+  if (!data || data->data.size() < 0x48) return "";
+  i32 av;
+  std::memcpy(&av, data->data.data() + 0x44, 4);
+  return EffectAvName(av);
+}
+
+bool RecordBackedSkyrimBindings::GetMagicEffectDetrimental(ObjectRef effect) {
+  if (!records_) return false;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(effect), &rec)) return false;
+  if (rec.header.type != FourCc('M', 'G', 'E', 'F')) return false;
+  // The 0x04 flag in MGEF DATA marks a detrimental effect (damage rather than
+  // restore or fortify).
+  const bethesda::Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+  if (!data || data->data.size() < 4) return false;
+  u32 flags;
+  std::memcpy(&flags, data->data.data(), 4);
+  return (flags & 0x04) != 0;
 }
 
 }  // namespace rec::script::skyrim

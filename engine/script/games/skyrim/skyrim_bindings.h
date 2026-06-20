@@ -133,10 +133,12 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   i32 GetWeaponDamage(papyrus::ObjectRef weapon) override;
   f32 GetArmorRating(papyrus::ObjectRef armor) override;
   papyrus::ObjectRef GetEnchantment(papyrus::ObjectRef item) override;
-  i32 GetIngredientEffectCount(papyrus::ObjectRef ingredient) override;
-  papyrus::ObjectRef GetNthIngredientEffectId(i32 index) override;
-  f32 GetNthIngredientEffectMagnitude(i32 index) override;
-  i32 GetNthIngredientEffectDuration(i32 index) override;
+  i32 GetMagicEffectCount(papyrus::ObjectRef item) override;
+  papyrus::ObjectRef GetNthMagicEffectId(i32 index) override;
+  f32 GetNthMagicEffectMagnitude(i32 index) override;
+  i32 GetNthMagicEffectDuration(i32 index) override;
+  std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) override;
+  bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) override;
   i32 GetRecipeCount() override;
   papyrus::ObjectRef GetNthRecipeOutput(i32 recipe) override;
   i32 GetNthRecipeOutputQuantity(i32 recipe) override;
@@ -250,9 +252,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
     f32 base = 0;
     f32 current = 0;
   };
-  // One parsed ingredient magic effect (INGR EFID/EFIT): the effect's global form
-  // handle and its base magnitude/duration, cached by GetIngredientEffectCount.
-  struct IngredientEffect {
+  // One parsed magic effect (INGR/ALCH EFID/EFIT): the effect's global form handle
+  // and its base magnitude/duration, cached by GetMagicEffectCount.
+  struct MagicEffectData {
     u64 effect = 0;
     f32 magnitude = 0;
     i32 duration = 0;
@@ -369,9 +371,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::mutex live_positions_mutex_;
   std::unordered_map<u64, std::array<f32, 3>> live_positions_;
   std::vector<std::pair<u64, f32>> nearby_cache_;  // last result: (handle, distance in game units)
-  // Last GetIngredientEffectCount result, read by the GetNthIngredientEffect*
-  // accessors. Guest-thread only (record parsing), so it needs no lock.
-  std::vector<IngredientEffect> ingredient_effect_cache_;
+  // Last GetMagicEffectCount result, read by the GetNthMagicEffect* accessors.
+  // Guest-thread only (record parsing), so it needs no lock.
+  std::vector<MagicEffectData> magic_effect_cache_;
   // Every COBJ recipe, built lazily on first GetRecipeCount and reused after.
   std::vector<Recipe> recipe_cache_;
   bool recipes_built_ = false;

@@ -26,16 +26,16 @@ public sealed class Alchemy
 
         // Tally each effect across the ingredients, counting a given ingredient at
         // most once per effect so a duplicate listing cannot fake a shared effect.
-        var byEffect = new Dictionary<ulong, List<IngredientEffect>>();
+        var byEffect = new Dictionary<ulong, List<MagicEffectInstance>>();
         foreach (Ingredient ingredient in ingredients)
         {
             var counted = new HashSet<ulong>();
-            foreach (IngredientEffect effect in ingredient.Effects)
+            foreach (MagicEffectInstance effect in ingredient.Effects)
             {
                 if (!counted.Add(effect.Effect.Handle)) continue;
                 if (!byEffect.TryGetValue(effect.Effect.Handle, out var occurrences))
                 {
-                    occurrences = new List<IngredientEffect>();
+                    occurrences = new List<MagicEffectInstance>();
                     byEffect[effect.Effect.Handle] = occurrences;
                 }
                 occurrences.Add(effect);
@@ -44,10 +44,10 @@ public sealed class Alchemy
 
         float scale = 1f + MagnitudePerSkill * alchemySkill;
         var effects = new List<PotionEffect>();
-        foreach (List<IngredientEffect> occurrences in byEffect.Values)
+        foreach (List<MagicEffectInstance> occurrences in byEffect.Values)
         {
             if (occurrences.Count < 2) continue;  // present in one ingredient: not shared
-            IngredientEffect strongest = occurrences.OrderByDescending(e => e.Magnitude).First();
+            MagicEffectInstance strongest = occurrences.OrderByDescending(e => e.Magnitude).First();
             int duration = occurrences.Max(e => e.Duration);
             effects.Add(new PotionEffect(strongest.Effect, strongest.Magnitude * scale, duration));
         }

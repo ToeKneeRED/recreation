@@ -51,15 +51,22 @@ class SkyrimBindings {
   virtual papyrus::ObjectRef GetBookSpell(papyrus::ObjectRef book) { return {}; }
   virtual std::string GetBookSkill(papyrus::ObjectRef book) { return ""; }
 
-  // The magic effects of an ingredient (INGR), for the C# alchemy logic. Call
-  // GetIngredientEffectCount first: it parses the ingredient's up-to-four effects
-  // (EFID/EFIT) into a cache and returns the count; the GetNthIngredientEffect*
-  // accessors then read that cache by index. Two ingredients share an effect when
-  // their effect ids match -- the rule managed code brews potions by.
-  virtual i32 GetIngredientEffectCount(papyrus::ObjectRef ingredient) { return 0; }
-  virtual papyrus::ObjectRef GetNthIngredientEffectId(i32 index) { return {}; }
-  virtual f32 GetNthIngredientEffectMagnitude(i32 index) { return 0; }
-  virtual i32 GetNthIngredientEffectDuration(i32 index) { return 0; }
+  // The magic effects of an ingredient or potion/food (INGR or ALCH), shared by
+  // alchemy (matching effects across ingredients) and consumables (applying a
+  // potion's effects). Call GetMagicEffectCount first: it parses the effects
+  // (EFID/EFIT) into a cache and returns the count; the GetNthMagicEffect*
+  // accessors then read that cache by index.
+  virtual i32 GetMagicEffectCount(papyrus::ObjectRef item) { return 0; }
+  virtual papyrus::ObjectRef GetNthMagicEffectId(i32 index) { return {}; }
+  virtual f32 GetNthMagicEffectMagnitude(i32 index) { return 0; }
+  virtual i32 GetNthMagicEffectDuration(i32 index) { return 0; }
+
+  // Properties of a magic effect (MGEF): the actor-value name it modifies (empty
+  // for values not modelled) and whether it is detrimental (damage rather than
+  // restore/fortify). Together with the per-effect duration these let managed code
+  // apply a consumable's effects.
+  virtual std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) { return ""; }
+  virtual bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) { return false; }
 
   // Constructible-object recipes (COBJ): the data behind smithing, cooking,
   // tempering and tanning. GetRecipeCount parses every recipe once into a cache
