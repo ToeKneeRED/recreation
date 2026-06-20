@@ -22,13 +22,18 @@ public sealed class Merchant
     // The gold the merchant has on hand to buy the player's wares.
     public int Gold => _vendor.GetItemCount(GoldForm);
 
-    // The per-unit prices for `item`, given the player's Speech. Use these to show
-    // a price before committing; the trade re-derives the same number.
+    // The per-unit prices for `item`, given the player's Speech and how the
+    // merchant regards them (a liked merchant trades fairer). Use these to show a
+    // price before committing; the trade re-derives the same number.
     public int BuyPrice(Actor player, Form item) =>
-        _pricing.BuyPrice(item.GoldValue, player.GetValue(ActorValue.Speechcraft));
+        _pricing.BuyPrice(item.GoldValue, player.GetValue(ActorValue.Speechcraft), Disposition(player));
 
     public int SellPrice(Actor player, Form item) =>
-        _pricing.SellPrice(item.GoldValue, player.GetValue(ActorValue.Speechcraft));
+        _pricing.SellPrice(item.GoldValue, player.GetValue(ActorValue.Speechcraft), Disposition(player));
+
+    // How the merchant regards the player (0..100), the disposition that nudges
+    // prices. Unset relationships are neutral, so a plain shop is unaffected.
+    private int Disposition(Actor player) => Relationships.Disposition(Actor.From(_vendor.Handle), player);
 
     // The player buys `count` of `item`: the item moves to the player and gold to
     // the merchant. Settles only if the merchant has the stock and the player the

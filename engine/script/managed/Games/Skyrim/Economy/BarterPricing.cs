@@ -18,20 +18,31 @@ public sealed class BarterPricing
     // With the defaults, 100 Speech reaches a fair trade on both sides.
     public float ReliefPerSpeech { get; init; } = 0.005f;
 
-    // What the player pays for one unit worth `value` at `speech` Speech. A
-    // worthless item (value <= 0) has no price.
-    public int BuyPrice(int value, float speech)
+    // How much disposition counts as Speech: a `disposition` above the neutral 50
+    // trades like extra Speech (a friend's discount), below it like a penalty. So a
+    // liked merchant and a high Speech reach a fair trade together.
+    public float DispositionAsSpeech { get; init; } = 1f;
+
+    // What the player pays for one unit worth `value` at `speech` Speech, with the
+    // merchant's `disposition` (0..100, 50 neutral) folded in. A worthless item
+    // (value <= 0) has no price.
+    public int BuyPrice(int value, float speech, int disposition = 50)
     {
         if (value <= 0) return 0;
-        float mult = Mathf.Clamp(BaseBuyMultiplier - ReliefPerSpeech * speech, 1f, BaseBuyMultiplier);
+        float mult = Mathf.Clamp(BaseBuyMultiplier - ReliefPerSpeech * Effective(speech, disposition),
+                                 1f, BaseBuyMultiplier);
         return Math.Max(1, (int)MathF.Ceiling(value * mult));
     }
 
     // What the player receives for selling one unit worth `value`.
-    public int SellPrice(int value, float speech)
+    public int SellPrice(int value, float speech, int disposition = 50)
     {
         if (value <= 0) return 0;
-        float mult = Mathf.Clamp(BaseSellMultiplier + ReliefPerSpeech * speech, BaseSellMultiplier, 1f);
+        float mult = Mathf.Clamp(BaseSellMultiplier + ReliefPerSpeech * Effective(speech, disposition),
+                                 BaseSellMultiplier, 1f);
         return Math.Max(1, (int)MathF.Floor(value * mult));
     }
+
+    private float Effective(float speech, int disposition) =>
+        speech + (disposition - 50) * DispositionAsSpeech;
 }

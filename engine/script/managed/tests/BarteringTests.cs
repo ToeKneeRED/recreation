@@ -34,6 +34,14 @@ public static class BarteringTests
         // A worthless item has no price on either side.
         check.Equal("worthless item has no buy price", 0, pricing.BuyPrice(0, 50));
         check.Equal("worthless item has no sell price", 0, pricing.SellPrice(0, 50));
+
+        // Disposition trades like Speech: a liked merchant (above the neutral 50)
+        // is cheaper to buy from, a disliked one dearer; neutral changes nothing.
+        check.Equal("neutral disposition is unchanged", 150, pricing.BuyPrice(100, 0, disposition: 50));
+        check.Equal("a friendly merchant is cheaper", 125, pricing.BuyPrice(100, 0, disposition: 100));
+        check.Equal("a friendly merchant pays more", 75, pricing.SellPrice(100, 0, disposition: 100));
+        check.Equal("a hostile merchant stays at the worst markup", 150,
+                    pricing.BuyPrice(100, 0, disposition: 0));
     }
 
     private static void Transactions(Check check)
@@ -100,6 +108,15 @@ public static class BarteringTests
         TradeResult tooBig = merchant.PlayerSells(player, Form.From(gemHandle));
         check.That("sell rejected when merchant is broke", !tooBig.Success);
         check.Equal("player kept the unsold item", 1, player.GetItemCount(Form.From(gemHandle)));
+
+        // The merchant's disposition toward the player feeds the price: an ally
+        // charges less than a neutral acquaintance.
+        Relationships.Clear();
+        Relationships.Set(Actor.From(vendorHandle), player, RelationshipRank.Ally);
+        int friendlyPrice = merchant.BuyPrice(player, item);
+        Relationships.Set(Actor.From(vendorHandle), player, RelationshipRank.Acquaintance);
+        check.That("a friendly merchant charges less", friendlyPrice < merchant.BuyPrice(player, item));
+        Relationships.Clear();
 
         Native.Backend = null;
     }
