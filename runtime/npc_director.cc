@@ -255,6 +255,8 @@ void NpcDirector::Mq101DemoTick(f32 dt) {
   // so the guided demo still completes.
   for (QuestMarker& m : quest_->markers())
     if (m.quest == mq101_demo_quest_ && !m.fired) {
+      ctx_.auto_walk_goal = m.pos;  // steer the guided player to this waypoint
+      ctx_.auto_walk_has_goal = true;
       mq101_demo_wait_ += dt;
       if (mq101_demo_wait_ > 12.0f) {
         m.fired = true;
@@ -273,6 +275,7 @@ void NpcDirector::Mq101DemoTick(f32 dt) {
   mq101_demo_wait_ = 0.0f;
   if (mq101_demo_next_ >= mq101_demo_stages_.size()) {
     mq101_demo_pending_ = false;  // the last waypoint advanced the quest to completion
+    ctx_.auto_walk_has_goal = false;
     REC_INFO("demo: MQ101 breadcrumb finished, quest driven to its completion stage");
     return;
   }
@@ -478,9 +481,20 @@ void NpcDirector::Mq101SceneTick(f32 dt) {
     }
     mq101_scene_stuck_time_ = 0;
   }
+  // Steer the guided player toward the beat's mark (where the guide is leading).
+  const size_t cur = scene_runner_.current_action();
+  if (running && cur < mq101_scene_.actions.size()) {
+    const quest::SceneAction& a = mq101_scene_.actions[cur];
+    if (a.kind == quest::SceneAction::Kind::kGuideTo ||
+        a.kind == quest::SceneAction::Kind::kWaitPlayerNear) {
+      ctx_.auto_walk_goal = Vec3{a.pos[0], a.pos[1], a.pos[2]};
+      ctx_.auto_walk_has_goal = true;
+    }
+  }
   if (!running) {
     mq101_scene_active_ = false;
     guides_.clear();
+    ctx_.auto_walk_has_goal = false;
     REC_INFO("scene: MQ101 escort complete, quest driven to its completion stage");
   }
 }

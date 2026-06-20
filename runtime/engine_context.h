@@ -107,6 +107,12 @@ struct EngineContext {
   f32 cam_yaw = 0;
   Vec3 walk_eye{};
   Vec3 walk_target{};
+  // Where the auto-walk test player should head: the active quest marker / guide
+  // mark, set by the npc director each frame. When unset, auto-walk coasts along
+  // the facing. Lets the guided playthrough follow the quest instead of walking
+  // blindly forward into whatever happens to be ahead.
+  bool auto_walk_has_goal = false;
+  Vec3 auto_walk_goal{};
 };
 
 }  // namespace rec

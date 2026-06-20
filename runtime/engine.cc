@@ -760,7 +760,18 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
     if (input.key(Key::kA)) move = move - right;
   }
   f32 speed = (allow && input.key(Key::kLeftShift)) ? 4.8f : 1.8f;
-  if (ctx_.auto_walk) move = fwd;  // test hook: walk forward automatically
+  if (ctx_.auto_walk) {
+    // Test hook: head for the active quest marker / guide mark when one is set,
+    // so the guided playthrough follows the quest; otherwise coast forward.
+    Vec3 ppos;
+    if (ctx_.auto_walk_has_goal && actors_->PlayerWorldPos(&ppos)) {
+      Vec3 to{ctx_.auto_walk_goal.x - ppos.x, 0, ctx_.auto_walk_goal.z - ppos.z};
+      const f32 len = Length(to);
+      move = len > 0.5f ? to * (1.0f / len) : fwd;
+    } else {
+      move = fwd;
+    }
+  }
   f32 move_len = Length(move);
   Vec3 velocity{};
   f32 yaw = 0;
