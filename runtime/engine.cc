@@ -48,10 +48,25 @@ bool Engine::Initialize(const EngineConfig& config) {
   }
 
   if (physics_.Initialize()) {
-    // A small cube every scene can throw around (F key).
+    // A small wooden cube every scene can throw around (F key).
+    asset::Material wood;
+    wood.id = asset::MakeAssetId("builtin/physics_cube/material");
+    wood.base_color_factor[0] = 0.42f;
+    wood.base_color_factor[1] = 0.26f;
+    wood.base_color_factor[2] = 0.14f;
+    wood.roughness_factor = 0.75f;
     asset::Mesh cube = asset::MakeCube(0.25f, asset::MakeAssetId("builtin/physics_cube"));
+    for (asset::MeshLod& lod : cube.lods) {
+      for (asset::Submesh& submesh : lod.submeshes) submesh.material = wood.id;
+      if (lod.submeshes.empty()) {
+        lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), wood.id});
+      }
+    }
     physics_cube_mesh_ = cube.id;
-    if (!config_.headless) renderer_.UploadMesh(cube);
+    if (!config_.headless) {
+      renderer_.UploadMaterial(wood);
+      renderer_.UploadMesh(cube);
+    }
     scheduler_.AddSystem(ecs::Stage::kSim, "physics", [this](ecs::World& world, f32 dt) {
       physics_.Update(dt);
       for (const PhysicsEntity& body : physics_entities_) {
