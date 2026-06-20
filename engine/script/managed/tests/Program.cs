@@ -58,6 +58,7 @@ internal static class Program
         RaceTests.Run(check);
         RaceTraitsTests.Run(check);
         RacialAbilitiesTests.Run(check);
+        EquipmentTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;
