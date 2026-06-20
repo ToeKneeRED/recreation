@@ -47,8 +47,8 @@ public sealed class BookLearning : GameBehaviour
         Form spell = book.TeachesSpell;
         if (spell.Exists)
         {
-            Game.Player.AddSpell(spell);
-            target.Enabled = false;  // the tome is consumed
+            Spellbook.Learn(Spell.From(spell));  // adds it to the player and records it
+            target.Enabled = false;              // the tome is consumed
             EventBus.Publish(new SpellLearned(Game.Player.Handle, spell.Handle));
             return;
         }

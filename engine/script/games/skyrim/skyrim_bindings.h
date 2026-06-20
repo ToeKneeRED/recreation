@@ -139,6 +139,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   i32 GetNthMagicEffectDuration(i32 index) override;
   std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) override;
   bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) override;
+  i32 GetSpellCost(papyrus::ObjectRef spell) override;
+  i32 GetSpellCastType(papyrus::ObjectRef spell) override;
+  i32 GetSpellDelivery(papyrus::ObjectRef spell) override;
   i32 GetRecipeCount() override;
   papyrus::ObjectRef GetNthRecipeOutput(i32 recipe) override;
   i32 GetNthRecipeOutputQuantity(i32 recipe) override;

@@ -1,7 +1,9 @@
-// Item record-data accessors for RecordBackedSkyrimBindings: weight, gold value,
-// weapon damage and armor rating, parsed from the form's record. Split out of
-// skyrim_bindings.cc to keep that file from becoming a god file; the rest of the
-// class lives there and in the other skyrim_bindings_*.cc units.
+// Form record-data accessors for RecordBackedSkyrimBindings: item weight/value,
+// weapon/armor stats, what a book teaches, the magic effects an ingredient/potion/
+// enchantment/spell carries, a magic effect's actor value, and a spell's cost.
+// All parsed from the form's record. Split out of skyrim_bindings.cc to keep that
+// file from becoming a god file; the rest of the class lives there and in the
+// other skyrim_bindings_*.cc units.
 #include "script/games/skyrim/skyrim_bindings.h"
 
 #include <cstring>
@@ -172,11 +174,12 @@ i32 RecordBackedSkyrimBindings::GetMagicEffectCount(ObjectRef item) {
   if (!stored) return 0;
   bethesda::Record rec;
   if (!records_->Parse(id, &rec)) return 0;
-  // Ingredients, potions/food/poisons (ALCH) and enchantments (ENCH) all list
+  // Ingredients, potions (ALCH), enchantments (ENCH) and spells (SPEL) all list
   // their effects the same way, so one accessor serves alchemy (matching shared
-  // effects), consumables (applying them) and enchanting (inspecting them).
-  if (rec.header.type != FourCc('I', 'N', 'G', 'R') && rec.header.type != FourCc('A', 'L', 'C', 'H') &&
-      rec.header.type != FourCc('E', 'N', 'C', 'H'))
+  // effects), consumables and casting (applying them) and enchanting (inspecting).
+  const u32 type = rec.header.type;
+  if (type != FourCc('I', 'N', 'G', 'R') && type != FourCc('A', 'L', 'C', 'H') &&
+      type != FourCc('E', 'N', 'C', 'H') && type != FourCc('S', 'P', 'E', 'L'))
     return 0;
 
   // The effects are ordered EFID (effect form id) / EFIT ({ float magnitude;
@@ -244,6 +247,35 @@ bool RecordBackedSkyrimBindings::GetMagicEffectDetrimental(ObjectRef effect) {
   u32 flags;
   std::memcpy(&flags, data->data.data(), 4);
   return (flags & 0x04) != 0;
+}
+
+namespace {
+// Reads a uint32 from a spell's SPIT subrecord at `offset`. SPIT is { uint32 cost;
+// uint32 flags; uint32 type; float chargeTime; uint32 castType; uint32 delivery;
+// ... }, so cost is at 0, type at 8, cast type at 16 and delivery at 20.
+i32 SpitField(const bethesda::RecordStore* records, bethesda::GlobalFormId id, size_t offset) {
+  if (!records) return 0;
+  bethesda::Record rec;
+  if (!records->Parse(id, &rec)) return 0;
+  if (rec.header.type != FourCc('S', 'P', 'E', 'L')) return 0;
+  const bethesda::Subrecord* spit = rec.Find(FourCc('S', 'P', 'I', 'T'));
+  if (!spit || spit->data.size() < offset + 4) return 0;
+  u32 value;
+  std::memcpy(&value, spit->data.data() + offset, 4);
+  return static_cast<i32>(value);
+}
+}  // namespace
+
+i32 RecordBackedSkyrimBindings::GetSpellCost(ObjectRef spell) {
+  return SpitField(records_, ToFormId(spell), 0);
+}
+
+i32 RecordBackedSkyrimBindings::GetSpellCastType(ObjectRef spell) {
+  return SpitField(records_, ToFormId(spell), 16);
+}
+
+i32 RecordBackedSkyrimBindings::GetSpellDelivery(ObjectRef spell) {
+  return SpitField(records_, ToFormId(spell), 20);
 }
 
 }  // namespace rec::script::skyrim

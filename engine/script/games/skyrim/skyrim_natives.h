@@ -68,6 +68,13 @@ class SkyrimBindings {
   virtual std::string GetMagicEffectActorValue(papyrus::ObjectRef effect) { return ""; }
   virtual bool GetMagicEffectDetrimental(papyrus::ObjectRef effect) { return false; }
 
+  // A spell's SPIT fields: the magicka cost, the cast type (0 constant effect,
+  // 1 fire-and-forget, 2 concentration) and the delivery (0 self, 1 touch, 2 aimed,
+  // 3 target actor, 4 target location). Let managed code model casting.
+  virtual i32 GetSpellCost(papyrus::ObjectRef spell) { return 0; }
+  virtual i32 GetSpellCastType(papyrus::ObjectRef spell) { return 0; }
+  virtual i32 GetSpellDelivery(papyrus::ObjectRef spell) { return 0; }
+
   // Constructible-object recipes (COBJ): the data behind smithing, cooking,
   // tempering and tanning. GetRecipeCount parses every recipe once into a cache
   // and returns the total; the GetNthRecipe* accessors read it by index, inputs

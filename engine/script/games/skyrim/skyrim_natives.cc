@@ -285,6 +285,15 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Form", "GetMagicEffectDetrimental", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Bool(Resolve(bindings).GetMagicEffectDetrimental(self));
   });
+  reg.Register("Form", "GetSpellCost", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetSpellCost(self));
+  });
+  reg.Register("Form", "GetSpellCastType", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetSpellCastType(self));
+  });
+  reg.Register("Form", "GetSpellDelivery", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetSpellDelivery(self));
+  });
 
   // ActorBase (and Actor, which delegates) read the NPC_ record.
   for (const char* type : {"ActorBase", "Actor"}) {

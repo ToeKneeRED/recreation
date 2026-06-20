@@ -14,20 +14,5 @@ public sealed class Enchantment : Form
     public static Enchantment From(Form form) => new(form.Handle);
 
     // The magic effects this enchantment applies, read from its record.
-    public IReadOnlyList<MagicEffectInstance> Effects
-    {
-        get
-        {
-            int count = Call("GetMagicEffectCount").AsInt();
-            var result = new MagicEffectInstance[count];
-            for (int i = 0; i < count; i++)
-            {
-                var effect = MagicEffect.From(Call("GetNthMagicEffectId", i).AsHandle());
-                float magnitude = Call("GetNthMagicEffectMagnitude", i).AsFloat();
-                int duration = Call("GetNthMagicEffectDuration", i).AsInt();
-                result[i] = new MagicEffectInstance(effect, magnitude, duration);
-            }
-            return result;
-        }
-    }
+    public IReadOnlyList<MagicEffectInstance> Effects => MagicEffectReader.Of(this);
 }
