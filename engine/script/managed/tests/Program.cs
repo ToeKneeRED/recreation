@@ -61,6 +61,7 @@ internal static class Program
         ThuumTests.Run(check);
         CharacterLevelTests.Run(check);
         SkillProgressionTests.Run(check);
+        TrainingTests.Run(check);
         KeywordsTests.Run(check);
         FormDataTests.Run(check);
         RelationshipsTests.Run(check);

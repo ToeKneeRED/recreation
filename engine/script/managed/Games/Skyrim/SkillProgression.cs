@@ -50,12 +50,23 @@ public static class SkillProgression
         while (level < MaxSkill && pool >= Threshold(level))
         {
             pool -= Threshold(level);
-            level += 1f;
-            actor.SetValue(skill, level);
-            EventBus.Publish(new SkillIncreased(actor.Handle, skill, (int)level));
-            CharacterLevel.GainXp(actor, CharXpPerSkillLevel * level);
+            level = Increment(actor, skill);
         }
         Pool[key] = pool;
+    }
+
+    // Raises `skill` by one point (up to the cap) and feeds the character's level,
+    // the shared step behind both natural use and a trainer's lesson. Returns the
+    // new skill level (unchanged if already at the cap).
+    public static int Increment(Actor actor, string skill)
+    {
+        float level = actor.GetBaseValue(skill);
+        if (level >= MaxSkill) return (int)level;
+        level += 1f;
+        actor.SetValue(skill, level);
+        EventBus.Publish(new SkillIncreased(actor.Handle, skill, (int)level));
+        CharacterLevel.GainXp(actor, CharXpPerSkillLevel * level);
+        return (int)level;
     }
 
     public static void Clear() => Pool.Clear();
