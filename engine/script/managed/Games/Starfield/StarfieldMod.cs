@@ -49,6 +49,11 @@ public sealed class StarfieldMod : IMod
         {
             XpPerStage = config.GetFloat("questXpPerStage", 50f),
         });
+        // Kills during the player's fights pay XP too, the combat half of leveling.
+        ModHost.Register(new StarfieldCombatRewards
+        {
+            XpPerKill = config.GetFloat("combatXpPerKill", 15f),
+        });
         // Surfaces the systems above to the player as corner notifications.
         ModHost.Register(new StarfieldNotifications());
     }
