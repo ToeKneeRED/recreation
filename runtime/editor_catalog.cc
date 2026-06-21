@@ -154,7 +154,12 @@ void MapEditor::RefreshFilter() {
     const CatalogEntry& e = catalog_[i];
     if (category_ != 0 && e.category != category_) continue;
     if (!needle.empty()) {
-      if (Lower(e.name).find(needle) == std::string::npos &&
+      // Match the name, the editor id, or the game (so "fallout" narrows to that
+      // game's assets in a multi-game session).
+      const bool game_match = domains_.size() > 1 && e.domain >= 0 &&
+                              e.domain < static_cast<int>(domains_.size()) &&
+                              Lower(domains_[e.domain].name).find(needle) != std::string::npos;
+      if (!game_match && Lower(e.name).find(needle) == std::string::npos &&
           Lower(e.editor_id).find(needle) == std::string::npos) {
         continue;
       }
