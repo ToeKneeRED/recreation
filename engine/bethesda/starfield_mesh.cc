@@ -311,6 +311,154 @@ bool ParseStarfieldMesh(ByteSpan data, StarfieldMeshData* out) {
   return true;
 }
 
+namespace {
+
+// Recomputes smooth normals on a skinned buffer, sharing the rigid path's
+// algorithm by reading the same Vertex/index fields through a temporary view.
+void ComputeNormalsSkinned(StarfieldSkinnedMeshData* mesh) {
+  StarfieldMeshData view;
+  view.vertices = std::move(mesh->vertices);
+  view.indices = mesh->indices;
+  ComputeNormals(&view);
+  mesh->vertices = std::move(view.vertices);
+}
+
+}  // namespace
+
+bool ParseStarfieldSkinnedMesh(ByteSpan data, StarfieldSkinnedMeshData* out) {
+  *out = StarfieldSkinnedMeshData{};
+  Reader r{data};
+  u32 version = r.Read<u32>();
+  if (!r.ok || (version != 1 && version != 2)) return false;
+
+  u32 index_count = r.Read<u32>();
+  if (!r.ok || index_count == 0 || index_count % 3 != 0 || index_count > 64'000'000) {
+    return false;
+  }
+  const u8* index_bytes = r.Bytes(static_cast<size_t>(index_count) * 2);
+  if (!index_bytes) return false;
+
+  f32 scale = r.Read<f32>();
+  u32 weights_per_vertex = r.Read<u32>();
+  u32 vertex_count = r.Read<u32>();
+  if (!r.ok || vertex_count == 0 || vertex_count > 16'000'000) return false;
+  if (weights_per_vertex == 0 || weights_per_vertex > 8) return false;  // rigid mesh
+  const u8* position_bytes = r.Bytes(static_cast<size_t>(vertex_count) * 6);
+  if (!position_bytes) return false;
+
+  out->indices.resize(index_count);
+  for (u32 i = 0; i < index_count; ++i) {
+    u16 index;
+    std::memcpy(&index, index_bytes + i * 2, 2);
+    if (index >= vertex_count) return false;
+    out->indices[i] = index;
+  }
+
+  out->vertices.resize(vertex_count);
+  // Positions stay in Starfield-native metres (no game-unit lift): the skinned
+  // body is posed by a metres-space skeleton and metres-space bind transforms,
+  // so keeping the vertices in metres keeps the whole skin chain consistent.
+  const f32 quant = 1.0f / 32767.0f * scale;
+  for (u32 i = 0; i < vertex_count; ++i) {
+    i16 p[3];
+    std::memcpy(p, position_bytes + i * 6, 6);
+    asset::Vertex& v = out->vertices[i];
+    for (int k = 0; k < 3; ++k) v.position[k] = static_cast<f32>(p[k]) * quant;
+    v.tangent[0] = 1;
+    v.tangent[3] = 1;
+  }
+
+  // The five optional vertex streams, same fixed order as the rigid path. The
+  // weight stream follows the last of them, so they must all be consumed even
+  // when unused, to leave the reader at the weight stream.
+  auto read_stream = [&](u32 stride, const std::function<void(u32, const u8*)>& consume) {
+    u32 count = r.Read<u32>();
+    if (!r.ok) return;
+    if (count == 0) return;
+    const u8* bytes = r.Bytes(static_cast<size_t>(count) * stride);
+    if (!bytes) return;
+    if (count == vertex_count && consume) consume(count, bytes);
+  };
+  read_stream(4, [&](u32 count, const u8* bytes) {  // uv1, two float16
+    for (u32 i = 0; i < count; ++i) {
+      u16 h[2];
+      std::memcpy(h, bytes + i * 4, 4);
+      out->vertices[i].uv[0] = HalfToFloat(h[0]);
+      out->vertices[i].uv[1] = HalfToFloat(h[1]);
+    }
+  });
+  read_stream(4, nullptr);                          // uv2, unused
+  read_stream(4, [&](u32 count, const u8* bytes) {  // vertex color, RGBA8
+    for (u32 i = 0; i < count; ++i) {
+      std::memcpy(&out->vertices[i].color, bytes + i * 4, 4);
+      out->vertices[i].color |= 0xff000000u;
+    }
+  });
+  read_stream(4, nullptr);  // packed normals, format undecoded
+  read_stream(4, nullptr);  // packed tangents, format undecoded
+  if (!r.ok) return false;
+
+  // Weight stream: u32 influenceCount == vertexCount * weightsPerVertex, then
+  // that many (u16 boneIndex, u16 weight) entries grouped per vertex. Reduce
+  // each vertex's influences to its four largest, renormalized to u8 weights
+  // summing to 255 (the engine SkinnedVertexExtra holds four influences).
+  u32 influence_count = r.Read<u32>();
+  if (!r.ok || influence_count != vertex_count * weights_per_vertex) return false;
+  const u8* influence_bytes = r.Bytes(static_cast<size_t>(influence_count) * 4);
+  if (!influence_bytes) return false;
+
+  out->skinning.resize(vertex_count);
+  for (u32 v = 0; v < vertex_count; ++v) {
+    // Pick the four highest-weight influences of this vertex by a small partial
+    // selection (weightsPerVertex is tiny, so a linear pass per slot is fine).
+    u16 picked_bone[4] = {0, 0, 0, 0};
+    u32 picked_weight[4] = {0, 0, 0, 0};
+    bool used[8] = {};
+    const u8* group = influence_bytes + static_cast<size_t>(v) * weights_per_vertex * 4;
+    for (int slot = 0; slot < 4 && slot < static_cast<int>(weights_per_vertex); ++slot) {
+      int best = -1;
+      u16 best_weight = 0;
+      for (u32 j = 0; j < weights_per_vertex; ++j) {
+        if (used[j]) continue;
+        u16 weight;
+        std::memcpy(&weight, group + j * 4 + 2, 2);
+        if (best < 0 || weight > best_weight) {
+          best = static_cast<int>(j);
+          best_weight = weight;
+        }
+      }
+      if (best < 0) break;
+      used[best] = true;
+      std::memcpy(&picked_bone[slot], group + best * 4, 2);
+      picked_weight[slot] = best_weight;
+    }
+
+    u32 total = picked_weight[0] + picked_weight[1] + picked_weight[2] + picked_weight[3];
+    asset::SkinnedVertexExtra& extra = out->skinning[v];
+    if (total == 0) {
+      extra.bone_indices[0] = static_cast<u8>(picked_bone[0]);
+      extra.bone_weights[0] = 255;
+      continue;
+    }
+    // Renormalize to u8 summing to 255, putting the rounding remainder on the
+    // largest (slot 0) so the dominant bone absorbs it.
+    u32 assigned = 0;
+    for (int slot = 0; slot < 4; ++slot) {
+      extra.bone_indices[slot] = static_cast<u8>(picked_bone[slot]);
+      u8 w = static_cast<u8>((static_cast<u64>(picked_weight[slot]) * 255 + total / 2) / total);
+      extra.bone_weights[slot] = w;
+      assigned += w;
+    }
+    if (assigned != 255) {
+      int delta = 255 - static_cast<int>(assigned);
+      extra.bone_weights[0] = static_cast<u8>(std::clamp(extra.bone_weights[0] + delta, 0, 255));
+    }
+  }
+
+  ComputeNormalsSkinned(out);
+  return true;
+}
+
 bool ParseStarfieldNif(ByteSpan data, base::Vector<StarfieldGeometryRef>* out) {
   auto header = ParseNifHeader(data);
   if (!header) return false;

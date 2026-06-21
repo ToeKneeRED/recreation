@@ -30,6 +30,25 @@ struct StarfieldMeshData {
 // unsupported version, or a stream the layout does not account for.
 bool ParseStarfieldMesh(ByteSpan data, StarfieldMeshData* out);
 
+// A decoded skinned ".mesh": the same geometry the rigid path produces plus a
+// per-vertex bone binding (the top four influences of the weight stream). Unlike
+// the rigid path, positions stay in Starfield-native metres: a skinned body is
+// driven by a metres-space skeleton, so its whole skin chain (vertices, bind
+// transforms, skeleton) is kept in metres for consistency, not lifted to game
+// units. Bone indices are the skin-bone indices the weight stream references,
+// which the converter resolves to names through the NIF's bone list.
+struct StarfieldSkinnedMeshData {
+  base::Vector<asset::Vertex> vertices;
+  base::Vector<asset::SkinnedVertexExtra> skinning;
+  base::Vector<u32> indices;
+};
+
+// Decodes a Starfield ".mesh" blob keeping its weight stream, for runtime GPU
+// skinning. Reduces each vertex's influences to the top four by weight and
+// renormalizes them to u8 summing to 255. Returns false on a short read, an
+// unsupported version, or a mesh that carries no weights (weightsPerVertex 0).
+bool ParseStarfieldSkinnedMesh(ByteSpan data, StarfieldSkinnedMeshData* out);
+
 // One BSGeometry resolved from a Starfield NIF: the full node-chain transform
 // baked from the parents down to the geometry, and the normalized vfs path of
 // its highest detail ".mesh" ("geometries/<dir>/<file>.mesh").
