@@ -7,9 +7,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 
+#include <ugui/core/color.h>
 #include <ugui/style/style.h>
 #include <ugui/ultragui.h>
 #include <ugui/widgets/text.h>
@@ -172,6 +174,142 @@ std::string BuildContainerSection() {
   return s;
 }
 
+// The map editor overlay: a top toolbar, a left asset-browser dock, a right
+// selection inspector, a bottom status bar and a builder reticle. Everything is
+// pooled (fixed widget counts filled and toggled each frame) and starts hidden;
+// the engine collapses editor_root until the editor is on. Names are matched by
+// the click router (btn_tool*, btn_cat*, ed_row*, ed_search*, btn_scroll_*).
+std::string BuildEditorSection() {
+  std::string s = R"(
+  panel editor_root {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+
+    panel editor_reticle {
+      position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+      layout: column; justify: center; align: center;
+      panel ed_cross {
+        width: 24; height: 24; position: relative;
+        panel { position: absolute; left: 11; top: 2; width: 2; height: 8; background: #ffcc55dd; }
+        panel { position: absolute; left: 11; top: 14; width: 2; height: 8; background: #ffcc55dd; }
+        panel { position: absolute; left: 2; top: 11; width: 8; height: 2; background: #ffcc55dd; }
+        panel { position: absolute; left: 14; top: 11; width: 8; height: 2; background: #ffcc55dd; }
+        panel { position: absolute; left: 10; top: 10; width: 4; height: 4; corner-radius: 2; background: #ffffffee; }
+      }
+    }
+
+    panel editor_toolbar {
+      position: absolute; top: 0; left: 0; width: 100vw; height: 46;
+      layout: row; align: center; justify: space-between; padding: 0 18;
+      background: #0a0c14f7; border-color: #ffffff14; border-width: 1;
+      shadow-color: #00000088; shadow-blur: 18; shadow-y: 3;
+      panel ed_tb_left { layout: row; align: center; gap: 14;
+        text { text: "MAP EDITOR"; font-size: 15; color: #ffcc55; letter-spacing: 3; text-transform: uppercase; }
+        text ed_tb_hint { text: ""; font-size: 12; color: #8a93a8; letter-spacing: 1; }
+      }
+      panel ed_tb_tools { layout: row; align: center; gap: 6;
+)";
+
+  // Toolbar action buttons (children of ed_tb_tools). Indices match MapEditor's
+  // ToolAction enum.
+  const char* tools[kEditorToolButtons] = {"Select", "Move",   "Rotate", "Scale",
+                                           "Delete", "Dupe",   "Undo",   "Save"};
+  for (int i = 0; i < kEditorToolButtons; ++i) {
+    s += "        button btn_tool" + std::to_string(i) + " { text: \"" + tools[i] +
+         "\"; font-size: 13; color: #d8def0; text-align: center; padding: 7 12;"
+         " background: #ffffff0e; corner-radius: 7; cursor: pointer;"
+         " :hover { background: #ffcc5530; color: #ffffff; }"
+         " :pressed { background: #ffcc5555; } }\n";
+  }
+  s += "      }\n    }\n";  // close ed_tb_tools, editor_toolbar
+
+  // Left asset-browser dock.
+  s += R"(
+    panel editor_browser {
+      position: absolute; left: 0; top: 46; width: 360; bottom: 34;
+      layout: column; align: start; padding: 16 18; gap: 10;
+      background: #0b0e16f7; border-color: #ffffff12; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 34; shadow-x: 8;
+      text { text: "Asset Browser"; font-size: 16; color: #ffcc55; letter-spacing: 3;
+        text-transform: uppercase; }
+      panel ed_search {
+        layout: row; align: center; justify: space-between; width: 324; padding: 9 12;
+        background: #05070ccc; corner-radius: 8; border-color: #ffffff16; border-width: 1;
+        cursor: text;
+        text ed_search_text { text: "Search assets..."; font-size: 14; color: #6b7488; }
+        button ed_search_clear { text: "x"; font-size: 13; color: #8a93a8; padding: 0 6;
+          background: #ffffff00; cursor: pointer; :hover { color: #ffffff; } }
+      }
+      panel ed_cats { layout: row; align: center; gap: 6; width: 324;
+)";
+
+  // Category tabs (children of ed_cats; pooled, filled/collapsed by the view).
+  for (int i = 0; i < kEditorCategoryTabs; ++i) {
+    s += "        button btn_cat" + std::to_string(i) +
+         " { text: \"\"; font-size: 12; color: #aab2c6; padding: 5 10;"
+         " background: #ffffff0c; corner-radius: 6; cursor: pointer;"
+         " :hover { background: #ffffff1a; color: #ffffff; } }\n";
+  }
+  s += "      }\n";  // close ed_cats
+  s += "      text ed_result_count { text: \"\"; font-size: 12; color: #8a93a8; }\n";
+  s += "      panel ed_rows { layout: column; align: start; gap: 3; width: 324;\n";
+
+  // Asset rows (children of ed_rows; pooled). Each is a clickable panel with a
+  // name line and a subtitle line.
+  for (int i = 0; i < kEditorBrowserRows; ++i) {
+    const std::string id = std::to_string(i);
+    s += "        panel ed_row" + id +
+         " { layout: column; align: start; width: 304; padding: 7 10; corner-radius: 7;"
+         " background: #ffffff08; cursor: pointer; :hover { background: #ffcc5522; }\n"
+         "          text ed_row" + id +
+         "_name { text: \"\"; font-size: 14; color: #e8ecf6; }\n"
+         "          text ed_row" + id +
+         "_sub { text: \"\"; font-size: 11; color: #7e879b; }\n"
+         "        }\n";
+  }
+  s += "      }\n";  // close ed_rows
+
+  s += R"(
+      panel ed_scroll {
+        layout: row; align: center; gap: 8; width: 324;
+        button btn_scroll_up { text: "prev"; font-size: 12; color: #d8def0; padding: 6 12;
+          background: #ffffff0e; corner-radius: 6; cursor: pointer;
+          :hover { background: #ffcc5530; color: #ffffff; } }
+        button btn_scroll_down { text: "next"; font-size: 12; color: #d8def0; padding: 6 12;
+          background: #ffffff0e; corner-radius: 6; cursor: pointer;
+          :hover { background: #ffcc5530; color: #ffffff; } }
+      }
+    }
+
+    panel editor_inspector {
+      position: absolute; right: 0; top: 46; width: 300; bottom: 34;
+      layout: column; align: start; padding: 18 20; gap: 6;
+      background: #0b0e16f7; border-color: #ffffff12; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 34; shadow-x: -8;
+      text { text: "Inspector"; font-size: 16; color: #ffcc55; letter-spacing: 3;
+        text-transform: uppercase; }
+      text ed_insp_title { text: ""; font-size: 17; color: #f2f4fb; margin: 6 0 0 0; }
+      text ed_insp_sub { text: ""; font-size: 12; color: #8a93a8; margin: 0 0 8 0; }
+      panel ed_insp_rule { width: 260; height: 1; background: #ffffff18; margin: 4 0 8 0; }
+      text ed_insp_pos { text: ""; font-size: 14; color: #d8def0; }
+      text ed_insp_rot { text: ""; font-size: 14; color: #d8def0; }
+      text ed_insp_scale { text: ""; font-size: 14; color: #d8def0; }
+      panel ed_insp_rule2 { width: 260; height: 1; background: #ffffff18; margin: 10 0 8 0; }
+      text { text: "G move   R rotate   wheel scale"; font-size: 12; color: #8a93a8; }
+      text { text: "X delete   Ctrl+D dupe   Ctrl+Z undo"; font-size: 12; color: #8a93a8; }
+    }
+
+    panel editor_status {
+      position: absolute; left: 0; bottom: 0; width: 100vw; height: 34;
+      layout: row; align: center; justify: space-between; padding: 0 18;
+      background: #0a0c14f7; border-color: #ffffff14; border-width: 1;
+      text ed_status_left { text: ""; font-size: 13; color: #ffcc55; }
+      text ed_status_right { text: ""; font-size: 12; color: #8a93a8; letter-spacing: 1; }
+    }
+  }
+)";
+  return s;
+}
+
 std::string BuildUi() {
   std::string s;
   s += R"(
@@ -277,6 +415,7 @@ panel root {
   s += BuildJournalSection();
   s += BuildDialogueSection();
   s += BuildContainerSection();
+  s += BuildEditorSection();  // before the menu so the pause overlay draws on top
 
   s += R"(
   panel menu {
@@ -421,6 +560,11 @@ struct GameUi::Impl {
   std::vector<HudQuest> journal;
   int journal_selected = -1;
 
+  // Map editor overlay state and the sink that receives its widget clicks.
+  EditorView editor;
+  std::function<void(const EditorUiEvent&)> editor_sink;
+  bool editor_prev_active = false;  // edge-detect to hide/restore the gameplay HUD
+
   void SetStyleField(const char* name, void (*mutate)(ugui::Style&, float), float arg) {
     ugui::wid w = ui.FindWidget(name);
     if (!w.valid()) return;
@@ -440,6 +584,34 @@ struct GameUi::Impl {
         visible ? 1.0f : 0.0f);
   }
 
+  void SetBackground(const char* name, ugui::Color color) {
+    ugui::wid w = ui.FindWidget(name);
+    if (!w.valid()) return;
+    ugui::StyleC* sc = ui.world().Get<ugui::StyleC>(w);
+    if (!sc) return;
+    ugui::Style style = sc->style;
+    style.background = color;
+    ugui::SetStyle(ui.world(), w, style);
+  }
+
+  void SetTextColor(const char* name, ugui::Color color) {
+    ugui::wid w = ui.FindWidget(name);
+    if (!w.valid()) return;
+    ugui::StyleC* sc = ui.world().Get<ugui::StyleC>(w);
+    if (!sc) return;
+    ugui::Style style = sc->style;
+    style.text_color = color;
+    ugui::SetStyle(ui.world(), w, style);
+  }
+
+  // Drives every editor widget from the EditorView each frame. Collapses the
+  // whole overlay when the editor is off.
+  void ApplyEditorView();
+
+  // Climbs from a clicked widget to the nearest editor-handled name and forwards
+  // the matching event to editor_sink. Returns true if it consumed the click.
+  bool RouteEditorClick(ugui::wid target);
+
   void ApplyMenuVisibility() {
     SetStyleField(
         "menu",
@@ -454,6 +626,174 @@ struct GameUi::Impl {
     ugui::SetText(ui.FindWidget("menu_title"), settings_open ? "Settings" : "Paused");
   }
 };
+
+namespace {
+const ugui::Color kEdGold = ugui::Color::FromRgba8(0xff, 0xcc, 0x55, 0xff);
+const ugui::Color kEdTabIdle = ugui::Color::FromRgba8(0xff, 0xff, 0xff, 0x0c);
+const ugui::Color kEdTabActive = ugui::Color::FromRgba8(0xff, 0xcc, 0x55, 0x33);
+const ugui::Color kEdRowIdle = ugui::Color::FromRgba8(0xff, 0xff, 0xff, 0x08);
+const ugui::Color kEdRowArmed = ugui::Color::FromRgba8(0xff, 0xcc, 0x55, 0x3a);
+const ugui::Color kEdTextIdle = ugui::Color::FromRgba8(0xaa, 0xb2, 0xc6, 0xff);
+const ugui::Color kEdSearchHint = ugui::Color::FromRgba8(0x6b, 0x74, 0x88, 0xff);
+const ugui::Color kEdSearchText = ugui::Color::FromRgba8(0xe8, 0xec, 0xf6, 0xff);
+}  // namespace
+
+void GameUi::Impl::ApplyEditorView() {
+  // On the active<->inactive edge, hide the gameplay HUD while editing and
+  // restore it on exit (the editor has its own reticle and chrome).
+  if (editor.active != editor_prev_active) {
+    const bool hud = !editor.active;
+    SetVisible("topbar", hud);
+    SetVisible("crosshair", hud);
+    SetVisible("vitals", hud);
+    SetVisible("readout", hud);
+    editor_prev_active = editor.active;
+  }
+  SetVisible("editor_root", editor.active);
+  if (!editor.active) return;
+
+  // Toolbar hint reflects the current mode / armed brush.
+  ugui::SetText(ui.FindWidget("ed_tb_hint"),
+                editor.brush.empty() ? "select / build" : ("brush: " + editor.brush).c_str());
+
+  // Category tabs: fill labels, collapse the unused pool slots, gold the active.
+  for (int i = 0; i < kEditorCategoryTabs; ++i) {
+    const std::string id = "btn_cat" + std::to_string(i);
+    if (i < static_cast<int>(editor.categories.size())) {
+      ugui::SetText(ui.FindWidget(id.c_str()), editor.categories[i].c_str());
+      SetVisible(id.c_str(), true);
+      const bool on = i == editor.category;
+      SetBackground(id.c_str(), on ? kEdTabActive : kEdTabIdle);
+      SetTextColor(id.c_str(), on ? kEdGold : kEdTextIdle);
+    } else {
+      SetVisible(id.c_str(), false);
+    }
+  }
+
+  // Search box: typed text (with a caret while focused) or the placeholder.
+  {
+    std::string shown;
+    bool placeholder = editor.search.empty() && !editor.search_focused;
+    if (placeholder) {
+      shown = "Search assets...";
+    } else {
+      shown = editor.search;
+      if (editor.search_focused) shown += "|";
+    }
+    ugui::SetText(ui.FindWidget("ed_search_text"), shown.c_str());
+    SetTextColor("ed_search_text", placeholder ? kEdSearchHint : kEdSearchText);
+  }
+
+  // Result count.
+  {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%d match%s", editor.result_count,
+                  editor.result_count == 1 ? "" : "es");
+    ugui::SetText(ui.FindWidget("ed_result_count"), buf);
+  }
+
+  // Asset rows: name + subtitle, collapse the unused pool, highlight the armed.
+  for (int i = 0; i < kEditorBrowserRows; ++i) {
+    const std::string row = "ed_row" + std::to_string(i);
+    if (i < static_cast<int>(editor.rows.size())) {
+      ugui::SetText(ui.FindWidget((row + "_name").c_str()), editor.rows[i].name.c_str());
+      ugui::SetText(ui.FindWidget((row + "_sub").c_str()), editor.rows[i].subtitle.c_str());
+      SetVisible(row.c_str(), true);
+      SetBackground(row.c_str(), editor.rows[i].armed ? kEdRowArmed : kEdRowIdle);
+    } else {
+      SetVisible(row.c_str(), false);
+    }
+  }
+
+  // Inspector (only with a live selection).
+  SetVisible("editor_inspector", editor.has_selection);
+  if (editor.has_selection) {
+    ugui::SetText(ui.FindWidget("ed_insp_title"), editor.sel_title.c_str());
+    ugui::SetText(ui.FindWidget("ed_insp_sub"), editor.sel_subtitle.c_str());
+    char b[96];
+    std::snprintf(b, sizeof(b), "pos   %.1f   %.1f   %.1f", editor.sel_pos[0], editor.sel_pos[1],
+                  editor.sel_pos[2]);
+    ugui::SetText(ui.FindWidget("ed_insp_pos"), b);
+    std::snprintf(b, sizeof(b), "yaw   %.0f deg", editor.sel_yaw_deg);
+    ugui::SetText(ui.FindWidget("ed_insp_rot"), b);
+    std::snprintf(b, sizeof(b), "scale   %.2fx", editor.sel_scale);
+    ugui::SetText(ui.FindWidget("ed_insp_scale"), b);
+  }
+
+  // Status bar.
+  ugui::SetText(ui.FindWidget("ed_status_left"), editor.status.c_str());
+  {
+    char b[96];
+    std::snprintf(b, sizeof(b), "%d placed     F4 exit     right-drag to fly", editor.object_count);
+    ugui::SetText(ui.FindWidget("ed_status_right"), b);
+  }
+}
+
+bool GameUi::Impl::RouteEditorClick(ugui::wid target) {
+  if (!editor_sink || !editor.active) return false;
+  // Climb from the clicked widget to the nearest editor-handled name; clicking
+  // a row's text resolves to its parent row, a button's glyph to the button.
+  ugui::wid w = target;
+  for (int depth = 0; depth < 6 && w.valid(); ++depth) {
+    const ugui::WidgetNode* n = ui.world().Get<ugui::WidgetNode>(w);
+    if (n) {
+      const std::string name = n->name.c_str();
+      auto suffix_index = [&](const char* prefix) -> int {
+        const size_t pl = std::strlen(prefix);
+        if (name.size() > pl && name.compare(0, pl, prefix) == 0)
+          return std::atoi(name.c_str() + pl);
+        return -1;
+      };
+      EditorUiEvent e;
+      if (int i = suffix_index("btn_tool"); i >= 0) {
+        e.kind = EditorUiEvent::Kind::kTool;
+        e.index = i;
+        editor_sink(e);
+        return true;
+      }
+      if (int i = suffix_index("btn_cat"); i >= 0) {
+        e.kind = EditorUiEvent::Kind::kCategory;
+        e.index = i;
+        editor_sink(e);
+        return true;
+      }
+      if (name.rfind("ed_row", 0) == 0) {
+        // ed_row3 or ed_row3_name/_sub all map to row 3.
+        e.kind = EditorUiEvent::Kind::kPickRow;
+        e.index = std::atoi(name.c_str() + 6);
+        editor_sink(e);
+        return true;
+      }
+      if (name == "ed_search" || name == "ed_search_text") {
+        e.kind = EditorUiEvent::Kind::kTool;
+        e.index = 8;  // kToolFocusSearch
+        editor_sink(e);
+        return true;
+      }
+      if (name == "ed_search_clear") {
+        e.kind = EditorUiEvent::Kind::kTool;
+        e.index = 9;  // kToolClearSearch
+        editor_sink(e);
+        return true;
+      }
+      if (name == "btn_scroll_up") {
+        e.kind = EditorUiEvent::Kind::kScroll;
+        e.index = -1;
+        editor_sink(e);
+        return true;
+      }
+      if (name == "btn_scroll_down") {
+        e.kind = EditorUiEvent::Kind::kScroll;
+        e.index = 1;
+        editor_sink(e);
+        return true;
+      }
+    }
+    const ugui::Hierarchy* h = ui.world().Get<ugui::Hierarchy>(w);
+    w = h ? h->parent : ugui::wid{};
+  }
+  return false;
+}
 
 GameUi::GameUi() : impl_(std::make_unique<Impl>()) {}
 GameUi::~GameUi() { Shutdown(); }
@@ -504,6 +844,7 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
   Impl* impl = impl_.get();
   impl_->ui.input().set_on_click([impl](ugui::wid w, ugui::MouseButton btn) {
     if (btn != ugui::MouseButton::kLeft) return;
+    if (impl->RouteEditorClick(w)) return;  // editor overlay owns this click
     ugui::WidgetNode* n = impl->ui.world().Get<ugui::WidgetNode>(w);
     if (!n) return;
     if (n->name == "btn_resume") {
@@ -520,6 +861,17 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
       impl->quit_requested = true;
     }
   });
+
+  // Editor overlay starts collapsed; the engine reveals it on F4. The category
+  // strip wraps to a tag cloud, which the markup grammar cannot express.
+  impl_->SetVisible("editor_root", false);
+  if (ugui::wid cats = impl_->ui.FindWidget("ed_cats"); cats.valid()) {
+    if (ugui::StyleC* sc = impl_->ui.world().Get<ugui::StyleC>(cats)) {
+      ugui::Style style = sc->style;
+      style.flex_wrap = ugui::FlexWrap::kWrap;
+      ugui::SetStyle(impl_->ui.world(), cats, style);
+    }
+  }
 
   // Debug aid: RECREATION_UI_MENU opens the pause menu at startup.
   if (std::getenv("RECREATION_UI_MENU")) impl_->menu_open = true;
@@ -560,6 +912,14 @@ void GameUi::SetActivatePrompt(const std::string& prompt) {
   if (impl_->initialized) impl_->activate_prompt = prompt;
 }
 
+void GameUi::SetHudVisible(bool visible) {
+  if (!impl_->initialized) return;
+  impl_->SetVisible("topbar", visible);     // compass
+  impl_->SetVisible("crosshair", visible);
+  impl_->SetVisible("vitals", visible);     // health / magicka / stamina bars
+  impl_->SetVisible("readout", visible);    // fps / coords / heading
+}
+
 void GameUi::SetObjectiveMarker(bool active, float bearing_deg, float distance_m) {
   if (!impl_->initialized) return;
   impl_->marker_active = active;
@@ -580,6 +940,14 @@ void GameUi::SetJournal(bool open, const std::vector<HudQuest>& quests, int sele
   impl_->journal_open = open;
   impl_->journal = quests;
   impl_->journal_selected = selected;
+}
+
+void GameUi::SetEditorView(const EditorView& view) {
+  if (impl_->initialized) impl_->editor = view;
+}
+
+void GameUi::SetEditorEventSink(std::function<void(const EditorUiEvent&)> sink) {
+  if (impl_->initialized) impl_->editor_sink = std::move(sink);
 }
 
 void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 frame_delta,
@@ -752,6 +1120,9 @@ void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 fra
     }
   }
 
+  // Map editor overlay (asset browser, toolbar, inspector, status, reticle).
+  impl->ApplyEditorView();
+
   // Produce the draw list (input routing + layout + paint, no GPU work).
   const ugui::DrawData& dd = impl->ui.RenderDrawData();
   impl->draw_data = &dd;
@@ -785,10 +1156,13 @@ void GameUi::Build(Window&, render::Renderer&, FlyCamera&, f32, render::FrameVie
 void GameUi::SetQuest(const HudQuest&) {}
 void GameUi::FlashQuestUpdate(const std::string&) {}
 void GameUi::SetActivatePrompt(const std::string&) {}
+void GameUi::SetHudVisible(bool) {}
 void GameUi::SetObjectiveMarker(bool, float, float) {}
 void GameUi::SetDialogue(const DialogueView&) {}
 void GameUi::SetContainer(const ContainerView&) {}
 void GameUi::SetJournal(bool, const std::vector<HudQuest>&, int) {}
+void GameUi::SetEditorView(const EditorView&) {}
+void GameUi::SetEditorEventSink(std::function<void(const EditorUiEvent&)>) {}
 void GameUi::ToggleMenu() {}
 bool GameUi::menu_open() const { return false; }
 bool GameUi::quit_requested() const { return false; }

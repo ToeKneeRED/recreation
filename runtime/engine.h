@@ -22,10 +22,12 @@
 #include "actor_system.h"
 #include "content_domain.h"
 #include "demo_scenes.h"
+#include "editor.h"
 #include "engine_context.h"
 #include "interaction_system.h"
 #include "npc_director.h"
 #include "quest_director.h"
+#include "showcase_camera.h"
 
 namespace rec {
 
@@ -158,6 +160,9 @@ class Engine {
   // frame, REC_REPLAY=<path> drives the camera from a recorded path.
   void DriveCamera(f32 dt);
   void LookCameraAt(const Vec3& eye, const Vec3& center);
+  // Builds the cinematic showcase path (REC_SHOWCASE): a smooth drone pass over
+  // each loaded worldspace in turn, from the region centers gathered at load.
+  void BuildShowcase();
   // Walk mode step: input -> character move (via the actor system) -> follow
   // camera. The player capsule lives in the actor system; this computes intent.
   void WalkUpdate(f32 dt, bool allow_input);
@@ -229,6 +234,25 @@ class Engine {
   std::FILE* cam_record_ = nullptr;
   base::Vector<CamKey> cam_replay_;
 
+  // Cinematic showcase (REC_SHOWCASE): a smooth drone flythrough over every
+  // loaded worldspace in one take, doubling as a deterministic benchmark and a
+  // source of regression frames (REC_SHOWCASE_SHOTS=<dir>). The region centers
+  // are gathered at ground level as each worldspace is placed.
+  struct ShowcaseRegion {
+    Vec3 center{};     // ground-level center of the worldspace to fly over
+    std::string name;  // game/profile name, used in capture filenames
+  };
+  base::Vector<ShowcaseRegion> showcase_regions_;
+  ShowcaseCamera showcase_;
+  bool cam_showcase_ = false;
+  bool showcase_done_ = false;
+  bool showcase_quit_ = false;  // REC_SHOWCASE_QUIT: exit when the pass ends
+  std::string showcase_shot_dir_;
+  f32 showcase_dt_min_ = 1e9f;
+  f32 showcase_dt_max_ = 0;
+  f32 showcase_bench_time_ = 0;  // summed dt of benchmarked frames (excludes load hitches)
+  u32 showcase_frames_ = 0;
+
   DebugUi debug_ui_;
   GameUi game_ui_;
   // Debug.Notification messages awaiting display, pushed from the guest thread and
@@ -258,6 +282,8 @@ class Engine {
   std::unique_ptr<NpcDirector> npc_;
   std::unique_ptr<QuestDirector> quest_;
   std::unique_ptr<DemoScenes> demos_;
+  // Live map editor (windowed client only); F4 toggles it. Null in headless.
+  std::unique_ptr<MapEditor> editor_;
 
   std::atomic<bool> quit_ = false;
   bool shut_down_ = false;

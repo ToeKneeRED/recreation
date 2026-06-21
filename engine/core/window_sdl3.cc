@@ -20,6 +20,12 @@ Key TranslateKey(SDL_Scancode code) {
     case SDL_SCANCODE_F: return Key::kF;
     case SDL_SCANCODE_T: return Key::kT;
     case SDL_SCANCODE_C: return Key::kC;
+    case SDL_SCANCODE_R: return Key::kR;
+    case SDL_SCANCODE_G: return Key::kG;
+    case SDL_SCANCODE_X: return Key::kX;
+    case SDL_SCANCODE_Z: return Key::kZ;
+    case SDL_SCANCODE_B: return Key::kB;
+    case SDL_SCANCODE_V: return Key::kV;
     case SDL_SCANCODE_SPACE: return Key::kSpace;
     case SDL_SCANCODE_LSHIFT: return Key::kLeftShift;
     case SDL_SCANCODE_LCTRL: return Key::kLeftCtrl;
@@ -27,6 +33,12 @@ Key TranslateKey(SDL_Scancode code) {
     case SDL_SCANCODE_F1: return Key::kF1;
     case SDL_SCANCODE_F2: return Key::kF2;
     case SDL_SCANCODE_F3: return Key::kF3;
+    case SDL_SCANCODE_F4: return Key::kF4;
+    case SDL_SCANCODE_F5: return Key::kF5;
+    case SDL_SCANCODE_DELETE: return Key::kDelete;
+    case SDL_SCANCODE_BACKSPACE: return Key::kBackspace;
+    case SDL_SCANCODE_RETURN: return Key::kReturn;
+    case SDL_SCANCODE_KP_ENTER: return Key::kReturn;
     case SDL_SCANCODE_1: return Key::k1;
     case SDL_SCANCODE_2: return Key::k2;
     case SDL_SCANCODE_3: return Key::k3;
@@ -58,6 +70,8 @@ class Sdl3Window final : public Window {
     input_.mouse_dx = 0;
     input_.mouse_dy = 0;
     input_.wheel = 0;
+    input_.text_len = 0;
+    input_.text[0] = '\0';
     std::memset(input_.pressed, 0, sizeof(input_.pressed));
 
     SDL_Event event;
@@ -95,6 +109,15 @@ class Sdl3Window final : public Window {
         case SDL_EVENT_MOUSE_WHEEL:
           input_.wheel += event.wheel.y;
           break;
+        case SDL_EVENT_TEXT_INPUT: {
+          // Append the UTF-8 text to this pump's buffer (truncated to capacity).
+          const char* t = event.text.text;
+          while (*t && input_.text_len < sizeof(input_.text) - 1) {
+            input_.text[input_.text_len++] = *t++;
+          }
+          input_.text[input_.text_len] = '\0';
+          break;
+        }
         default:
           break;
       }
@@ -160,6 +183,9 @@ std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc) {
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return nullptr;
   }
+  // Receive SDL_EVENT_TEXT_INPUT so editor text fields get typed characters.
+  // Key events still arrive; this only adds the translated text stream.
+  SDL_StartTextInput(window);
   return std::make_unique<Sdl3Window>(window);
 }
 

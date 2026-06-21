@@ -69,6 +69,9 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
   demos_ = std::make_unique<DemoScenes>(ctx_, actors_.get());
   npc_->set_siblings(interaction_.get(), quest_.get());
   quest_->set_siblings(npc_.get(), interaction_.get());
+  // The live map editor (windowed client only). Constructed after game_ui_ is up
+  // so it can register its overlay event sink; ticked from UpdateCamera.
+  if (!config_.headless) editor_ = std::make_unique<MapEditor>(ctx_);
 
   if (physics_.Initialize()) {
     // A small wooden cube every scene can throw around (F key).
@@ -779,6 +782,7 @@ bool Engine::LoadGameData() {
   REC_INFO("camera start: cell {},{} at ({:.1f}, {:.1f}, {:.1f})", config_.start_cell_x,
            config_.start_cell_y, start.x, start.y, start.z);
   actors_->MaybeSpawnWorldPlayer({start.x, ground, start.z});  // on the terrain, not 10m up
+  showcase_regions_.push_back({{start.x, ground, start.z}, std::string(profile.name)});
   SetupExtraStreamers();
   return true;
 }
@@ -860,6 +864,9 @@ void Engine::SetupExtraStreamers() {
     }
     REC_INFO("secondary worldspace rendering: {} cell {},{} placed at ({:.0f}, {:.0f}, {:.0f})",
              domain.profile().name, region_x, region_y, place.x, place.y, place.z);
+    // The showcase flies over each rendered region; its ground baseline sits the
+    // same 10m below the placed camera-height anchor as the primary's does.
+    showcase_regions_.push_back({{place.x, place.y - 10.0f, place.z}, std::string(domain.profile().name)});
     extra_streamers_.push_back(std::move(streamer));
   }
 }
@@ -967,15 +974,27 @@ void Engine::UpdateCamera(f32 frame_delta) {
   // Modal overlays that consume Esc; captured before the branches below so the
   // Esc that closes one does not also open the pause menu this frame.
   bool modal = interaction_->dialogue_open() || interaction_->container_open();
+  // The map editor takes over navigation and input while on; its own Esc cancels
+  // (clear brush / cancel move), so the pause menu yields to it.
+  const bool editor_on = editor_ && editor_->active();
 
-  if (input.key_pressed(Key::kT) && !menu && !kb && !modal && actors_->HasPlayer()) {
+  if (input.key_pressed(Key::kT) && !menu && !kb && !modal && !editor_on && actors_->HasPlayer()) {
     ctx_.walk_mode = !ctx_.walk_mode;
     REC_INFO("walk mode {}", ctx_.walk_mode ? "on (WASD move, Shift run, Space jump, C view)" : "off");
   }
-  if (input.key_pressed(Key::kC) && !menu && !kb && !modal) ctx_.third_person = !ctx_.third_person;
-  if (input.key_pressed(Key::kJ) && !menu && !kb && !modal) quest_->ToggleJournal();
+  if (input.key_pressed(Key::kC) && !menu && !kb && !modal && !editor_on)
+    ctx_.third_person = !ctx_.third_person;
+  if (input.key_pressed(Key::kJ) && !menu && !kb && !modal && !editor_on) quest_->ToggleJournal();
 
-  if (interaction_->container_open()) {
+  if (editor_on) {
+    // Free-fly builder camera: right mouse looks, WASD/QE move (unless the search
+    // box has the keyboard). The editor handles picking, placing and editing.
+    const bool allow = !menu && !kb;
+    const bool typing = editor_->wants_keyboard();
+    camera_.Update(input, allow, allow && !typing, frame_delta);
+    window_->SetRelativeMouseMode(!menu && camera_.looking());
+    editor_->Update(input, frame_delta, allow);
+  } else if (interaction_->container_open()) {
     interaction_->UpdateContainerInput(input);  // Esc closes the loot view
     interaction_->UpdateInteraction(false);     // freeze movement/activation while looting
   } else if (interaction_->dialogue_open()) {
@@ -1005,8 +1024,10 @@ void Engine::UpdateCamera(f32 frame_delta) {
   if (input.key_pressed(Key::kF1) && !kb) debug_ui_.ToggleVisible();
   if (input.key_pressed(Key::kF2) && !kb) debug_ui_.ToggleTrace();
   if (input.key_pressed(Key::kF3) && !kb) debug_ui_.ToggleQuests();
-  if (input.key_pressed(Key::kF) && !menu && !kb && !ctx_.walk_mode) ThrowPhysicsCube();
-  if (input.key_pressed(Key::kEscape) && !kb && !modal) game_ui_.ToggleMenu();
+  if (input.key_pressed(Key::kF4) && !kb && editor_) editor_->Toggle();
+  if (input.key_pressed(Key::kF) && !menu && !kb && !ctx_.walk_mode && !editor_on) ThrowPhysicsCube();
+  // The editor owns Esc (cancel brush / move); only open the pause menu outside it.
+  if (input.key_pressed(Key::kEscape) && !kb && !modal && !editor_on) game_ui_.ToggleMenu();
   if (game_ui_.quit_requested()) RequestQuit();
 }
 
@@ -1031,6 +1052,9 @@ void Engine::DriveCamera(f32 dt) {
       }
     }
     cam_orbit_ = std::getenv("REC_ORBIT") != nullptr;
+    // REC_EDITOR boots straight into the map editor (the catalog is ready once
+    // the records are loaded), so a capture or a builder session can skip F4.
+    if (std::getenv("REC_EDITOR") && editor_ && !editor_->active()) editor_->Toggle();
     if (const char* r = std::getenv("REC_RECORD")) cam_record_ = std::fopen(r, "wb");
     if (const char* p = std::getenv("REC_REPLAY")) {
       if (std::FILE* f = std::fopen(p, "rb")) {
@@ -1042,10 +1066,67 @@ void Engine::DriveCamera(f32 dt) {
         REC_INFO("camera replay: {} keys from {}", cam_replay_.size(), p);
       }
     }
+    // REC_SHOWCASE flies a smooth cinematic pass over every loaded worldspace in
+    // one take. REC_SHOWCASE_SHOTS=<dir> writes a regression PNG at each marked
+    // beat; REC_SHOWCASE_QUIT exits when the pass ends (headless benchmark).
+    if (std::getenv("REC_SHOWCASE")) {
+      BuildShowcase();
+      cam_showcase_ = !showcase_.empty();
+      if (const char* d = std::getenv("REC_SHOWCASE_SHOTS")) showcase_shot_dir_ = d;
+      showcase_quit_ = std::getenv("REC_SHOWCASE_QUIT") != nullptr;
+      if (cam_showcase_) {
+        ctx_.walk_mode = false;        // the cinematic owns the camera
+        game_ui_.SetHudVisible(false);  // clean frames: no crosshair / compass / bars
+        REC_INFO("showcase: {} waypoints over {} region(s), {:.1f}s{}", showcase_.size(),
+                 showcase_regions_.size(), showcase_.duration(),
+                 showcase_shot_dir_.empty() ? "" : " (capturing)");
+      } else {
+        REC_WARN("REC_SHOWCASE set but no worldspaces to fly over");
+      }
+    }
   }
   cam_time_ += dt;
 
-  if (cam_orbit_) {
+  if (cam_showcase_) {
+    f32 prev = cam_time_ - dt;
+    ShowcasePose p = showcase_.Sample(cam_time_);
+    LookCameraAt(p.eye, p.target);
+    if (!showcase_shot_dir_.empty()) {
+      std::string label;
+      int idx = showcase_.CaptureCrossed(prev, cam_time_, &label);
+      if (idx >= 0) {
+        for (char& ch : label) {
+          bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9');
+          if (!ok) ch = '_';
+        }
+        char path[1024];
+        std::snprintf(path, sizeof(path), "%s/%02d_%s.png", showcase_shot_dir_.c_str(), idx,
+                      label.c_str());
+        renderer_.CaptureScreenshot(path);
+        REC_INFO("showcase capture: {}", path);
+      }
+    }
+    if (!showcase_done_) {
+      // Benchmark steady-state render: skip the first second of warmup and any
+      // half-second-plus frame (cold streaming/IO hitches, not GPU time). Real
+      // mid-flight stutter (down to ~2 fps) is still counted, so it shows up.
+      if (dt > 0 && dt < 0.5f && cam_time_ >= 1.0f) {
+        showcase_dt_min_ = std::min(showcase_dt_min_, dt);
+        showcase_dt_max_ = std::max(showcase_dt_max_, dt);
+        showcase_bench_time_ += dt;
+        ++showcase_frames_;
+      }
+      if (cam_time_ >= showcase_.duration()) {
+        showcase_done_ = true;
+        f32 avg = showcase_frames_ > 0 ? showcase_bench_time_ / static_cast<f32>(showcase_frames_) : 0.0f;
+        REC_INFO("showcase done: {} frames over {:.1f}s, avg {:.0f} fps (min {:.0f}, max {:.0f})",
+                 showcase_frames_, showcase_bench_time_, avg > 0 ? 1.0f / avg : 0.0f,
+                 showcase_dt_max_ > 0 ? 1.0f / showcase_dt_max_ : 0.0f,
+                 showcase_dt_min_ > 0 ? 1.0f / showcase_dt_min_ : 0.0f);
+        if (showcase_quit_) RequestQuit();
+      }
+    }
+  } else if (cam_orbit_) {
     f32 a = cam_time_ * 0.4f;  // radians/sec
     Vec3 center{0.0f, 1.0f, 0.0f};
     LookCameraAt({center.x + std::cos(a) * 6.0f, 2.4f, center.z + std::sin(a) * 6.0f}, center);
@@ -1071,6 +1152,46 @@ void Engine::DriveCamera(f32 dt) {
     f32 rec[7] = {cam_time_, p.x, p.y, p.z, t.x, t.y, t.z};
     std::fwrite(rec, sizeof(f32), 7, cam_record_);
     std::fflush(cam_record_);  // survive a timeout kill
+  }
+}
+
+void Engine::BuildShowcase() {
+  // Per-worldspace drone beats, as offsets in metres from the region centre C
+  // (ground level). Regions are placed along +X (east), so each pass enters from
+  // the west and exits east, which keeps the glide between worldspaces short.
+  auto wp = [](Vec3 eye, Vec3 look, f32 travel, bool capture, std::string label) {
+    return ShowcaseCamera::Waypoint{eye, look, travel, capture, std::move(label)};
+  };
+  // Lead-in: hold on the opening vantage so the primary world (which streams
+  // around the camera) has time to populate before the move and the first
+  // capture. Secondary worldspaces stream around their own fixed anchor, so they
+  // are already loaded by the time the camera reaches them.
+  if (!showcase_regions_.empty()) {
+    const Vec3 c0 = showcase_regions_[0].center;
+    showcase_.Add(wp(c0 + Vec3{-180, 110, 80}, c0 + Vec3{-20, 25, 0}, 0.0f, false, {}));
+  }
+  // Every waypoint sits at ~zero velocity (smoothstep), so each is a clean,
+  // well-framed still: capture them all for broad regression coverage and so a
+  // good YouTube frame can be picked from the set. Files sort by play order.
+  for (size_t k = 0; k < showcase_regions_.size(); ++k) {
+    const Vec3 c = showcase_regions_[k].center;
+    const std::string& n = showcase_regions_[k].name;
+    if (k > 0) {
+      // High traveling glide over the seam: both worldspaces are in frame here,
+      // which makes it both a strong showcase beat and a regression mark.
+      Vec3 mid = (showcase_regions_[k - 1].center + c) * 0.5f;
+      showcase_.Add(wp(mid + Vec3{0, 170, 70}, mid + Vec3{70, 0, -20}, 9.0f, true, "seam"));
+    }
+    // Establishing: high to the west, looking down into the region. For region 0
+    // this is the same pose as the lead-in, so the camera holds there first.
+    showcase_.Add(
+        wp(c + Vec3{-180, 110, 80}, c + Vec3{-20, 25, 0}, k == 0 ? 5.0f : 7.0f, true, n + "_wide"));
+    // Descending push-in toward the centre.
+    showcase_.Add(wp(c + Vec3{-70, 38, -30}, c + Vec3{40, 15, -60}, 5.0f, true, n + "_descend"));
+    // Low skim across the centre.
+    showcase_.Add(wp(c + Vec3{-10, 22, 25}, c + Vec3{110, 10, -10}, 7.0f, true, n + "_skim"));
+    // Crane up and east, revealing the vista and setting up the exit.
+    showcase_.Add(wp(c + Vec3{120, 92, 70}, c + Vec3{30, 15, 0}, 5.0f, true, n + "_reveal"));
   }
 }
 

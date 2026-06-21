@@ -800,6 +800,32 @@ bool CellStreamer::EnsureUploaded(const asset::Mesh& mesh) {
   return true;
 }
 
+ecs::Entity CellStreamer::PlaceObject(ecs::World& world, bethesda::GlobalFormId base_id,
+                                      const Vec3& position, const f32 rotation[4], f32 scale,
+                                      asset::AssetId* out_mesh) {
+  // The editor placed this deliberately, so convert/upload synchronously rather
+  // than honoring the streaming budget. MeshForBase caches the result.
+  u32 budget = 256;
+  bool budget_exceeded = false;
+  const asset::Mesh* mesh = MeshForBase(base_id, budget, budget_exceeded);
+  if (!mesh || !EnsureUploaded(*mesh)) return ecs::kInvalidEntity;
+
+  ecs::Entity entity = world.Create();
+  Transform transform;
+  transform.position[0] = position.x;
+  transform.position[1] = position.y;
+  transform.position[2] = position.z;
+  for (int i = 0; i < 4; ++i) transform.rotation[i] = rotation[i];
+  // Meshes live in Bethesda object space (1 unit = 1.428 cm); the entity carries
+  // the unit->metre scale, so the editor's `scale` is a clean native multiplier.
+  transform.scale = scale * kUnitsToMeters;
+  world.Add(entity, transform);
+  const asset::AssetId render_id = RenderMeshId(mesh->id);
+  world.Add(entity, Renderable{render_id});
+  if (out_mesh) *out_mesh = render_id;
+  return entity;
+}
+
 bool CellStreamer::GroundHeight(f32 engine_x, f32 engine_z, f32* engine_y) const {
   if (!grid_) return false;
   f32 beth_x = engine_x / kUnitsToMeters;

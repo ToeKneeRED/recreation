@@ -10,6 +10,9 @@ set(RECREATION_RUNTIME_SOURCES
   npc_director.cc
   quest_director.cc
   fly_camera.cc
+  showcase_camera.cc
+  editor.cc
+  editor_catalog.cc
   debug_ui.cc
   game_ui.cc
 )

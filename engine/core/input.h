@@ -17,6 +17,12 @@ enum class Key : u8 {
   kF,
   kT,
   kC,
+  kR,  // editor: rotate the selection
+  kG,  // editor: grab / move the selection
+  kX,  // editor: delete the selection
+  kZ,  // editor: undo (with Ctrl)
+  kB,  // editor: toggle the asset browser
+  kV,  // editor: duplicate the selection (with Ctrl)
   kSpace,
   kLeftShift,
   kLeftCtrl,
@@ -24,6 +30,11 @@ enum class Key : u8 {
   kF1,
   kF2,
   kF3,
+  kF4,  // toggle the map editor
+  kF5,  // editor: save the layout
+  kDelete,     // editor: delete the selection
+  kBackspace,  // text fields: erase
+  kReturn,     // text fields: commit
   k1,  // dialogue option select; also journal pick when the journal is open
   k2,
   k3,
@@ -47,6 +58,11 @@ struct InputState {
   f32 mouse_x = 0;
   f32 mouse_y = 0;
   f32 wheel = 0;
+  // UTF-8 text typed this pump (resets each PumpEvents, like the deltas). Filled
+  // from the platform's text-input events so editor text fields (the asset
+  // search box) can read characters without the engine binding every key.
+  char text[32] = {};
+  u8 text_len = 0;
 
   bool key(Key k) const { return keys[static_cast<u8>(k)]; }
   bool key_pressed(Key k) const { return pressed[static_cast<u8>(k)]; }

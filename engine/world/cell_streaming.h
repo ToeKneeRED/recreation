@@ -115,6 +115,17 @@ class CellStreamer {
   void EnterExterior(ecs::World& world);
   bool in_interior() const { return interior_active_; }
 
+  // Editor placement: converts a base form's world model, uploads it to the
+  // shared renderer (salted for this domain), and spawns a standalone
+  // renderable entity at an engine-space transform. Unlike a streamed ref the
+  // entity belongs to no cell, so it persists until the caller destroys it;
+  // `scale` is a user multiplier (1.0 = the model's native size). Returns
+  // kInvalidEntity when the base resolves to no usable model. `out_mesh`, when
+  // given, receives the renderer mesh id used. The runtime map editor drops
+  // assets onto the world through this.
+  ecs::Entity PlaceObject(ecs::World& world, bethesda::GlobalFormId base_id, const Vec3& position,
+                          const f32 rotation[4], f32 scale, asset::AssetId* out_mesh = nullptr);
+
   // Terrain height (engine units) at an engine space x/z from LAND data.
   bool GroundHeight(f32 engine_x, f32 engine_z, f32* engine_y) const;
 
