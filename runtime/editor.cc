@@ -64,6 +64,7 @@ void MapEditor::Toggle() {
     selection_ = ecs::kInvalidEntity;
     moving_ = false;
     brush_ = -1;
+    ClearGhost();
   }
   REC_INFO("map editor {}", active_ ? "on" : "off");
   // Push one view so the overlay shows/hides immediately.
@@ -115,6 +116,7 @@ void MapEditor::Update(const InputState& input, f32 dt, bool allow_input) {
         SelectUnderCursor(input);
     }
     ApplyKeyboard(input);
+    UpdateGhost(input);
     prev_lmb_ = lmb;
   }
 
@@ -284,6 +286,43 @@ void MapEditor::PlaceDemoBuild() {
   REC_INFO("editor: demo build placed {} objects", placed);
   SetStatus("Demo build: placed " + std::to_string(placed) + " objects");
   SaveLayout();
+}
+
+void MapEditor::UpdateGhost(const InputState& input) {
+  const bool want =
+      brush_ >= 0 && !moving_ && ctx_.streamer && !PointerOverUi(input) && !ctx_.camera->looking();
+  if (!want) {
+    ClearGhost();
+    return;
+  }
+  Vec3 aim;
+  if (!AimPoint(input, &aim)) {
+    ClearGhost();
+    return;
+  }
+  const Quat yq = QuatFromAxisAngle({0, 1, 0}, brush_yaw_);
+  if (ghost_entity_ == ecs::kInvalidEntity || ghost_brush_ != brush_ ||
+      !ctx_.world->IsAlive(ghost_entity_)) {
+    ClearGhost();
+    const f32 rot[4] = {yq.x, yq.y, yq.z, yq.w};
+    ghost_entity_ = ctx_.streamer->PlaceObject(*ctx_.world, catalog_[brush_].base, aim, rot, 1.0f);
+    ghost_brush_ = brush_;
+  } else if (world::Transform* t = ctx_.world->Get<world::Transform>(ghost_entity_)) {
+    t->position[0] = aim.x;
+    t->position[1] = aim.y;
+    t->position[2] = aim.z;
+    t->rotation[0] = yq.x;
+    t->rotation[1] = yq.y;
+    t->rotation[2] = yq.z;
+    t->rotation[3] = yq.w;
+  }
+}
+
+void MapEditor::ClearGhost() {
+  if (ghost_entity_ != ecs::kInvalidEntity && ctx_.world->IsAlive(ghost_entity_))
+    ctx_.world->Destroy(ghost_entity_);
+  ghost_entity_ = ecs::kInvalidEntity;
+  ghost_brush_ = -1;
 }
 
 void MapEditor::SelectUnderCursor(const InputState& input) {
@@ -499,6 +538,7 @@ ecs::Entity MapEditor::PickEntity(const InputState& input, f32* out_t) const {
   f32 best_t = 1e30f;
   ctx_.world->Each<world::Transform, world::Renderable>(
       [&](ecs::Entity entity, world::Transform& t, world::Renderable& r) {
+        if (entity == ghost_entity_) return;  // never select the live preview
         if (ctx_.world->Has<world::Hidden>(entity)) return;
         // World-space bounding sphere from the mesh bounds (object space, scaled).
         Vec3 center{t.position[0], t.position[1], t.position[2]};

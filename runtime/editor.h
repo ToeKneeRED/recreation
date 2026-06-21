@@ -106,6 +106,10 @@ class MapEditor {
   void ApplyKeyboard(const InputState& input);
   void ArmBrush(int catalog_index);
   void PlaceBrush(const InputState& input);
+  // A live preview of the armed asset following the aim point, so placing reads
+  // as dragging it onto the world. ClearGhost destroys it.
+  void UpdateGhost(const InputState& input);
+  void ClearGhost();
   // Drops a curated row of assets on the ground ahead of the camera and saves
   // the layout. Driven by REC_EDITOR_DEMO so a capture (or a save/load round
   // trip) needs no interactive clicks.
@@ -143,6 +147,11 @@ class MapEditor {
   bool search_focused_ = false;  // search box has keyboard focus
   bool snap_ = false;            // snap placements / moves to a ground grid
   f32 snap_grid_ = 1.0f;         // grid size in metres when snap_ is on
+
+  // Live placement preview ("ghost"): a transient entity, excluded from picking
+  // and never saved, that tracks the aim point while a brush is armed.
+  ecs::Entity ghost_entity_ = ecs::kInvalidEntity;
+  int ghost_brush_ = -1;  // catalog index the ghost currently shows
 
   // Selection + active tool.
   ecs::Entity selection_ = ecs::kInvalidEntity;
