@@ -268,12 +268,12 @@ std::string SingleMaterialPath(ByteSpan nif) {
   return found;
 }
 
-// Binds the base-color and normal textures a ".mat" implies by Starfield's path
-// mirror convention (Materials\X\Y.mat -> textures/X/Y_color.dds), but only when
-// the files actually exist, so a mesh is never bound a wrong texture. The
-// convention holds for landscape and natural materials; architecture and ships
-// route textures through the compiled material database and stay gray until that
-// reader lands.
+// Binds the base-color, normal and emissive textures a ".mat" implies by
+// Starfield's path mirror convention (Materials\X\Y.mat -> textures/X/Y_color.dds),
+// but only when the files actually exist, so a mesh is never bound a wrong
+// texture. The convention holds for landscape and natural materials; architecture
+// and ships route textures through the compiled material database and stay gray
+// until that reader lands.
 void BindConventionTextures(asset::AssetDatabase& database, const std::string& mat_path,
                             asset::Material* material) {
   size_t anchor = mat_path.find("materials/");
@@ -281,6 +281,7 @@ void BindConventionTextures(asset::AssetDatabase& database, const std::string& m
   std::string stem = mat_path.substr(anchor + 10, mat_path.size() - anchor - 10 - 4);  // drop ".mat"
   const std::string color = "textures/" + stem + "_color.dds";
   const std::string normal = "textures/" + stem + "_normal.dds";
+  const std::string emissive = "textures/" + stem + "_emissive.dds";
   if (database.vfs().Contains(color)) {
     material->base_color = asset::MakeAssetId(color);
     database.LoadTexture(color);
@@ -288,6 +289,13 @@ void BindConventionTextures(asset::AssetDatabase& database, const std::string& m
   if (database.vfs().Contains(normal)) {
     material->normal = asset::MakeAssetId(normal);
     database.LoadTexture(normal);
+  }
+  // Emissive is a single unambiguous channel, so it is safe to bind even when
+  // the rest of the material is unknown; lights, signs and screens then glow.
+  if (database.vfs().Contains(emissive)) {
+    material->emissive = asset::MakeAssetId(emissive);
+    for (int k = 0; k < 3; ++k) material->emissive_factor[k] = 1.0f;
+    database.LoadTexture(emissive);
   }
 }
 
