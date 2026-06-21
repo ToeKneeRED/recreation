@@ -418,14 +418,18 @@ void ActorSystem::LoadBuiltinActorTemplate(Actor* out) {
 
 bool ActorSystem::SpawnPlayerActor(const Vec3& pos) {
   Actor actor;
-  if (!LoadActorTemplate(&actor)) return false;
+  const bool starfield = ctx_.game == bethesda::Game::kStarfield;
+  if (!(starfield ? LoadStarfieldActorTemplate(&actor) : LoadActorTemplate(&actor))) return false;
 
   actor.entity = world_.Create();
   world_.Add(actor.entity, world::Transform{.position = {pos.x, pos.y, pos.z}});
   actor.animate = true;
   actor.speed = 0.0f;  // idle until walk input arrives
   actor.foot_ik = true;
-  actor.ankle_height = 6.0f;  // game units: the ankle sits ~6u above the sole
+  // Foot IK ankle height is measured in the skeleton's own units. Skyrim's
+  // skeleton is game units (~70/m), Starfield's is metres, so the same ~0.086m
+  // sole-to-ankle offset is 6 there but 0.086 here.
+  actor.ankle_height = starfield ? 0.086f : 6.0f;
 
   // Character capsule the walk mode drives. Capsule half-height+radius = 0.85,
   // so the entity origin (feet) rests at pos.y on the ground.
