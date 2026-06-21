@@ -310,7 +310,28 @@ std::string BuildEditorSection() {
       text ed_insp_scale { text: ""; font-size: 14; color: #d8def0; }
       panel ed_insp_rule2 { width: 260; height: 1; background: #ffffff18; margin: 10 0 8 0; }
       text { text: "G move   R rotate   wheel scale"; font-size: 12; color: #8a93a8; }
-      text { text: "X delete   Ctrl+D dupe   Ctrl+Z undo"; font-size: 12; color: #8a93a8; }
+      text { text: "X delete   Ctrl+V dupe   Ctrl+Z undo"; font-size: 12; color: #8a93a8; }
+    }
+
+    panel editor_help {
+      position: absolute; right: 0; top: 46; width: 300; bottom: 34;
+      layout: column; align: start; padding: 18 20; gap: 7;
+      background: #0b0e16f7; border-color: #ffffff12; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 34; shadow-x: -8;
+      text { text: "Controls"; font-size: 16; color: #ffcc55; letter-spacing: 3;
+        text-transform: uppercase; }
+      text { text: "Right-drag to fly,  WASD / Q E"; font-size: 13; color: #c7cfdf; margin: 6 0 0 0; }
+      panel { width: 260; height: 1; background: #ffffff18; margin: 4 0 4 0; }
+      text { text: "1. Click an asset on the left"; font-size: 13; color: #d8def0; }
+      text { text: "2. Aim at the ground"; font-size: 13; color: #d8def0; }
+      text { text: "3. Click to drop it"; font-size: 13; color: #d8def0; }
+      panel { width: 260; height: 1; background: #ffffff18; margin: 4 0 4 0; }
+      text { text: "Click a placed object to select"; font-size: 13; color: #c7cfdf; }
+      text { text: "R   rotate the brush / selection"; font-size: 12; color: #9aa2b6; }
+      text { text: "G   grab and move,  X delete"; font-size: 12; color: #9aa2b6; }
+      text { text: "wheel  scale,   Ctrl+V duplicate"; font-size: 12; color: #9aa2b6; }
+      text { text: "B   grid snap,   Ctrl+Z undo"; font-size: 12; color: #9aa2b6; }
+      text { text: "F5  save,   F4 exit editor"; font-size: 12; color: #9aa2b6; }
     }
 
     panel editor_status {
@@ -738,8 +759,10 @@ void GameUi::Impl::ApplyEditorView() {
         editor.sel_screen[1] - kHalf);
   }
 
-  // Inspector (only with a live selection).
+  // Inspector with a live selection, the controls card otherwise, so the right
+  // dock is always useful and the controls stay discoverable.
   SetVisible("editor_inspector", editor.has_selection);
+  SetVisible("editor_help", !editor.has_selection);
   if (editor.has_selection) {
     ugui::SetText(ui.FindWidget("ed_insp_title"), editor.sel_title.c_str());
     ugui::SetText(ui.FindWidget("ed_insp_sub"), editor.sel_subtitle.c_str());
