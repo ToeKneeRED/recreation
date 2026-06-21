@@ -564,6 +564,10 @@ papyrus::ObjectRef RecordBackedSkyrimBindings::SceneOwningQuest(papyrus::ObjectR
 
 void RecordBackedSkyrimBindings::RunSceneFragment(u64 scene, u64 owning_quest,
                                                   const std::string& function) {
+  // Server-authoritative: a multiplayer client mirrors quest progress via
+  // replication, so it must not run scene logic itself (the fragments touch more
+  // than SetStage -- ref enables, dialogue -- and only SetStage is replica-gated).
+  if (replica_mode_) return;
   if (!vm_ || function.empty()) return;
   // Scene fragments call SetStage, whose stage fragment can run more fragments;
   // share the stage-fragment depth guard so a cyclic chain cannot blow the stack.
