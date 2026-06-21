@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 
 #include "core/input.h"
@@ -53,6 +54,12 @@ void MapEditor::Toggle() {
     if (!catalog_built_) BuildCatalog();
     ctx_.walk_mode = false;  // editor flies; never walks
     SetStatus("Editor on. Pick an asset, aim, click to place. F4 exits.");
+    // Restore a previously saved building the first time the editor opens.
+    if (!layout_loaded_) {
+      layout_loaded_ = true;
+      LoadLayout();
+      if (std::getenv("REC_EDITOR_DEMO")) PlaceDemoBuild();
+    }
   } else {
     selection_ = ecs::kInvalidEntity;
     moving_ = false;
@@ -145,6 +152,10 @@ void MapEditor::ApplyKeyboard(const InputState& input) {
     Undo();
     return;
   }
+  if (input.key_pressed(Key::kF5)) {
+    SaveLayout();
+    return;
+  }
   if (selection_ != ecs::kInvalidEntity && !ctx_.world->IsAlive(selection_)) {
     selection_ = ecs::kInvalidEntity;  // it was unloaded/destroyed elsewhere
   }
@@ -202,6 +213,42 @@ void MapEditor::PlaceBrush(const InputState& input) {
   undo_.push_back({UndoKind::kPlace, entity, e.base, {}, e.name});
   selection_ = entity;
   SetStatus("Placed " + e.name);
+}
+
+void MapEditor::PlaceDemoBuild() {
+  if (!ctx_.streamer || !ctx_.world || catalog_.empty()) return;
+  // A row on the ground a few metres ahead of the camera, spread along its right
+  // axis. We step through the catalog so the row shows a variety of models, and
+  // skip any whose mesh fails to convert.
+  const Vec3 eye = ctx_.camera->position();
+  const Vec3 fwd = ctx_.camera->forward();
+  const Vec3 right = Normalize(Cross(fwd, {0, 1, 0}));
+  const Vec3 center = eye + Vec3{fwd.x, 0, fwd.z} * 9.0f;
+  int placed = 0;
+  const int kWant = 8;
+  for (size_t i = 0; i < catalog_.size() && placed < kWant; i += 53) {
+    const CatalogEntry& e = catalog_[i];
+    Vec3 pos = center + right * (static_cast<f32>(placed) - (kWant - 1) * 0.5f) * 3.0f;
+    f32 ground = 0;
+    if (ctx_.streamer->GroundHeight(pos.x, pos.z, &ground)) pos.y = ground;
+    ecs::Entity entity = ctx_.streamer->PlaceObject(*ctx_.world, e.base, pos, kIdentityRot, 1.0f);
+    if (entity == ecs::kInvalidEntity) continue;
+    placed_.push_back({entity, e.base, e.name});
+    undo_.push_back({UndoKind::kPlace, entity, e.base, {}, e.name});
+    ++placed;
+  }
+  // Frame the row for a clean capture: pull back and up, look at its centre.
+  Vec3 row_center = center;
+  f32 cg = 0;
+  if (ctx_.streamer->GroundHeight(row_center.x, row_center.z, &cg)) row_center.y = cg + 1.0f;
+  const Vec3 framed_eye = row_center + Vec3{fwd.x, 0, fwd.z} * -10.0f + Vec3{0, 6.0f, 0};
+  ctx_.camera->set_position(framed_eye);
+  const Vec3 d = Normalize(row_center - framed_eye);
+  ctx_.camera->set_yaw_pitch(std::atan2(d.x, -d.z), std::asin(std::clamp(d.y, -1.0f, 1.0f)));
+
+  REC_INFO("editor: demo build placed {} objects", placed);
+  SetStatus("Demo build: placed " + std::to_string(placed) + " objects");
+  SaveLayout();
 }
 
 void MapEditor::SelectUnderCursor(const InputState& input) {
@@ -502,7 +549,7 @@ void MapEditor::HandleUiEvent(const EditorUiEvent& e) {
           Undo();
           break;
         case kToolSave:
-          SetStatus("Save layout: coming soon");
+          SaveLayout();
           break;
         case kToolFocusSearch:
           search_focused_ = true;

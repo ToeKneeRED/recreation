@@ -93,11 +93,23 @@ class MapEditor {
   void BuildCatalog();
   void RefreshFilter();  // recompute filtered_ from search_ + category_
 
+  // --- persistence (editor_io.cc) ---
+  // The layout file is a tiny line-based record of placed objects (base form +
+  // engine-space transform), so a building survives a restart. SaveLayout writes
+  // placed_; LoadLayout re-places each line through the streamer. Both report a
+  // status message and return the count written/read.
+  int SaveLayout();
+  int LoadLayout();
+
   // --- input / ops (editor.cc) ---
   void UpdateSearchInput(const InputState& input);  // text entry while focused
   void ApplyKeyboard(const InputState& input);
   void ArmBrush(int catalog_index);
   void PlaceBrush(const InputState& input);
+  // Drops a curated row of assets on the ground ahead of the camera and saves
+  // the layout. Driven by REC_EDITOR_DEMO so a capture (or a save/load round
+  // trip) needs no interactive clicks.
+  void PlaceDemoBuild();
   void SelectUnderCursor(const InputState& input);
   void DeleteSelection();
   void DuplicateSelection();
@@ -141,6 +153,9 @@ class MapEditor {
   std::string status_;
   f32 status_age_ = 0;
   u32 next_synth_id_ = 1;  // local id for placed objects' synthetic form links
+
+  std::string layout_path_;     // where SaveLayout/LoadLayout read and write
+  bool layout_loaded_ = false;  // auto-load the saved layout once, on first entry
 };
 
 }  // namespace rec

@@ -13,6 +13,7 @@ set(RECREATION_RUNTIME_SOURCES
   showcase_camera.cc
   editor.cc
   editor_catalog.cc
+  editor_io.cc
   debug_ui.cc
   game_ui.cc
 )
