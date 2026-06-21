@@ -1,11 +1,11 @@
 #include <cstdlib>
 #include <fstream>
-#include <sstream>
 #include <string>
 
 #include "core/log.h"
 #include "ecs/world.h"
 #include "editor.h"
+#include "editor_layout.h"
 #include "engine_context.h"
 #include "world/cell_streaming.h"
 
@@ -37,10 +37,12 @@ int MapEditor::SaveLayout() {
     if (!ctx_.world->IsAlive(p.entity)) continue;
     const world::Transform* t = ctx_.world->Get<world::Transform>(p.entity);
     if (!t) continue;
-    const f32 user_scale = t->scale / kUnitsToMeters;
-    out << "place " << p.base.plugin << ' ' << p.base.local_id << ' ' << t->position[0] << ' '
-        << t->position[1] << ' ' << t->position[2] << ' ' << t->rotation[0] << ' ' << t->rotation[1]
-        << ' ' << t->rotation[2] << ' ' << t->rotation[3] << ' ' << user_scale << '\n';
+    editor::LayoutEntry e;
+    e.base = p.base;
+    for (int i = 0; i < 3; ++i) e.pos[i] = t->position[i];
+    for (int i = 0; i < 4; ++i) e.rot[i] = t->rotation[i];
+    e.scale = t->scale / kUnitsToMeters;  // native multiplier, not engine metres
+    out << editor::FormatPlaceLine(e) << '\n';
     ++n;
   }
   SetStatus("Saved " + std::to_string(n) + " objects to " + layout_path_);
@@ -56,28 +58,21 @@ int MapEditor::LoadLayout() {
 
   std::string line;
   int n = 0;
+  editor::LayoutEntry le;
   while (std::getline(in, line)) {
-    if (line.empty() || line[0] == '#') continue;
-    std::istringstream ss(line);
-    std::string tag;
-    ss >> tag;
-    if (tag != "place") continue;
-    unsigned plugin = 0, local = 0;
-    f32 px, py, pz, qx, qy, qz, qw, scale;
-    if (!(ss >> plugin >> local >> px >> py >> pz >> qx >> qy >> qz >> qw >> scale)) continue;
-    const bethesda::GlobalFormId base{static_cast<u16>(plugin), static_cast<u32>(local)};
-    const f32 rot[4] = {qx, qy, qz, qw};
-    ecs::Entity e = ctx_.streamer->PlaceObject(*ctx_.world, base, Vec3{px, py, pz}, rot, scale);
+    if (!editor::ParsePlaceLine(line, &le)) continue;
+    ecs::Entity e = ctx_.streamer->PlaceObject(
+        *ctx_.world, le.base, Vec3{le.pos[0], le.pos[1], le.pos[2]}, le.rot, le.scale);
     if (e == ecs::kInvalidEntity) continue;
     // Recover a display name from the catalog when it is built.
     std::string name = "object";
     for (const CatalogEntry& c : catalog_) {
-      if (c.base.plugin == base.plugin && c.base.local_id == base.local_id) {
+      if (c.base.plugin == le.base.plugin && c.base.local_id == le.base.local_id) {
         name = c.name;
         break;
       }
     }
-    placed_.push_back({e, base, std::move(name)});
+    placed_.push_back({e, le.base, std::move(name)});
     ++n;
   }
   if (n > 0) {

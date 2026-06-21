@@ -54,6 +54,13 @@ add_executable(ba2test ba2test.cc)
 target_link_libraries(ba2test PRIVATE recreation::bethesda recreation::asset)
 recreation_set_warnings(ba2test)
 
+# Map editor layout-file format (runtime/editor_layout.h is header-only, so the
+# test pulls it in directly off the runtime source dir).
+add_executable(editor_layouttest editor_layouttest.cc)
+target_link_libraries(editor_layouttest PRIVATE recreation::bethesda recreation::core)
+target_include_directories(editor_layouttest PRIVATE ${CMAKE_SOURCE_DIR}/runtime)
+recreation_set_warnings(editor_layouttest)
+
 add_executable(pexfo4test pexfo4test.cc)
 target_link_libraries(pexfo4test PRIVATE recreation::script)
 recreation_set_warnings(pexfo4test)
@@ -199,6 +206,7 @@ add_test(NAME quest_worldtest COMMAND quest_worldtest)
 add_test(NAME replicamodetest COMMAND replicamodetest)
 add_test(NAME navgridtest COMMAND navgridtest)
 add_test(NAME dialoguetest COMMAND dialoguetest)
+add_test(NAME editor_layouttest COMMAND editor_layouttest)
 if(RECREATION_NET)
   add_test(NAME quest_nettest COMMAND quest_nettest)
   add_test(NAME world_nettest COMMAND world_nettest)
