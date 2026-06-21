@@ -153,14 +153,26 @@ bool Engine::StartNetworking() {
     // clients are connected, so the guest round-trip costs nothing while idle.
     // Quest state lives on the guest thread, so we marshal the read onto it.
     if (scripts_ && script_bindings_) {
-      server_session_->SetQuestSource([this]() -> std::vector<quest::QuestStatus> {
-        if (!scripts_) return {};
-        auto* binds = script_bindings_.get();
-        return scripts_->guest()
-            .SubmitFor([binds](script::papyrus::VirtualMachine&) {
-              return binds->quest_system().AllStatuses();
-            })
-            .get();
+      server_session_->SetQuestSource([this]() -> std::vector<net::DomainQuestStatus> {
+        // Replicate every loaded game's journal, each tagged with its domain so
+        // the client routes it to the matching game.
+        std::vector<net::DomainQuestStatus> all;
+        auto collect = [&](u8 domain, rec::script::ScriptSystem* scripts,
+                           rec::script::skyrim::RecordBackedSkyrimBindings* binds) {
+          if (!scripts || !binds) return;
+          auto statuses = scripts->guest()
+                              .SubmitFor([binds](script::papyrus::VirtualMachine&) {
+                                return binds->quest_system().AllStatuses();
+                              })
+                              .get();
+          for (quest::QuestStatus& s : statuses) all.push_back({domain, std::move(s)});
+        };
+        collect(0, scripts_.get(), script_bindings_.get());
+        for (size_t i = 0; i < extra_domains_.size(); ++i) {
+          collect(static_cast<u8>(i + 1), extra_domains_[i]->scripts(),
+                  extra_domains_[i]->bindings());
+        }
+        return all;
       });
       // A client activating a reference runs OnActivate authoritatively here; the
       // resulting quest/world changes replicate back through the usual channels.
@@ -209,15 +221,25 @@ bool Engine::StartNetworking() {
     // Mirror the server's journal onto our quest system. ApplyStatus mutates
     // quest state, so it has to run on the guest thread like every other write.
     if (scripts_ && script_bindings_) {
-      client_session_->SetQuestSink([this](const quest::QuestStatus& status) {
-        if (!scripts_) return;
-        auto* binds = script_bindings_.get();
-        scripts_->guest().Submit([binds, status](script::papyrus::VirtualMachine&) {
+      client_session_->SetQuestSink([this](u8 domain, const quest::QuestStatus& status) {
+        // Route the replicated quest to the game it belongs to: 0 is the primary
+        // game, 1..N the secondary domains loaded in the same order as the host.
+        rec::script::ScriptSystem* scripts = nullptr;
+        rec::script::skyrim::RecordBackedSkyrimBindings* binds = nullptr;
+        if (domain == 0) {
+          scripts = scripts_.get();
+          binds = script_bindings_.get();
+        } else if (static_cast<size_t>(domain - 1) < extra_domains_.size()) {
+          scripts = extra_domains_[domain - 1]->scripts();
+          binds = extra_domains_[domain - 1]->bindings();
+        }
+        if (!scripts || !binds) return;
+        scripts->guest().Submit([binds, status](script::papyrus::VirtualMachine&) {
           binds->quest_system().ApplyStatus(status);
         });
         if (std::getenv("REC_NET_QUEST_LOG"))
-          REC_INFO("net: applied quest 0x{:x} stage {} complete {}", status.handle, status.stage,
-                   status.complete ? 1 : 0);
+          REC_INFO("net: applied domain {} quest 0x{:x} stage {} complete {}", domain,
+                   status.handle, status.stage, status.complete ? 1 : 0);
       });
       // Mirror the host's quest-driven world effects (spawns/moves/disables/
       // cleanup). Runs in the net sim stage on the main thread, which owns the

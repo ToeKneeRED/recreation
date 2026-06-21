@@ -53,9 +53,10 @@ class ServerSession final : public Session {
   bool Start();
   void Tick(ecs::World& world, f32 dt) override;
 
-  // Authoritative quest state to replicate. Set by the engine to e.g.
-  // [&qs] { return qs.AllStatuses(); }. When unset, no quest packets ship.
-  void SetQuestSource(std::function<std::vector<quest::QuestStatus>()> source) {
+  // Authoritative quest state to replicate, across every loaded game. Set by the
+  // engine to collect each domain's QuestSystem::AllStatuses() tagged with its
+  // domain id. When unset, no quest packets ship.
+  void SetQuestSource(std::function<std::vector<DomainQuestStatus>()> source) {
     quest_source_ = std::move(source);
   }
 
@@ -119,7 +120,7 @@ class ServerSession final : public Session {
   Snapshot snapshot_;  // reused so the vectors keep their capacity
   base::UnorderedMap<u32, RemoteClient> clients_;
   base::Vector<u32> scratch_dropped_;
-  std::function<std::vector<quest::QuestStatus>()> quest_source_;
+  std::function<std::vector<DomainQuestStatus>()> quest_source_;
   std::function<void(const StageRequest&)> stage_request_sink_;
   std::function<void(u64)> activate_sink_;
   std::function<void(u64)> dialogue_sink_;
@@ -151,10 +152,10 @@ class ClientSession final : public Session {
   // result comes back through the normal quest replication.
   void SendStageRequest(const StageRequest& req);
 
-  // Sink invoked once per quest in every kQuestUpdate received. The engine
-  // wires this to QuestSystem::ApplyStatus so the client journal mirrors the
-  // server. When unset, quest updates are decoded and dropped.
-  void SetQuestSink(std::function<void(const quest::QuestStatus&)> sink) {
+  // Sink invoked once per quest in every kQuestUpdate received, with the quest's
+  // domain id. The engine routes it to that game's QuestSystem::ApplyStatus so
+  // each client journal mirrors the server. When unset, updates are dropped.
+  void SetQuestSink(std::function<void(u8 domain, const quest::QuestStatus&)> sink) {
     quest_sink_ = std::move(sink);
   }
 
@@ -189,7 +190,7 @@ class ClientSession final : public Session {
   SessionConfig config_;
   tx::network::ZClient client_;
   SnapshotApplier applier_;
-  std::function<void(const quest::QuestStatus&)> quest_sink_;
+  std::function<void(u8 domain, const quest::QuestStatus&)> quest_sink_;
   std::function<void(const ObjectiveMarkerState&)> objective_marker_sink_;
   std::function<void(const std::vector<world::WorldCommand>&)> world_command_sink_;
   std::function<void(const std::vector<ActorState>&)> actor_sink_;

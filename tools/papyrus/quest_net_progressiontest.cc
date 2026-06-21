@@ -23,6 +23,7 @@
 namespace {
 
 using rec::net::ApplyQuestUpdate;
+using rec::net::DomainQuestStatus;
 using rec::net::QuestReplicator;
 using rec::quest::ObjectiveDef;
 using rec::quest::ObjectiveStatus;
@@ -64,10 +65,13 @@ QuestDef MakeUnboundDef(QuestHandle handle) {
 // nothing was sent.
 size_t Replicate(QuestReplicator& rep, const QuestSystem& server,
                  QuestSystem& client) {
-  std::vector<rec::u8> blob = rep.Build(server.AllStatuses());
+  // This single-game harness replicates everything as the primary domain (0).
+  std::vector<DomainQuestStatus> snapshot;
+  for (QuestStatus& s : server.AllStatuses()) snapshot.push_back({0, std::move(s)});
+  std::vector<rec::u8> blob = rep.Build(snapshot);
   if (blob.empty()) return 0;
   size_t count = 0;
-  const bool ok = ApplyQuestUpdate(blob, [&](const QuestStatus& q) {
+  const bool ok = ApplyQuestUpdate(blob, [&](rec::u8 /*domain*/, const QuestStatus& q) {
     client.ApplyStatus(q);
     ++count;
   });

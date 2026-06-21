@@ -13,8 +13,9 @@
 
 namespace rec::net {
 
-// Bumped whenever nbuf/protocol.nb changes shape.
-inline constexpr u32 kProtocolVersion = 1;
+// Bumped whenever nbuf/protocol.nb or a hand-encoded payload changes shape.
+// v2 adds the per-quest domain tag (multi-game quest replication).
+inline constexpr u32 kProtocolVersion = 2;
 
 // Application packet ids. Zetanet owns everything below PacketType::Message
 // (100), recreation ids start at 101. Every payload is a nanobuf message
