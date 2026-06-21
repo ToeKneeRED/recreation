@@ -108,6 +108,16 @@ class MapEditor {
     int domain = 0;
   };
 
+  // One part of a reusable group ("prefab"): a placeable form plus its transform
+  // relative to the group anchor, so the whole group can be stamped as a unit.
+  struct PrefabMember {
+    bethesda::GlobalFormId base;
+    int domain = 0;
+    f32 rel[3] = {0, 0, 0};  // offset from the anchor at capture
+    f32 rot[4] = {0, 0, 0, 1};
+    f32 scale = 1.0f;  // native multiplier
+  };
+
   // The inverse of one edit, for the undo stack.
   enum class UndoKind { kPlace, kDelete, kTransform };
   struct UndoOp {
@@ -158,6 +168,10 @@ class MapEditor {
   void RotateSelection(f32 radians);
   void ScaleSelection(f32 factor);
   void BeginMove();  // snapshot the selection's transforms and start a grab
+  // Prefabs: capture the current multi-selection as a reusable group, then stamp
+  // copies of the whole group at the aim point (Ctrl+G groups, click stamps).
+  void SaveSelectionAsPrefab();
+  void StampPrefab(const Vec3& at);
   void Undo();
   void RecordTransform(ecs::Entity entity);  // push a kTransform undo snapshot
   void SetStatus(std::string message);
@@ -214,6 +228,10 @@ class MapEditor {
   // screen projection falls in the rect is selected.
   bool marquee_dragging_ = false;
   f32 marquee_x0_ = 0, marquee_y0_ = 0, marquee_x1_ = 0, marquee_y1_ = 0;
+
+  // Current prefab (a reusable group) and whether a click stamps it.
+  std::vector<PrefabMember> prefab_;
+  bool prefab_armed_ = false;
 
   // Paint-scatter: holding the place button and dragging drops a copy every
   // `scatter_spacing_` metres, each at a varied yaw, for fast forests / clutter.

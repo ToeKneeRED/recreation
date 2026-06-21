@@ -64,6 +64,7 @@ void MapEditor::Toggle() {
     selected_.clear();
     moving_ = false;
     brush_ = -1;
+    prefab_armed_ = false;
     ClearGhost();
   }
   REC_INFO("map editor {}", active_ ? "on" : "off");
@@ -130,6 +131,11 @@ void MapEditor::Update(const InputState& input, f32 dt, bool allow_input) {
         moving_ = false;
         SetStatus("Moved");
       }
+    } else if (prefab_armed_ && lmb && !prev_lmb_ && !PointerOverUi(input) &&
+               !ctx_.camera->looking()) {
+      // A click stamps the whole prefab at the aim point.
+      Vec3 aim;
+      if (AimPoint(input, &aim)) StampPrefab(aim);
     } else if (brush_ >= 0 && lmb && !PointerOverUi(input) && !ctx_.camera->looking()) {
       // With a brush armed: the first click drops one; holding and dragging
       // paint-scatters a copy every scatter_spacing_ metres (fast forests).
@@ -216,9 +222,14 @@ void MapEditor::ApplyKeyboard(const InputState& input) {
   }
   PruneDeadSelection();
 
-  if (input.key_pressed(Key::kEscape) && brush_ >= 0) {
-    brush_ = -1;
-    SetStatus("Brush cleared");
+  if (input.key_pressed(Key::kEscape)) {
+    if (brush_ >= 0) {
+      brush_ = -1;
+      SetStatus("Brush cleared");
+    } else if (prefab_armed_) {
+      prefab_armed_ = false;
+      SetStatus("Prefab cleared");
+    }
   }
 
   // While a brush is armed, R orients the next placement instead of an existing
@@ -238,7 +249,9 @@ void MapEditor::ApplyKeyboard(const InputState& input) {
   if (input.key_pressed(Key::kV) && ctrl) DuplicateSelection();
   if (input.key_pressed(Key::kX) || input.key_pressed(Key::kDelete)) DeleteSelection();
   if (input.key_pressed(Key::kG)) {
-    if (moving_)
+    if (ctrl)
+      SaveSelectionAsPrefab();  // Ctrl+G groups the selection into a prefab
+    else if (moving_)
       moving_ = false;  // toggle off; a click would also confirm
     else
       BeginMove();
@@ -541,6 +554,56 @@ void MapEditor::BeginMove() {
   if (const world::Transform* pt = ctx_.world->Get<world::Transform>(Primary()))
     move_pivot_ = Vec3{pt->position[0], pt->position[1], pt->position[2]};
   SetStatus("Move: aim and click to drop, Esc to cancel");
+}
+
+void MapEditor::SaveSelectionAsPrefab() {
+  PruneDeadSelection();
+  const world::Transform* anchor_t = ctx_.world->Get<world::Transform>(Primary());
+  if (!anchor_t) return;
+  const Vec3 anchor{anchor_t->position[0], anchor_t->position[1], anchor_t->position[2]};
+  prefab_.clear();
+  for (ecs::Entity e : selected_) {
+    const int pi = FindPlaced(e);  // only editor-owned objects can be grouped
+    const world::Transform* t = ctx_.world->Get<world::Transform>(e);
+    if (pi < 0 || !t) continue;
+    PrefabMember m;
+    m.base = placed_[pi].base;
+    m.domain = placed_[pi].domain;
+    m.rel[0] = t->position[0] - anchor.x;
+    m.rel[1] = t->position[1] - anchor.y;
+    m.rel[2] = t->position[2] - anchor.z;
+    for (int i = 0; i < 4; ++i) m.rot[i] = t->rotation[i];
+    m.scale = t->scale / kUnitsToMeters;  // strip the unit->metre factor
+    prefab_.push_back(m);
+  }
+  if (prefab_.empty()) {
+    SetStatus("Select placed objects to group");
+    return;
+  }
+  prefab_armed_ = true;
+  brush_ = -1;  // stamping a prefab replaces the single-asset brush
+  ClearGhost();
+  SetStatus("Prefab saved (" + std::to_string(prefab_.size()) +
+            " parts). Click to stamp, Esc to clear.");
+}
+
+void MapEditor::StampPrefab(const Vec3& at) {
+  if (prefab_.empty()) return;
+  std::vector<ecs::Entity> stamped;
+  for (const PrefabMember& m : prefab_) {
+    world::CellStreamer* streamer = StreamerFor(m.domain);
+    if (!streamer) continue;
+    const Vec3 pos{at.x + m.rel[0], at.y + m.rel[1], at.z + m.rel[2]};
+    ecs::Entity e = streamer->PlaceObject(*ctx_.world, m.base, pos, m.rot, m.scale);
+    if (e == ecs::kInvalidEntity) continue;
+    placed_.push_back({e, m.base, "prefab part", m.domain});
+    undo_.push_back({UndoKind::kPlace, e, m.base, {}, "prefab part", m.domain});
+    stamped.push_back(e);
+  }
+  if (!stamped.empty()) {
+    selected_ = std::move(stamped);  // select the new copies
+    SetStatus("Stamped prefab (" + std::to_string(selected_.size()) + " parts)");
+  }
 }
 
 void MapEditor::Undo() {
