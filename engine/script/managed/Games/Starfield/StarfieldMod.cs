@@ -56,5 +56,9 @@ public sealed class StarfieldMod : IMod
         });
         // Surfaces the systems above to the player as corner notifications.
         ModHost.Register(new StarfieldNotifications());
+
+        // A keypad panel to exercise the gameplay by hand; off unless asked for.
+        if (config.GetBool("debug", false))
+            ModHost.Register(new StarfieldGameplayDebug());
     }
 }
