@@ -1,9 +1,11 @@
 #include "bethesda/converters.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "bethesda/nif.h"
+#include "bethesda/starfield_mesh.h"
 #include "core/log.h"
 
 namespace rec::bethesda {
@@ -244,7 +246,92 @@ bool ParseBgsm(ByteSpan data, BgsmMaterial* out) {
   return !out->diffuse.empty();
 }
 
+namespace {
+
+// Starfield NIFs reference external ".mesh" geometry by hash rather than
+// inlining vertices, so its converter loads each referenced mesh from the vfs,
+// bakes the node transform into the vertices, and assigns one default material
+// (textures are out of scope for now). Returns null when nothing converts.
+base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& database, ByteSpan data,
+                                                     asset::AssetId id, std::string_view path) {
+  base::Vector<StarfieldGeometryRef> refs;
+  if (!ParseStarfieldNif(data, &refs)) return nullptr;
+
+  auto mesh = base::MakeUnique<asset::Mesh>();
+  mesh->id = id;
+  mesh->lods.emplace_back();
+  asset::MeshLod& lod = mesh->lods[0];
+
+  // One shared default material: mid gray, mostly rough. base_color stays unset
+  // (no texture), so the renderer falls back to base_color_factor.
+  asset::Material material;
+  material.id = asset::MakeAssetId(std::string(path) + "#m0");
+  for (int k = 0; k < 3; ++k) material.base_color_factor[k] = 0.5f;
+  material.roughness_factor = 0.8f;
+  material.metallic_factor = 0;
+  database.AddMaterial(material);
+
+  f32 bounds_min[3] = {1e30f, 1e30f, 1e30f};
+  f32 bounds_max[3] = {-1e30f, -1e30f, -1e30f};
+  for (const StarfieldGeometryRef& ref : refs) {
+    auto bytes = database.vfs().Read(ref.mesh_path);
+    if (!bytes) continue;
+    StarfieldMeshData geometry;
+    if (!ParseStarfieldMesh(ByteSpan(bytes->data(), bytes->size()), &geometry)) continue;
+
+    u32 vertex_base = static_cast<u32>(lod.vertices.size());
+    u32 index_offset = static_cast<u32>(lod.indices.size());
+    for (const asset::Vertex& src : geometry.vertices) {
+      asset::Vertex v = src;
+      // Bake the node-chain transform: p' = rotation * p * scale + translation.
+      for (int i = 0; i < 3; ++i) {
+        v.position[i] = (ref.rotation[i * 3] * src.position[0] +
+                         ref.rotation[i * 3 + 1] * src.position[1] +
+                         ref.rotation[i * 3 + 2] * src.position[2]) *
+                            ref.scale +
+                        ref.translation[i];
+        v.normal[i] = ref.rotation[i * 3] * src.normal[0] +
+                      ref.rotation[i * 3 + 1] * src.normal[1] +
+                      ref.rotation[i * 3 + 2] * src.normal[2];
+      }
+      for (int k = 0; k < 3; ++k) {
+        bounds_min[k] = std::min(bounds_min[k], v.position[k]);
+        bounds_max[k] = std::max(bounds_max[k], v.position[k]);
+      }
+      lod.vertices.push_back(v);
+    }
+    for (u32 index : geometry.indices) lod.indices.push_back(vertex_base + index);
+
+    asset::Submesh submesh;
+    submesh.index_offset = index_offset;
+    submesh.index_count = static_cast<u32>(geometry.indices.size());
+    submesh.material = material.id;
+    lod.submeshes.push_back(submesh);
+  }
+
+  if (lod.vertices.empty()) return nullptr;
+  for (int k = 0; k < 3; ++k) mesh->bounds_center[k] = (bounds_min[k] + bounds_max[k]) * 0.5f;
+  f32 radius_sq = 0;
+  for (int k = 0; k < 3; ++k) {
+    f32 d = bounds_max[k] - mesh->bounds_center[k];
+    radius_sq += d * d;
+  }
+  mesh->bounds_radius = std::sqrt(radius_sq);
+  return mesh;
+}
+
+}  // namespace
+
 void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profile) {
+  if (profile.game == Game::kStarfield) {
+    database.RegisterMeshConverter(
+        ".nif", [&database](ByteSpan data, asset::AssetId id, std::string_view path) {
+          return ConvertStarfieldNif(database, data, id, path);
+        });
+    database.RegisterTextureConverter(".dds", ConvertDds);
+    REC_INFO("registered bethesda converters for {}", profile.name);
+    return;
+  }
   // The NIF converter synthesizes materials from the shader property blocks
   // and pre-loads their textures, so a converted mesh's submesh material ids
   // always resolve against the database.
