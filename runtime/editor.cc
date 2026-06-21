@@ -263,7 +263,10 @@ void MapEditor::ApplyKeyboard(const InputState& input) {
   const bool ctrl = input.key(Key::kLeftCtrl);
 
   if (input.key_pressed(Key::kZ) && ctrl) {
-    Undo();
+    if (input.key(Key::kLeftShift))
+      Redo();  // Ctrl+Shift+Z
+    else
+      Undo();  // Ctrl+Z
     return;
   }
   if (input.key_pressed(Key::kF5)) {
@@ -336,7 +339,7 @@ ecs::Entity MapEditor::PlaceArmedAt(const Vec3& pos, f32 yaw) {
   ecs::Entity entity = streamer->PlaceObject(*ctx_.world, e.base, pos, rot, 1.0f);
   if (entity == ecs::kInvalidEntity) return ecs::kInvalidEntity;
   placed_.push_back({entity, e.base, e.name, e.domain});
-  undo_.push_back({UndoKind::kPlace, entity, e.base, {}, e.name, e.domain});
+  PushEdit({UndoKind::kPlace, entity, e.base, {}, e.name, e.domain});
   return entity;
 }
 
@@ -402,7 +405,7 @@ void MapEditor::PlaceDemoBuild() {
         }
       }
       placed_.push_back({entity, e.base, e.name, d});
-      undo_.push_back({UndoKind::kPlace, entity, e.base, {}, e.name, d});
+      PushEdit({UndoKind::kPlace, entity, e.base, {}, e.name, d});
       ++placed;
       ++total;
     }
@@ -549,7 +552,7 @@ void MapEditor::DeleteSelection() {
       op.name = placed_[pi].name;
       op.domain = placed_[pi].domain;
     }
-    undo_.push_back(op);
+    PushEdit(op);
     ctx_.world->Destroy(e);
     ++deleted;
   }
@@ -577,7 +580,7 @@ void MapEditor::DuplicateSelection() {
     ecs::Entity copy = streamer->PlaceObject(*ctx_.world, src.base, pos, t->rotation, user_scale);
     if (copy == ecs::kInvalidEntity) continue;
     placed_.push_back({copy, src.base, src.name, src.domain});
-    undo_.push_back({UndoKind::kPlace, copy, src.base, {}, src.name, src.domain});
+    PushEdit({UndoKind::kPlace, copy, src.base, {}, src.name, src.domain});
     copies.push_back(copy);
   }
   if (copies.empty()) {
@@ -672,13 +675,59 @@ void MapEditor::StampPrefab(const Vec3& at) {
     ecs::Entity e = streamer->PlaceObject(*ctx_.world, m.base, pos, m.rot, m.scale);
     if (e == ecs::kInvalidEntity) continue;
     placed_.push_back({e, m.base, "prefab part", m.domain});
-    undo_.push_back({UndoKind::kPlace, e, m.base, {}, "prefab part", m.domain});
+    PushEdit({UndoKind::kPlace, e, m.base, {}, "prefab part", m.domain});
     stamped.push_back(e);
   }
   if (!stamped.empty()) {
     selected_ = std::move(stamped);  // select the new copies
     SetStatus("Stamped prefab (" + std::to_string(selected_.size()) + " parts)");
   }
+}
+
+MapEditor::UndoOp MapEditor::ApplyAndInvert(const UndoOp& op) {
+  UndoOp inv = op;
+  switch (op.kind) {
+    case UndoKind::kPlace: {
+      // Undo a placement by destroying it; the inverse re-creates it (kDelete).
+      inv.kind = UndoKind::kDelete;
+      if (const world::Transform* t = ctx_.world->Get<world::Transform>(op.entity))
+        inv.transform = *t;
+      if (ctx_.world->IsAlive(op.entity)) ctx_.world->Destroy(op.entity);
+      placed_.erase(std::remove_if(placed_.begin(), placed_.end(),
+                                   [&](const PlacedObject& p) { return p.entity == op.entity; }),
+                    placed_.end());
+      selected_.erase(std::remove(selected_.begin(), selected_.end(), op.entity), selected_.end());
+      break;
+    }
+    case UndoKind::kDelete: {
+      // Re-create from the stored base + transform; the inverse deletes the new
+      // entity (kPlace). A streamed ref with no base cannot be recreated.
+      world::CellStreamer* streamer = StreamerFor(op.domain);
+      ecs::Entity e = ecs::kInvalidEntity;
+      if (op.base.plugin != 0xffff && streamer) {
+        const f32 user_scale = op.transform.scale / kUnitsToMeters;
+        Vec3 pos{op.transform.position[0], op.transform.position[1], op.transform.position[2]};
+        e = streamer->PlaceObject(*ctx_.world, op.base, pos, op.transform.rotation, user_scale);
+      }
+      if (e != ecs::kInvalidEntity) {
+        placed_.push_back({e, op.base, op.name, op.domain});
+        selected_ = {e};
+      }
+      inv.kind = UndoKind::kPlace;
+      inv.entity = e;
+      break;
+    }
+    case UndoKind::kTransform: {
+      // Swap the stored transform with the current one, so undo and redo just
+      // bounce between the two states.
+      if (world::Transform* t = ctx_.world->Get<world::Transform>(op.entity)) {
+        inv.transform = *t;
+        *t = op.transform;
+      }
+      break;
+    }
+  }
+  return inv;
 }
 
 void MapEditor::Undo() {
@@ -688,40 +737,24 @@ void MapEditor::Undo() {
   }
   UndoOp op = undo_.back();
   undo_.pop_back();
-  switch (op.kind) {
-    case UndoKind::kPlace:
-      if (ctx_.world->IsAlive(op.entity)) ctx_.world->Destroy(op.entity);
-      placed_.erase(std::remove_if(placed_.begin(), placed_.end(),
-                                   [&](const PlacedObject& p) { return p.entity == op.entity; }),
-                    placed_.end());
-      selected_.erase(std::remove(selected_.begin(), selected_.end(), op.entity), selected_.end());
-      SetStatus("Undid place");
-      break;
-    case UndoKind::kTransform:
-      if (ctx_.world->IsAlive(op.entity))
-        if (world::Transform* t = ctx_.world->Get<world::Transform>(op.entity)) *t = op.transform;
-      SetStatus("Undid transform");
-      break;
-    case UndoKind::kDelete: {
-      // Re-place editor-owned deletes from their base form; live streamed refs
-      // we cannot recreate just report that.
-      world::CellStreamer* streamer = StreamerFor(op.domain);
-      if (op.base.plugin != 0xffff && streamer) {
-        const f32 user_scale = op.transform.scale / kUnitsToMeters;
-        Vec3 pos{op.transform.position[0], op.transform.position[1], op.transform.position[2]};
-        ecs::Entity e =
-            streamer->PlaceObject(*ctx_.world, op.base, pos, op.transform.rotation, user_scale);
-        if (e != ecs::kInvalidEntity) {
-          placed_.push_back({e, op.base, op.name, op.domain});
-          selected_ = {e};
-          SetStatus("Undid delete");
-        }
-      } else {
-        SetStatus("Cannot restore a streamed object");
-      }
-      break;
-    }
+  redo_.push_back(ApplyAndInvert(op));
+  SetStatus("Undid");
+}
+
+void MapEditor::Redo() {
+  if (redo_.empty()) {
+    SetStatus("Nothing to redo");
+    return;
   }
+  UndoOp op = redo_.back();
+  redo_.pop_back();
+  undo_.push_back(ApplyAndInvert(op));
+  SetStatus("Redid");
+}
+
+void MapEditor::PushEdit(const UndoOp& op) {
+  undo_.push_back(op);
+  redo_.clear();  // a fresh edit invalidates the redo history
 }
 
 void MapEditor::RecordTransform(ecs::Entity entity) {
@@ -738,7 +771,7 @@ void MapEditor::RecordTransform(ecs::Entity entity) {
   op.kind = UndoKind::kTransform;
   op.entity = entity;
   op.transform = *t;
-  undo_.push_back(op);
+  PushEdit(op);
 }
 
 ecs::Entity MapEditor::Primary() const {

@@ -337,7 +337,7 @@ std::string BuildEditorSection() {
       text { text: "R   rotate the brush / selection"; font-size: 12; color: #9aa2b6; }
       text { text: "G   grab and move,  X delete"; font-size: 12; color: #9aa2b6; }
       text { text: "wheel  scale,   Ctrl+V duplicate"; font-size: 12; color: #9aa2b6; }
-      text { text: "B   grid snap,   Ctrl+Z undo"; font-size: 12; color: #9aa2b6; }
+      text { text: "B   grid snap,   Ctrl+Z undo / +Shift redo"; font-size: 12; color: #9aa2b6; }
       text { text: "F5  save,   F4 exit editor"; font-size: 12; color: #9aa2b6; }
     }
 

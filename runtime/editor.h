@@ -194,6 +194,12 @@ class MapEditor {
   void SaveSelectionAsPrefab();
   void StampPrefab(const Vec3& at);
   void Undo();
+  void Redo();
+  // Performs one undo/redo step's action and returns the op that reverses it, so
+  // undo and redo share one symmetric path (the inverse just moves to the other
+  // stack). Mutates the world / placed_ / selected_.
+  UndoOp ApplyAndInvert(const UndoOp& op);
+  void PushEdit(const UndoOp& op);           // record an edit; clears the redo stack
   void RecordTransform(ecs::Entity entity);  // push a kTransform undo snapshot
   void SetStatus(std::string message);
   void PushView();
@@ -265,6 +271,7 @@ class MapEditor {
 
   std::vector<PlacedObject> placed_;
   std::vector<UndoOp> undo_;
+  std::vector<UndoOp> redo_;  // cleared by any fresh edit (PushEdit)
 
   std::string status_;
   f32 status_age_ = 0;
