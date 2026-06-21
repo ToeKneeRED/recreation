@@ -89,7 +89,8 @@ base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
       case 77: texture->format = asset::TextureFormat::kBc3; break;
       case 78: texture->format = asset::TextureFormat::kBc3; srgb_from_format = true; break;
       case 80: texture->format = asset::TextureFormat::kBc4; break;
-      case 83: texture->format = asset::TextureFormat::kBc5; break;
+      case 83:  // BC5_UNORM
+      case 84: texture->format = asset::TextureFormat::kBc5; break;  // BC5_SNORM (SF normals)
       case 87:  // B8G8R8A8_UNORM: swizzled to RGBA below
       case 28: texture->format = asset::TextureFormat::kRgba8; break;
       case 91:  // B8G8R8A8_UNORM_SRGB
@@ -248,10 +249,53 @@ bool ParseBgsm(ByteSpan data, BgsmMaterial* out) {
 
 namespace {
 
+// The one ".mat" path a Starfield NIF references, or empty when it carries none
+// or several (an unambiguous single material is the case the convention below
+// can texture safely). Material paths live in the NIF header string table.
+std::string SingleMaterialPath(ByteSpan nif) {
+  auto header = ParseNifHeader(nif);
+  if (!header) return {};
+  std::string found;
+  for (const std::string& s : header->strings) {
+    std::string norm = asset::NormalizePath(s);
+    if (!norm.ends_with(".mat") || norm.find("materials/") == std::string::npos) continue;
+    if (found.empty()) {
+      found = std::move(norm);
+    } else if (found != norm) {
+      return {};  // more than one distinct material: ambiguous, leave untextured
+    }
+  }
+  return found;
+}
+
+// Binds the base-color and normal textures a ".mat" implies by Starfield's path
+// mirror convention (Materials\X\Y.mat -> textures/X/Y_color.dds), but only when
+// the files actually exist, so a mesh is never bound a wrong texture. The
+// convention holds for landscape and natural materials; architecture and ships
+// route textures through the compiled material database and stay gray until that
+// reader lands.
+void BindConventionTextures(asset::AssetDatabase& database, const std::string& mat_path,
+                            asset::Material* material) {
+  size_t anchor = mat_path.find("materials/");
+  if (anchor == std::string::npos || mat_path.size() < anchor + 14) return;
+  std::string stem = mat_path.substr(anchor + 10, mat_path.size() - anchor - 10 - 4);  // drop ".mat"
+  const std::string color = "textures/" + stem + "_color.dds";
+  const std::string normal = "textures/" + stem + "_normal.dds";
+  if (database.vfs().Contains(color)) {
+    material->base_color = asset::MakeAssetId(color);
+    database.LoadTexture(color);
+  }
+  if (database.vfs().Contains(normal)) {
+    material->normal = asset::MakeAssetId(normal);
+    database.LoadTexture(normal);
+  }
+}
+
 // Starfield NIFs reference external ".mesh" geometry by hash rather than
 // inlining vertices, so its converter loads each referenced mesh from the vfs,
-// bakes the node transform into the vertices, and assigns one default material
-// (textures are out of scope for now). Returns null when nothing converts.
+// bakes the node transform into the vertices, and assigns one material with the
+// convention-derived textures when they exist (gray otherwise). Returns null
+// when nothing converts.
 base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& database, ByteSpan data,
                                                      asset::AssetId id, std::string_view path) {
   base::Vector<StarfieldGeometryRef> refs;
@@ -262,13 +306,17 @@ base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& datab
   mesh->lods.emplace_back();
   asset::MeshLod& lod = mesh->lods[0];
 
-  // One shared default material: mid gray, mostly rough. base_color stays unset
-  // (no texture), so the renderer falls back to base_color_factor.
+  // One shared material: mid gray, with the .mat's textures bound when the path
+  // convention resolves to files that exist; an unset base_color falls back to
+  // the gray factor.
   asset::Material material;
   material.id = asset::MakeAssetId(std::string(path) + "#m0");
   for (int k = 0; k < 3; ++k) material.base_color_factor[k] = 0.5f;
   material.roughness_factor = 0.8f;
   material.metallic_factor = 0;
+  if (std::string mat_path = SingleMaterialPath(data); !mat_path.empty()) {
+    BindConventionTextures(database, mat_path, &material);
+  }
   database.AddMaterial(material);
 
   f32 bounds_min[3] = {1e30f, 1e30f, 1e30f};
