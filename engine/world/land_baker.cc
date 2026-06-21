@@ -108,6 +108,7 @@ struct QuadLayer {
 
 bool LandBaker::DecodeTexture(const asset::Texture& texture, Layer* out) const {
   if (texture.format != asset::TextureFormat::kBc1 &&
+      texture.format != asset::TextureFormat::kBc2 &&
       texture.format != asset::TextureFormat::kBc3 &&
       texture.format != asset::TextureFormat::kRgba8) {
     return false;
@@ -126,8 +127,11 @@ bool LandBaker::DecodeTexture(const asset::Texture& texture, Layer* out) const {
     if (offset + rgba.size() > texture.data.size()) return false;
     std::memcpy(rgba.data(), texture.data.data() + offset, rgba.size());
   } else {
-    bool bc3 = texture.format == asset::TextureFormat::kBc3;
-    size_t block_size = bc3 ? 16 : 8;
+    // BC2 and BC3 share a 16 byte block with the BC1 style color block in the
+    // last 8 bytes; only the leading alpha block (ignored here) differs.
+    bool alpha_block = texture.format == asset::TextureFormat::kBc2 ||
+                       texture.format == asset::TextureFormat::kBc3;
+    size_t block_size = alpha_block ? 16 : 8;
     u32 bw = (width + 3) / 4, bh = (height + 3) / 4;
     if (offset + static_cast<size_t>(bw) * bh * block_size > texture.data.size()) return false;
     for (u32 by = 0; by < bh; ++by) {
@@ -135,7 +139,7 @@ bool LandBaker::DecodeTexture(const asset::Texture& texture, Layer* out) const {
         const u8* block = texture.data.data() + offset +
                           (static_cast<size_t>(by) * bw + bx) * block_size;
         u8 colors[16][3];
-        DecodeBc1Colors(block + (bc3 ? 8 : 0), bc3, colors);
+        DecodeBc1Colors(block + (alpha_block ? 8 : 0), alpha_block, colors);
         for (u32 py = 0; py < 4; ++py) {
           for (u32 px = 0; px < 4; ++px) {
             u32 x = bx * 4 + px, y = by * 4 + py;

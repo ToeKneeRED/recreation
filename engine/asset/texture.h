@@ -12,6 +12,7 @@ enum class TextureFormat : u8 {
   kUnknown,
   kRgba8,
   kBc1,
+  kBc2,
   kBc3,
   kBc4,
   kBc5,

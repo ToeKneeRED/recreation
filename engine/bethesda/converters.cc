@@ -75,6 +75,8 @@ base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
     switch (dxgi) {
       case 71: texture->format = asset::TextureFormat::kBc1; linear_from_format = true; break;
       case 72: texture->format = asset::TextureFormat::kBc1; srgb_from_format = true; break;
+      case 74: texture->format = asset::TextureFormat::kBc2; linear_from_format = true; break;
+      case 75: texture->format = asset::TextureFormat::kBc2; srgb_from_format = true; break;
       case 77: texture->format = asset::TextureFormat::kBc3; linear_from_format = true; break;
       case 78: texture->format = asset::TextureFormat::kBc3; srgb_from_format = true; break;
       case 80: texture->format = asset::TextureFormat::kBc4; break;
@@ -135,6 +137,7 @@ base::UniquePointer<asset::Texture> ConvertDds(ByteSpan data, asset::AssetId id,
   }
 
   bool color = texture->format == asset::TextureFormat::kBc1 ||
+               texture->format == asset::TextureFormat::kBc2 ||
                texture->format == asset::TextureFormat::kBc3 ||
                texture->format == asset::TextureFormat::kBc7 ||
                texture->format == asset::TextureFormat::kRgba8;

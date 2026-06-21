@@ -20,6 +20,8 @@ FormatInfo FormatFor(asset::TextureFormat format, bool srgb) {
       return {srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, 4, 1};
     case asset::TextureFormat::kBc1:
       return {srgb ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK, 8, 4};
+    case asset::TextureFormat::kBc2:
+      return {srgb ? VK_FORMAT_BC2_SRGB_BLOCK : VK_FORMAT_BC2_UNORM_BLOCK, 16, 4};
     case asset::TextureFormat::kBc3:
       return {srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK, 16, 4};
     case asset::TextureFormat::kBc4:
