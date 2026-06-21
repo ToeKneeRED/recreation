@@ -2,6 +2,8 @@
 #include <cctype>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 
 #include "bethesda/load_order.h"
 #include "bethesda/record.h"
@@ -59,6 +61,23 @@ std::string Lower(std::string_view s) {
   return out;
 }
 
+// Developer/debug forms whose editor id makes them clutter in the palette: view
+// models, markers, scratch and test assets. Matched on the lowercased id so the
+// browser shows shippable objects, not Creation Kit plumbing. Kept conservative
+// (no bare "ref", which is a common legitimate suffix) to avoid dropping real
+// assets.
+bool IsDeveloperJunk(const std::string& editor_id) {
+  if (editor_id.empty()) return false;
+  const std::string lid = Lower(editor_id);
+  if (lid.rfind("1stperson", 0) == 0) return true;
+  static const char* const kFragments[] = {
+      "marker", "delete", "dummy", "test", "zzz", "xxx", "debug", "editor", "holding",
+  };
+  for (const char* frag : kFragments)
+    if (lid.find(frag) != std::string::npos) return true;
+  return false;
+}
+
 }  // namespace
 
 void MapEditor::BuildCatalog() {
@@ -70,6 +89,10 @@ void MapEditor::BuildCatalog() {
 
   const u32 kEdid = FourCc('E', 'D', 'I', 'D');
   const u32 kModl = FourCc('M', 'O', 'D', 'L');
+  // Collapses entries that would read identically in the browser; keyed on the
+  // final display name and the record type so the first of each (name, type)
+  // pair wins.
+  std::unordered_set<std::string> seen;
   for (const TypeBucket& tb : kPlaceableTypes) {
     if (static_cast<int>(catalog_.size()) >= kCatalogCap) break;
     int taken = 0;
@@ -81,25 +104,36 @@ void MapEditor::BuildCatalog() {
           // Only forms with a world model are droppable.
           const bethesda::Subrecord* modl = record.Find(kModl);
           if (!modl || modl->data.empty()) return;
+          std::string editor_id = record.GetString(kEdid);
+          if (IsDeveloperJunk(editor_id)) return;
+          std::string name = DisplayName(record, strings, editor_id);
+          if (name.empty()) return;  // nameless and idless: not useful to browse
+          std::string key = Lower(name);
+          key.push_back('\x1f');
+          key.append(reinterpret_cast<const char*>(&tb.type), sizeof(tb.type));
+          if (!seen.insert(std::move(key)).second) return;  // duplicate display row
           CatalogEntry e;
           e.base = id;
           e.type = tb.type;
           e.category = tb.category;
-          e.editor_id = record.GetString(kEdid);
-          e.name = DisplayName(record, strings, e.editor_id);
-          if (e.name.empty()) return;  // nameless and idless: not useful to browse
+          e.editor_id = std::move(editor_id);
+          e.name = std::move(name);
           catalog_.push_back(std::move(e));
           ++taken;
         });
   }
 
-  // Group by category then name so the browser reads tidily; the filter keeps
-  // these in order.
+  // Group by category, then float entries with a real FULL name above id-only
+  // ones, then sort by name so the browser reads tidily; the filter keeps this
+  // order. An entry whose name fell back to its editor id reads as id-only.
   std::sort(catalog_.begin(), catalog_.end(), [](const CatalogEntry& a, const CatalogEntry& b) {
     if (a.category != b.category) return a.category < b.category;
+    const bool a_named = a.name != a.editor_id;
+    const bool b_named = b.name != b.editor_id;
+    if (a_named != b_named) return a_named;
     return Lower(a.name) < Lower(b.name);
   });
-  REC_INFO("editor catalog: {} placeable forms across {} types", catalog_.size(),
+  REC_INFO("editor catalog: {} curated placeable forms across {} types", catalog_.size(),
            sizeof(kPlaceableTypes) / sizeof(kPlaceableTypes[0]));
   RefreshFilter();
 }
