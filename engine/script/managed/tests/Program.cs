@@ -12,6 +12,7 @@ internal static class Program
 
         ValueTests.Run(check);
         SdkApiTests.Run(check);
+        DomainsTests.Run(check);
         InventoryTests.Run(check);
         ActorDataTests.Run(check);
         WrapperDispatchTests.Run(check);

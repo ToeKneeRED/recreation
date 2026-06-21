@@ -40,11 +40,23 @@ internal unsafe struct HostCallbacks
     public delegate* unmanaged<void> Shutdown;
 }
 
+// One loaded game's content domain. Mirror of host/bridge.h DomainBridge.
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct DomainBridge
+{
+    public byte* Name;        // UTF-8 display name
+    public ScriptBridge* Bridge;
+}
+
 // What the managed entrypoint receives: the inbound bridge plus the outbound
-// callbacks slot to fill. Mirror of host/bridge.h HostHandshake.
+// callbacks slot to fill. Mirror of host/bridge.h HostHandshake. `Bridge` is the
+// primary domain (== Domains[0].Bridge); `Domains` lists every loaded game so a
+// mod can consume Skyrim and Fallout content at the same time. Append only.
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct HostHandshake
 {
     public ScriptBridge* Bridge;
     public HostCallbacks Callbacks;
+    public int DomainCount;
+    public DomainBridge* Domains;
 }

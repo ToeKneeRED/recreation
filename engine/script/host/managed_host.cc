@@ -8,14 +8,30 @@ namespace rec::script::host {
 
 ManagedHost::~ManagedHost() { Shutdown(); }
 
-bool ManagedHost::Boot(PapyrusGuest& guest, std::function<bool(const std::string&)> loader,
-                       const std::string& dotnet_root, const std::string& runtime_config,
+void ManagedHost::AddDomain(std::string name, PapyrusGuest& guest,
+                            std::function<bool(const std::string&)> loader) {
+  auto domain = std::make_unique<Domain>();
+  domain->name = std::move(name);
+  domain->ctx.guest = &guest;
+  domain->ctx.loader = std::move(loader);
+  domain->bridge = MakeScriptBridge(domain->ctx);  // ctx address is stable (heap)
+  domains_.push_back(std::move(domain));
+}
+
+bool ManagedHost::Boot(const std::string& dotnet_root, const std::string& runtime_config,
                        const std::string& assembly) {
-  ctx_.guest = &guest;
-  ctx_.loader = std::move(loader);
-  bridge_ = MakeScriptBridge(ctx_);
-  handshake_.bridge = &bridge_;
+  if (domains_.empty()) {
+    REC_WARN("managed: no content domain registered, scripting disabled");
+    return false;
+  }
+  domain_table_.clear();
+  domain_table_.reserve(domains_.size());
+  for (const auto& domain : domains_)
+    domain_table_.push_back({domain->name.c_str(), &domain->bridge});
+  handshake_.bridge = &domains_[0]->bridge;  // primary, back-compatible
   handshake_.callbacks = {};
+  handshake_.domain_count = static_cast<std::int32_t>(domain_table_.size());
+  handshake_.domains = domain_table_.data();
 
   if (!clr_.Initialize(dotnet_root, runtime_config, assembly,
                        "Recreation.ScriptHost, Recreation.Scripting", "Main")) {

@@ -19,7 +19,9 @@ public static unsafe class ScriptHost
     {
         var handshake = (HostHandshake*)handshakePtr;
         Native.Bind(handshake->Bridge);
-        Console.WriteLine("[managed] Recreation scripting host online");
+        RegisterDomains(handshake);
+        Console.WriteLine($"[managed] Recreation scripting host online, {Domains.Count} game(s)");
+        if (Environment.GetEnvironmentVariable("REC_DOMAINS_REPORT") != null) ReportDomains();
         ModHost.Boot();
 
         // Load drop-in user mods from RECREATION_MODS_DIR, if set.
@@ -30,6 +32,34 @@ public static unsafe class ScriptHost
         handshake->Callbacks.PublishEvent = &OnPublishEvent;
         handshake->Callbacks.Shutdown = &OnShutdown;
         return 0;
+    }
+
+    // Builds the Domains registry from the handshake's per-game bridge table, so
+    // mods can reach every loaded game. The primary (rendered) game is entry 0
+    // and reuses the bound Native backend; the rest each get their own backend.
+    private static void RegisterDomains(HostHandshake* handshake)
+    {
+        Domains.Clear();
+        for (int i = 0; i < handshake->DomainCount; i++)
+        {
+            DomainBridge db = handshake->Domains[i];
+            string name = Marshal.PtrToStringUTF8((IntPtr)db.Name) ?? $"domain{i}";
+            IEngineBackend backend =
+                i == 0 ? Native.Backend! : new NativeBackend(db.Bridge);
+            Domains.Register(new GameWorld(name, backend), isPrimary: i == 0);
+        }
+        // The bare SelfTest path passes no domain table; fall back to one world
+        // over the bound primary backend so Domains is never empty when bound.
+        if (Domains.Count == 0 && Native.Backend != null)
+            Domains.Register(new GameWorld("primary", Native.Backend), isPrimary: true);
+    }
+
+    // REC_DOMAINS_REPORT: list every game a mod can reach this session.
+    private static void ReportDomains()
+    {
+        Console.WriteLine($"[managed] {Domains.Count} game domain(s) live:");
+        foreach (GameWorld world in Domains.All)
+            Console.WriteLine($"[managed]   - {world.Name}{(world == Domains.Primary ? " (primary)" : "")}");
     }
 
     // Self-test: binds the bridge and exercises the SDK against the engine,

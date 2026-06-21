@@ -121,12 +121,27 @@ struct HostCallbacks {
   void (*shutdown)();
 };
 
+// One loaded game's content domain, exposed to managed code so a mod can reach
+// every game live in the process. `name` is the game's display name (UTF-8,
+// e.g. "Fallout 4"); `bridge` dispatches into that domain's own Papyrus guest
+// and record store. The primary (rendered) game is always entry 0.
+struct DomainBridge {
+  const char* name;
+  ScriptBridge* bridge;
+};
+
 // What the managed entrypoint receives: the inbound bridge it drives the engine
 // through, plus the outbound callbacks slot it fills. One struct keeps the
 // entrypoint a single-argument call.
+//
+// `bridge` stays the primary domain (back-compatible: it is `domains[0].bridge`).
+// `domains` lists every loaded game so mods can consume Skyrim and Fallout
+// content at the same time; `domain_count` is 0 only for the bare SelfTest path.
 struct HostHandshake {
   ScriptBridge* bridge;
   HostCallbacks callbacks;
+  std::int32_t domain_count;
+  const DomainBridge* domains;
 };
 
 // Signature of the managed entrypoint, exported [UnmanagedCallersOnly]. The host

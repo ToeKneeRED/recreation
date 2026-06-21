@@ -805,7 +805,8 @@ int ManagedHostTest(const std::string& runtime_config, const std::string& assemb
   guest.Start();
 
   rec::script::host::ManagedHost host;
-  if (!host.Boot(guest, /*loader=*/{}, /*dotnet_root=*/"", runtime_config, assembly)) {
+  host.AddDomain("Skyrim Special Edition", guest, /*loader=*/{});
+  if (!host.Boot(/*dotnet_root=*/"", runtime_config, assembly)) {
     std::printf("MANAGEDHOSTTEST SKIPPED (no .NET runtime / entrypoint)\n");
     guest.Stop();
     return 0;

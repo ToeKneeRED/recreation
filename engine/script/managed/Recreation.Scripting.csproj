@@ -20,4 +20,9 @@
     <Compile Remove="tests/**/*.cs" />
   </ItemGroup>
 
+  <!-- The test runner exercises internal seams (GameWorld, the Domains registry). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Recreation.Scripting.Tests" />
+  </ItemGroup>
+
 </Project>

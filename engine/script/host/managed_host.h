@@ -2,6 +2,7 @@
 #define RECREATION_SCRIPT_HOST_MANAGED_HOST_H_
 
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -33,14 +34,20 @@ class ManagedHost {
   ManagedHost(const ManagedHost&) = delete;
   ManagedHost& operator=(const ManagedHost&) = delete;
 
-  // Boots the managed world over guest. loader pulls a script (and its ancestor
-  // chain) from the VFS by name for the bridge's load_script; pass {} to leave
-  // it loading only already-present types. The remaining paths locate the .NET
-  // runtime and the Recreation.Scripting assembly (see ClrHost::Initialize).
-  // Returns false (and leaves available() false) when the runtime or assembly
-  // is unavailable.
-  bool Boot(PapyrusGuest& guest, std::function<bool(const std::string&)> loader,
-            const std::string& dotnet_root, const std::string& runtime_config,
+  // Registers a content domain the managed world can reach, before Boot. Call
+  // once per loaded game, primary (rendered) game first: it becomes the default
+  // bridge and domains[0]. `name` is the game's display name; loader pulls a
+  // script (and its ancestor chain) from that domain's VFS by name for the
+  // bridge's load_script (pass {} to load only already-present types). The guest
+  // must outlive the host.
+  void AddDomain(std::string name, PapyrusGuest& guest,
+                 std::function<bool(const std::string&)> loader);
+
+  // Boots the managed world over the registered domains. The paths locate the
+  // .NET runtime and the Recreation.Scripting assembly (see ClrHost::Initialize).
+  // Returns false (and leaves available() false) when no domain was registered,
+  // or the runtime or assembly is unavailable.
+  bool Boot(const std::string& dotnet_root, const std::string& runtime_config,
             const std::string& assembly);
 
   bool available() const { return available_; }
@@ -62,9 +69,17 @@ class ManagedHost {
   void Shutdown();
 
  private:
+  // One registered domain. Heap allocated so its BridgeContext address (which the
+  // ScriptBridge::ctx points at) stays stable as more domains are added.
+  struct Domain {
+    std::string name;
+    BridgeContext ctx;
+    ScriptBridge bridge{};
+  };
+
   ClrHost clr_;
-  BridgeContext ctx_{};
-  ScriptBridge bridge_{};
+  std::vector<std::unique_ptr<Domain>> domains_;
+  std::vector<DomainBridge> domain_table_;  // handshake view: borrows name/bridge
   HostHandshake handshake_{};
   bool available_ = false;
 

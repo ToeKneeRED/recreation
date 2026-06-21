@@ -111,7 +111,6 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
     if (!LoadGltfScene()) return false;
   } else if (!config_.data_dir.empty()) {
     if (!LoadGameData()) return false;
-    LoadExtraDomains();
   } else {
     demos_->CreateDemoScene();
   }
@@ -522,10 +521,21 @@ void Engine::BootManagedScripting() {
     return;
   }
   managed_ = std::make_unique<rec::script::host::ManagedHost>();
-  auto loader = [this](const std::string& name) {
-    return !scripts_->EnsureScriptLoaded(name).empty();
-  };
-  if (!managed_->Boot(scripts_->guest(), loader, /*dotnet_root=*/"", runtime_config, assembly)) {
+  // Register the primary (rendered) game first, then every secondary domain, so a
+  // C# mod can reach Skyrim and Fallout content at the same time. Each domain
+  // dispatches into its own guest, keeping the games' state isolated.
+  managed_->AddDomain(bethesda::GameProfile::For(game_).name, scripts_->guest(),
+                      [this](const std::string& name) {
+                        return !scripts_->EnsureScriptLoaded(name).empty();
+                      });
+  for (auto& domain : extra_domains_) {
+    ContentDomain* d = domain.get();
+    managed_->AddDomain(d->profile().name, d->scripts()->guest(),
+                        [d](const std::string& name) {
+                          return !d->scripts()->EnsureScriptLoaded(name).empty();
+                        });
+  }
+  if (!managed_->Boot(/*dotnet_root=*/"", runtime_config, assembly)) {
     managed_.reset();  // unavailable: run without it
     return;
   }
@@ -649,6 +659,10 @@ bool Engine::LoadGameData() {
     });
   }
   quest_->AttachQuestScripts();
+
+  // Load any additional games as live secondary domains before the managed world
+  // boots, so C# mods see every game's content at once.
+  LoadExtraDomains();
 
   // Bring up the managed (C#) scripting world over the same guest, so user mods
   // and Skyrim soft logic run alongside Papyrus. Optional and gracefully absent.
