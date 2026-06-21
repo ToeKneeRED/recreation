@@ -409,6 +409,23 @@ void RegisterQuest(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Scene", "GetOwningQuest", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Object(Resolve(bindings).SceneOwningQuest(self));
   });
+  // Quest stage fragments call MyScene.Start() to play a scene; the scene's own
+  // fragments then SetStage, so this is the hinge of native scene-driven progress.
+  reg.Register("Scene", "Start", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).SceneStart(self);
+    return Value();
+  });
+  reg.Register("Scene", "ForceStart", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).SceneStart(self);
+    return Value();
+  });
+  reg.Register("Scene", "Stop", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).SceneStop(self);
+    return Value();
+  });
+  reg.Register("Scene", "IsPlaying", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(Resolve(bindings).SceneIsPlaying(self));
+  });
   reg.Register("Quest", "IsRunning", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Bool(Resolve(bindings).IsRunning(self));
   });

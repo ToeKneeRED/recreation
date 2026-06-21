@@ -124,6 +124,11 @@ class SkyrimBindings {
   // Scenes: a SCEN fragment runs Self.GetOwningQuest().SetStage(N), so the scene
   // object must resolve to its owning quest. Returns None for an unknown scene.
   virtual papyrus::ObjectRef SceneOwningQuest(papyrus::ObjectRef scene) { return papyrus::ObjectRef{0}; }
+  // Scene.Start/ForceStart begin playing a scene (a quest fragment calls this);
+  // Stop ends it; IsPlaying queries it. Default no-ops for the neutral bindings.
+  virtual void SceneStart(papyrus::ObjectRef scene) {}
+  virtual void SceneStop(papyrus::ObjectRef scene) {}
+  virtual bool SceneIsPlaying(papyrus::ObjectRef scene) { return false; }
 
   // Player control gate (new system). Categories: 0 movement, 1 fighting,
   // 2 cam-switch, 3 looking, 4 sneaking, 5 menu, 6 activate, 7 journal,

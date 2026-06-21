@@ -13,6 +13,7 @@
 #include "bethesda/strings.h"
 #include "core/types.h"
 #include "quest/quest_graph.h"
+#include "quest/scene_player.h"
 #include "quest/quest_system.h"
 #include "script/games/skyrim/skyrim_natives.h"
 #include "script/world_effect_sink.h"
@@ -75,6 +76,15 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void RunSceneBegin(u64 scene);
   void RunSceneEnd(u64 scene);
   void RunScenePhase(u64 scene, u32 phase, bool on_begin);
+
+  // Advances every scene the ScenePlayer is playing by `dt`, firing the phase
+  // begin/end cues whose timers elapse. The runtime posts this each frame on the
+  // guest thread; cheap when nothing is playing.
+  void TickScenes(f32 dt);
+  bool AnyScenePlaying() const { return scene_player_.playing_count() > 0; }
+  // How many scene begin-fragments have run (scenes that have played). Lets a
+  // driver confirm the Scene.Start path actually fired.
+  u32 scenes_begun() const { return scenes_begun_; }
 
   // The engine-side quest store these bindings delegate to. The runtime reads
   // it for the HUD / debugger / network and seeds it with QUST definitions; all
@@ -178,6 +188,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   bool IsObjectiveDisplayed(papyrus::ObjectRef quest, i32 objective) override;
   bool IsObjectiveCompleted(papyrus::ObjectRef quest, i32 objective) override;
   papyrus::ObjectRef SceneOwningQuest(papyrus::ObjectRef scene) override;
+  void SceneStart(papyrus::ObjectRef scene) override;
+  void SceneStop(papyrus::ObjectRef scene) override;
+  bool SceneIsPlaying(papyrus::ObjectRef scene) override;
 
   // quest::QuestActionSink: the graph drives stage entry through here. State and
   // dedup still live in quest_system_ (SetStage records the stage before the
@@ -246,6 +259,10 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::unordered_map<u64, SceneFragmentSet> scene_fragments_;
   // Runs one scene fragment function via the VM, attributed to its owning quest.
   void RunSceneFragment(u64 scene, u64 owning_quest, const std::string& function);
+  // Plays the scenes a quest fragment Started, firing their phase fragments over
+  // time. Lives here (guest thread) so the Scene.Start native can reach it.
+  quest::ScenePlayer scene_player_;
+  u32 scenes_begun_ = 0;  // count of scene begin-fragments run (diagnostics)
 
   // Raises a Skyrim form event (OnDeath, OnItemAdded, ...) on the target form's
   // script instance, if it defines a handler -- a silent no-op without a VM or

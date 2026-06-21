@@ -63,6 +63,14 @@ class QuestDirector {
   // Like ReportSceneFragments but plays each scene through the timer-driven
   // ScenePlayer (begin/phase/end over simulated time), the live cue mechanism.
   void ReportScenePlay(const std::string& edid);
+  // Parses a quest's SCEN scripts and registers them with the bindings so the
+  // quest's own stage fragments can Scene.Start them at runtime. Call before the
+  // quest runs (main thread; AttachScripts marshals to the guest).
+  void AttachQuestScenes(u64 quest);
+  // Headless self-drive check: attach a quest's scenes, start it, and tick the
+  // ScenePlayer so its stage fragments Start scenes whose fragments SetStage --
+  // reporting how far the quest drives itself natively.
+  void ReportSceneLive(const std::string& edid);
 
   // Editor-id -> quest handle (0 if unknown); used by the npc director's scene.
   u64 FindQuestHandle(const std::string& edid) const;

@@ -431,6 +431,80 @@ void QuestDirector::ReportSceneFragments(const std::string& edid) {
   std::fflush(stdout);
 }
 
+void QuestDirector::AttachQuestScenes(u64 quest) {
+  if (!ctx_.scripts || !ctx_.bindings) return;
+  std::vector<SceneJob> jobs = GatherQuestScenes(records_, ctx_.scripts, quest);
+  if (jobs.empty()) return;
+  const size_t n = jobs.size();
+  auto* binds = ctx_.bindings;
+  ctx_.scripts->guest().Submit(
+      [binds, quest, jobs = std::move(jobs)](rec::script::papyrus::VirtualMachine&) mutable {
+        for (SceneJob& j : jobs) binds->SetSceneFragments(j.handle, quest, std::move(j.frags));
+      });
+  REC_INFO("quest: attached {} scene script(s) for 0x{:x}", n, quest);
+}
+
+void QuestDirector::ReportSceneLive(const std::string& edid) {
+  const u64 handle = FindQuestHandle(edid);
+  if (handle == 0 || !ctx_.scripts) {
+    std::printf("scene live: no quest matching '%s'\n", edid.c_str());
+    return;
+  }
+  AttachQuestScenes(handle);
+
+  auto* binds = ctx_.bindings;
+  // Start the quest, then tick the ScenePlayer: its stage fragments Start scenes,
+  // whose fragments SetStage, which run more stage fragments -- a self-driving
+  // chain. We report how far it gets on its own (no breadcrumb, no direct stages).
+  std::string report =
+      ctx_.scripts->guest()
+          .SubmitFor([binds, handle, edid](rec::script::papyrus::VirtualMachine&) {
+            using rec::script::papyrus::ObjectRef;
+            quest::QuestSystem& qs = binds->quest_system();
+            std::string r;
+            auto emit = [&](const std::string& line) { r += line; r += '\n'; };
+
+            binds->StartQuest(ObjectRef{handle});
+            const quest::QuestDef* def = qs.Definition(handle);
+            emit(Fmt("=== scene live: %s (0x%llx) start stage=%d ===", edid.c_str(),
+                     static_cast<unsigned long long>(handle), qs.GetStage(handle)));
+            if (!def) {
+              emit("no definition");
+              return r;
+            }
+
+            // Walk the quest's stages in order -- the gameplay a player would do
+            // (reach a mark, finish a fight) that the engine cannot simulate
+            // headless. Setting a stage runs its fragment; where that fragment
+            // calls Scene.Start, the scene plays here and its own fragments drive
+            // further stages. So this shows the scenes participating natively.
+            std::vector<i32> order;
+            for (const quest::StageDef& s : def->stages) order.push_back(s.index);
+            std::sort(order.begin(), order.end());
+            order.erase(std::unique(order.begin(), order.end()), order.end());
+
+            constexpr f32 kDt = 0.5f;
+            u32 before_total = binds->scenes_begun();
+            for (i32 stage : order) {
+              if (qs.GetStageDone(handle, stage)) continue;  // a scene already passed it
+              const u32 before = binds->scenes_begun();
+              binds->SetStage(ObjectRef{handle}, stage);
+              // Let any scene this stage started play to its end.
+              for (int t = 0; t < 200 && binds->AnyScenePlaying(); ++t) binds->TickScenes(kDt);
+              if (binds->scenes_begun() != before)
+                emit(Fmt("  stage %d started %u scene(s) -> stage now %d", stage,
+                         binds->scenes_begun() - before, qs.GetStage(handle)));
+            }
+            emit(Fmt("result: %u scene(s) played, stage=%d complete=%s",
+                     binds->scenes_begun() - before_total, qs.GetStage(handle),
+                     qs.IsComplete(handle) ? "YES" : "no"));
+            return r;
+          })
+          .get();
+  std::printf("%s", report.c_str());
+  std::fflush(stdout);
+}
+
 void QuestDirector::ReportScenePlay(const std::string& edid) {
   const u64 handle = FindQuestHandle(edid);
   if (handle == 0 || !ctx_.scripts) {

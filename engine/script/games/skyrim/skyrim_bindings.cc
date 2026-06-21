@@ -18,6 +18,21 @@ namespace {
 
 using papyrus::ObjectRef;
 
+// Seconds the ScenePlayer dwells in each scene phase before advancing. Scenes
+// really pace on dialogue length / completion conditions; a fixed cadence keeps
+// the journal moving until that runtime exists.
+constexpr f32 kScenePhaseSeconds = 2.0f;
+
+// Bridges ScenePlayer cues to the scene fragment runners on the bindings.
+struct SceneCueSink : quest::ScenePlayerSink {
+  RecordBackedSkyrimBindings* b = nullptr;
+  void SceneBegin(u64 scene) override { b->RunSceneBegin(scene); }
+  void ScenePhase(u64 scene, u32 phase, bool on_begin) override {
+    b->RunScenePhase(scene, phase, on_begin);
+  }
+  void SceneEnd(u64 scene) override { b->RunSceneEnd(scene); }
+};
+
 std::string Lower(std::string s) {
   std::ranges::transform(s, s.begin(), [](char c) { return (char)std::tolower((unsigned char)c); });
   return s;
@@ -562,6 +577,39 @@ papyrus::ObjectRef RecordBackedSkyrimBindings::SceneOwningQuest(papyrus::ObjectR
   return papyrus::ObjectRef{it != scene_fragments_.end() ? it->second.owning_quest : 0};
 }
 
+void RecordBackedSkyrimBindings::SceneStart(papyrus::ObjectRef scene) {
+  // Server-authoritative: a client mirrors quest progress via replication.
+  if (replica_mode_) return;
+  // Only scenes whose SCEN was parsed + SF_ script attached (by the runtime) can
+  // play; an unregistered scene is a silent no-op rather than a crash.
+  auto it = scene_fragments_.find(scene.handle);
+  if (it == scene_fragments_.end()) return;
+  std::vector<u32> phases;
+  for (const auto& p : it->second.frags.phases) phases.push_back(p.phase);
+  std::sort(phases.begin(), phases.end());
+  phases.erase(std::unique(phases.begin(), phases.end()), phases.end());
+  SceneCueSink sink;
+  sink.b = this;
+  scene_player_.Start(scene.handle, std::move(phases), kScenePhaseSeconds, sink);
+}
+
+void RecordBackedSkyrimBindings::SceneStop(papyrus::ObjectRef scene) {
+  SceneCueSink sink;
+  sink.b = this;
+  scene_player_.Stop(scene.handle, sink);
+}
+
+bool RecordBackedSkyrimBindings::SceneIsPlaying(papyrus::ObjectRef scene) {
+  return scene_player_.IsPlaying(scene.handle);
+}
+
+void RecordBackedSkyrimBindings::TickScenes(f32 dt) {
+  if (scene_player_.playing_count() == 0) return;
+  SceneCueSink sink;
+  sink.b = this;
+  scene_player_.Tick(dt, sink);
+}
+
 void RecordBackedSkyrimBindings::RunSceneFragment(u64 scene, u64 owning_quest,
                                                   const std::string& function) {
   // Server-authoritative: a multiplayer client mirrors quest progress via
@@ -589,6 +637,7 @@ void RecordBackedSkyrimBindings::RunSceneFragment(u64 scene, u64 owning_quest,
 }
 
 void RecordBackedSkyrimBindings::RunSceneBegin(u64 scene) {
+  ++scenes_begun_;
   auto it = scene_fragments_.find(scene);
   if (it != scene_fragments_.end())
     RunSceneFragment(scene, it->second.owning_quest, it->second.frags.begin.function);

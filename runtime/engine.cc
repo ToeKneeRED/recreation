@@ -347,6 +347,13 @@ bool Engine::RunFrame() {
     // The guest advances on the main loop's clock; it does its work on its own
     // thread, so this only posts a tick.
     if (scripts_) scripts_->Tick(static_cast<f32>(timer_.frame_delta()));
+    // Advance any scenes a quest fragment Started; the ScenePlayer fires their
+    // phase fragments over time (host-authoritative; runs on the guest thread).
+    if (scripts_ && ctx_.bindings && !client_session_) {
+      auto* binds = ctx_.bindings;
+      const f32 sdt = static_cast<f32>(timer_.frame_delta());
+      scripts_->guest().Submit([binds, sdt](rec::script::papyrus::VirtualMachine&) { binds->TickScenes(sdt); });
+    }
 
     // Apply (and, when hosting, replicate) the world mutations quests requested
     // on the guest thread. Main-thread only, so it owns the ECS exclusively here.
@@ -548,6 +555,10 @@ bool Engine::LoadGameData() {
   }
   if (const char* want = std::getenv("REC_SCENE_PLAY")) {
     quest_->ReportScenePlay(want);
+    quit_.store(true, std::memory_order_relaxed);
+  }
+  if (const char* want = std::getenv("REC_SCENE_LIVE")) {
+    quest_->ReportSceneLive(want);
     quit_.store(true, std::memory_order_relaxed);
   }
 
