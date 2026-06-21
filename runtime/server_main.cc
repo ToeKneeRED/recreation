@@ -30,6 +30,7 @@ rec::bethesda::Game ParseGame(const std::string& id) {
   if (id == "skyrimse") return rec::bethesda::Game::kSkyrimSe;
   if (id == "fo4") return rec::bethesda::Game::kFallout4;
   if (id == "fo76") return rec::bethesda::Game::kFallout76;
+  if (id == "starfield") return rec::bethesda::Game::kStarfield;
   return rec::bethesda::Game::kUnknown;
 }
 

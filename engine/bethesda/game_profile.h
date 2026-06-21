@@ -9,7 +9,7 @@
 
 namespace rec::bethesda {
 
-enum class Game : u8 { kUnknown, kSkyrimSe, kFallout4, kFallout76 };
+enum class Game : u8 { kUnknown, kSkyrimSe, kFallout4, kFallout76, kStarfield };
 
 enum class ArchiveFormat : u8 { kBsa, kBa2 };
 

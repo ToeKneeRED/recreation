@@ -16,12 +16,18 @@ constexpr u32 kBa2Dx10 = FourCc('D', 'X', '1', '0');
 
 struct Ba2Header {
   u32 magic;
-  u32 version;  // 1/7/8 FO4, 2/3 FO76
+  u32 version;  // 1/7/8 FO4, 2/3 Starfield
   u32 type;     // GNRL or DX10
   u32 file_count;
   u64 name_table_offset;
 };
 static_assert(sizeof(Ba2Header) == 24);
+
+// Starfield (v2/v3) inserts a u64 between the header and the file records; the
+// per-file record and texture chunk layouts are otherwise identical to FO4.
+constexpr size_t ExtraHeaderSize(u32 version) {
+  return (version == 2 || version == 3) ? sizeof(u64) : 0;
+}
 
 // GNRL file record, 36 bytes on disk. A packed size of 0 means the bytes are
 // stored uncompressed; otherwise they are a zlib (DEFLATE) stream.
@@ -110,7 +116,7 @@ class Ba2Provider final : public asset::FileProvider {
   bool Parse() {
     std::ifstream file(path_, std::ios::binary);
     if (!file) return false;
-    file.seekg(sizeof(Ba2Header));
+    file.seekg(sizeof(Ba2Header) + ExtraHeaderSize(header_.version));
 
     const bool dx10 = header_.type == kBa2Dx10;
     base::Vector<GnrlEntry> gnrl;

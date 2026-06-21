@@ -34,12 +34,25 @@ const GameProfile& GameProfile::For(Game game) {
       .supports_esl = false,
       .has_loose_script_source = false,
   };
+  // Starfield keeps the TES4 plugin layout (HEDR 0.96, 24 byte record headers)
+  // but ships BA2 v2/v3 archives and the new .mesh/.mat asset formats. Strings
+  // are localized with the Fallout "en" token and live inside the archives.
+  static const GameProfile starfield{
+      .game = Game::kStarfield,
+      .name = "Starfield",
+      .archive_format = ArchiveFormat::kBa2,
+      .plugin_version = 0.96f,
+      .base_masters = {"Starfield.esm"},
+      .exterior_worldspace = "NewAtlantis",
+      .string_language = "en",
+  };
   static const GameProfile unknown{};
 
   switch (game) {
     case Game::kSkyrimSe: return skyrim_se;
     case Game::kFallout4: return fallout4;
     case Game::kFallout76: return fallout76;
+    case Game::kStarfield: return starfield;
     case Game::kUnknown: return unknown;
   }
   return unknown;
@@ -48,6 +61,7 @@ const GameProfile& GameProfile::For(Game game) {
 Game GameProfile::DetectFromDataDir(const std::string& data_dir) {
   namespace fs = std::filesystem;
   if (fs::exists(fs::path(data_dir) / "SeventySix.esm")) return Game::kFallout76;
+  if (fs::exists(fs::path(data_dir) / "Starfield.esm")) return Game::kStarfield;
   if (fs::exists(fs::path(data_dir) / "Fallout4.esm")) return Game::kFallout4;
   if (fs::exists(fs::path(data_dir) / "Skyrim.esm")) return Game::kSkyrimSe;
   return Game::kUnknown;

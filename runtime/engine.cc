@@ -810,6 +810,8 @@ static std::string GameSlug(bethesda::Game game) {
       return "fallout4";
     case bethesda::Game::kFallout76:
       return "fallout76";
+    case bethesda::Game::kStarfield:
+      return "starfield";
     default:
       return "game";
   }

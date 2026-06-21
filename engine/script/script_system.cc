@@ -17,7 +17,7 @@ ScriptSystem::ScriptSystem(bethesda::Game game, asset::Vfs* vfs, skyrim::SkyrimB
   // and game agnostic, so it serves every Bethesda game; register it for all of
   // them, not just Skyrim, so the Fallout microvms expose the same API to mods.
   if (bindings && (game == bethesda::Game::kSkyrimSe || game == bethesda::Game::kFallout4 ||
-                   game == bethesda::Game::kFallout76)) {
+                   game == bethesda::Game::kFallout76 || game == bethesda::Game::kStarfield)) {
     skyrim::RegisterSkyrimNatives(guest_.natives(), bindings);
   }
   guest_.Start();
