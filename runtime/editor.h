@@ -124,6 +124,7 @@ class MapEditor {
   bool PointerOverUi(const InputState& input) const;
   Vec3 CursorRayDir(const InputState& input) const;
   bool AimPoint(const InputState& input, Vec3* out) const;            // ray vs ground
+  Vec3 Snap(const Vec3& p) const;                                     // grid-snap x/z when snap_
   ecs::Entity PickEntity(const InputState& input, f32* out_t) const;  // ray vs spheres
   world::Transform* SelectedTransform();
 
@@ -138,7 +139,10 @@ class MapEditor {
   std::string search_;
   int page_first_ = 0;           // scroll offset into filtered_
   int brush_ = -1;               // catalog_ index of the armed asset, or -1
+  f32 brush_yaw_ = 0;            // yaw the next placement faces (R orients it)
   bool search_focused_ = false;  // search box has keyboard focus
+  bool snap_ = false;            // snap placements / moves to a ground grid
+  f32 snap_grid_ = 1.0f;         // grid size in metres when snap_ is on
 
   // Selection + active tool.
   ecs::Entity selection_ = ecs::kInvalidEntity;

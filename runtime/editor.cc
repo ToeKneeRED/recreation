@@ -156,6 +156,10 @@ void MapEditor::ApplyKeyboard(const InputState& input) {
     SaveLayout();
     return;
   }
+  if (input.key_pressed(Key::kB)) {
+    snap_ = !snap_;
+    SetStatus(snap_ ? "Grid snap ON (1 m)" : "Grid snap OFF");
+  }
   if (selection_ != ecs::kInvalidEntity && !ctx_.world->IsAlive(selection_)) {
     selection_ = ecs::kInvalidEntity;  // it was unloaded/destroyed elsewhere
   }
@@ -164,6 +168,19 @@ void MapEditor::ApplyKeyboard(const InputState& input) {
     brush_ = -1;
     SetStatus("Brush cleared");
   }
+
+  // While a brush is armed, R orients the next placement instead of an existing
+  // selection, so a building can be laid out facing the right way.
+  if (brush_ >= 0) {
+    if (input.key_pressed(Key::kR)) {
+      brush_yaw_ += input.key(Key::kLeftShift) ? -kRotateStep : kRotateStep;
+      char buf[48];
+      std::snprintf(buf, sizeof(buf), "Brush yaw %.0f deg", brush_yaw_ * 57.29578f);
+      SetStatus(buf);
+    }
+    return;
+  }
+
   if (selection_ == ecs::kInvalidEntity) return;
 
   if (input.key_pressed(Key::kV) && ctrl) DuplicateSelection();
@@ -202,9 +219,10 @@ void MapEditor::PlaceBrush(const InputState& input) {
   const CatalogEntry& e = catalog_[brush_];
   Vec3 pos;
   if (!AimPoint(input, &pos)) return;
-  // Face a random-ish yaw derived from the placement count so a forest of the
-  // same tree does not look stamped; identity for the first drop is fine too.
-  ecs::Entity entity = ctx_.streamer->PlaceObject(*ctx_.world, e.base, pos, kIdentityRot, 1.0f);
+  // Drop it facing the brush yaw the user dialed in with R.
+  const Quat yq = QuatFromAxisAngle({0, 1, 0}, brush_yaw_);
+  const f32 rot[4] = {yq.x, yq.y, yq.z, yq.w};
+  ecs::Entity entity = ctx_.streamer->PlaceObject(*ctx_.world, e.base, pos, rot, 1.0f);
   if (entity == ecs::kInvalidEntity) {
     SetStatus("Could not load a model for " + e.name);
     return;
@@ -458,14 +476,20 @@ bool MapEditor::AimPoint(const InputState& input, Vec3* out) const {
       p = eye + dir * d;
       f32 ground = 0;
       if (ctx_.streamer->GroundHeight(p.x, p.z, &ground) && p.y <= ground) {
-        *out = Vec3{p.x, ground, p.z};
+        *out = Snap(Vec3{p.x, ground, p.z});
         return true;
       }
     }
   }
   // No ground (interior, or aimed at the sky): drop it a fixed distance ahead.
-  *out = eye + dir * kFallbackDist;
+  *out = Snap(eye + dir * kFallbackDist);
   return true;
+}
+
+Vec3 MapEditor::Snap(const Vec3& p) const {
+  if (!snap_ || snap_grid_ <= 0) return p;
+  return Vec3{std::round(p.x / snap_grid_) * snap_grid_, p.y,
+              std::round(p.z / snap_grid_) * snap_grid_};
 }
 
 ecs::Entity MapEditor::PickEntity(const InputState& input, f32* out_t) const {
