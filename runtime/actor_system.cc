@@ -293,6 +293,28 @@ bool ActorSystem::LoadActorTemplate(Actor* out) {
   return true;
 }
 
+void ActorSystem::LoadBuiltinActorTemplate(Actor* out) {
+  // Fallback rig for games whose character assets are not the Skyrim layout
+  // LoadActorTemplate expects (Fallout 4, Starfield use different paths and the
+  // new skinned ".mesh" format): a procedural biped so their NPCs are visible
+  // placeholders rather than invisible markers. It is already in engine space
+  // (Y-up, metres), so skeleton_to_local stays identity.
+  asset::Skeleton skeleton;
+  asset::Mesh mesh;
+  asset::MakeSkinnedBiped(asset::MakeAssetId("builtin/biped"), &skeleton, &mesh);
+  renderer_.UploadMesh(mesh);
+  out->skeleton = std::move(skeleton);
+  out->pose.ResetToBind(out->skeleton);
+  out->ik_up = {0, 1, 0};
+  out->ik_forward = {0, 0, 1};
+  anim::ComputeModelMatrices(out->skeleton, out->pose, &out->bone_model);
+  ActorPart part;
+  part.mesh = mesh.id;
+  part.skin = mesh.skin;
+  part.remap = anim::BuildBoneRemap(out->skeleton, part.skin);
+  out->parts.push_back(std::move(part));
+}
+
 bool ActorSystem::SpawnPlayerActor(const Vec3& pos) {
   Actor actor;
   if (!LoadActorTemplate(&actor)) return false;
@@ -442,12 +464,13 @@ void ActorSystem::SyncNpcActors() {
   if (config_.headless) return;  // dedicated server doesn't render NPCs
   // Build the shared rig once; every NPC actor is instanced from it.
   if (!npc_template_) {
-    if (npc_template_failed_) return;
     Actor tmpl;
     if (!LoadActorTemplate(&tmpl)) {
-      npc_template_failed_ = true;
-      REC_WARN("npc rendering disabled: actor template failed to load");
-      return;
+      // The Skyrim body assets are absent (a Fallout 4 or Starfield session):
+      // fall back to the builtin biped so NPCs still populate the world.
+      tmpl = Actor{};
+      LoadBuiltinActorTemplate(&tmpl);
+      REC_INFO("npc rendering: using the builtin biped (game body assets absent)");
     }
     tmpl.animate = true;
     tmpl.speed = 0.0f;     // idle

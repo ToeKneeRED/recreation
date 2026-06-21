@@ -89,6 +89,7 @@ class ActorSystem {
   };
 
   bool LoadActorTemplate(Actor* out);
+  void LoadBuiltinActorTemplate(Actor* out);
   bool LoadActorPart(const std::string& path, Actor& actor, i32 attach_bone = -1);
   base::Vector<std::string> FindHeadPartModels(u32 part_type, u32 max);
   void UpdateOneActor(Actor& actor, f32 dt);
@@ -106,7 +107,6 @@ class ActorSystem {
   base::Vector<Actor> actors_;
   i32 player_actor_ = -1;  // index into actors_ the walk mode drives, -1 = none
   std::optional<Actor> npc_template_;
-  bool npc_template_failed_ = false;
   base::UnorderedMap<u64, Actor> npc_actors_;
   base::Vector<u64> scratch_dead_actors_;
   base::UnorderedMap<u64, physics::BodyId> solid_bodies_;
