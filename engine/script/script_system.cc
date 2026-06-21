@@ -13,8 +13,13 @@ using papyrus::VirtualMachine;
 
 ScriptSystem::ScriptSystem(bethesda::Game game, asset::Vfs* vfs, skyrim::SkyrimBindings* bindings)
     : vfs_(vfs), guest_(game) {
-  if (game == bethesda::Game::kSkyrimSe)
+  // The "skyrim" native surface (GetForm, GetActorValue, ...) is record-backed
+  // and game agnostic, so it serves every Bethesda game; register it for all of
+  // them, not just Skyrim, so the Fallout microvms expose the same API to mods.
+  if (bindings && (game == bethesda::Game::kSkyrimSe || game == bethesda::Game::kFallout4 ||
+                   game == bethesda::Game::kFallout76)) {
     skyrim::RegisterSkyrimNatives(guest_.natives(), bindings);
+  }
   guest_.Start();
 }
 
