@@ -175,15 +175,70 @@ void TestDx10(const std::string& dir) {
             std::memcmp(dds->data() + 148, mip0.data(), mip0.size()) == 0);
 }
 
+// Starfield (BA2 v2/v3) keeps the FO4 record layout but inserts a u64 between
+// the 24-byte header and the first record. The reader must skip it, otherwise
+// every offset is 8 bytes short. This builds a v2 GNRL archive with that field
+// and confirms a clean read.
+void TestStarfieldGnrl(const std::string& dir) {
+  std::puts("ba2 Starfield (v2) GNRL round trip:");
+  const std::vector<u8> payload = {'m', 'e', 's', 'h', 0x02, 0x00, 0x00, 0x00};
+  const std::string name = "Geometries\\ABCD\\1234.mesh";
+
+  constexpr u64 kHeaderSize = 24;
+  constexpr u64 kExtraHeaderSize = 8;  // the v2/v3 u64
+  constexpr u64 kRecordSize = 36;
+  const u64 data_offset = kHeaderSize + kExtraHeaderSize + kRecordSize;
+  const u64 name_table_offset = data_offset + payload.size();
+
+  std::vector<u8> b;
+  PutBytes(b, "BTDX", 4);
+  PutU32(b, 2);  // version (Starfield general archives ship v2)
+  PutBytes(b, "GNRL", 4);
+  PutU32(b, 1);
+  PutU64(b, name_table_offset);
+  PutU64(b, 1);  // v2/v3 extra header field, skipped by the reader
+
+  PutU32(b, 0);  // name hash
+  PutBytes(b, "mesh", 4);
+  PutU32(b, 0);  // dir hash
+  PutU32(b, 0x00100100);  // flags as seen in shipped archives
+  PutU64(b, data_offset);
+  PutU32(b, 0);  // packed size 0 => stored uncompressed
+  PutU32(b, static_cast<u32>(payload.size()));
+  PutU32(b, 0xBAADF00D);
+
+  b.insert(b.end(), payload.begin(), payload.end());
+
+  PutU16(b, static_cast<u16>(name.size()));
+  PutBytes(b, name.data(), name.size());
+
+  auto provider = OpenSynthetic(b, dir + "/rec_ba2test_sf.ba2");
+  Check("opens", provider != nullptr);
+  if (!provider) return;
+
+  const std::string key = "geometries/abcd/1234.mesh";
+  Check("contains by normalized path", provider->Contains(key));
+  auto data = provider->Read(key);
+  Check("reads", data.has_value());
+  if (data) {
+    Check("payload length", data->size() == payload.size());
+    Check("payload bytes match",
+          data->size() == payload.size() &&
+              std::memcmp(data->data(), payload.data(), payload.size()) == 0);
+  }
+}
+
 }  // namespace
 
 int main() {
   const std::string dir = std::filesystem::temp_directory_path().string();
   TestGnrl(dir);
   TestDx10(dir);
+  TestStarfieldGnrl(dir);
   std::error_code ec;
   std::filesystem::remove(dir + "/rec_ba2test_gnrl.ba2", ec);
   std::filesystem::remove(dir + "/rec_ba2test_dx10.ba2", ec);
+  std::filesystem::remove(dir + "/rec_ba2test_sf.ba2", ec);
   if (g_failures == 0) {
     std::puts("ba2: all checks passed");
     return 0;
