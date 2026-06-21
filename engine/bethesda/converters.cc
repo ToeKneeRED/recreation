@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
+#include "bethesda/material_db.h"
 #include "bethesda/nif.h"
 #include "bethesda/starfield_mesh.h"
 #include "core/log.h"
@@ -268,35 +270,52 @@ std::string SingleMaterialPath(ByteSpan nif) {
   return found;
 }
 
+// Binds `path` to a material texture slot when the file exists, so a mesh is
+// never given a missing or wrong texture.
+void BindTextureIfExists(asset::AssetDatabase& database, const std::string& path,
+                         asset::AssetId* slot) {
+  if (path.empty() || !database.vfs().Contains(path)) return;
+  *slot = asset::MakeAssetId(path);
+  database.LoadTexture(path);
+}
+
+// Emissive, unlike the other maps, needs its factor turned on to show.
+void BindEmissiveIfExists(asset::AssetDatabase& database, const std::string& path,
+                          asset::Material* material) {
+  if (path.empty() || !database.vfs().Contains(path)) return;
+  material->emissive = asset::MakeAssetId(path);
+  for (int k = 0; k < 3; ++k) material->emissive_factor[k] = 1.0f;
+  database.LoadTexture(path);
+}
+
 // Binds the base-color, normal and emissive textures a ".mat" implies by
 // Starfield's path mirror convention (Materials\X\Y.mat -> textures/X/Y_color.dds),
 // but only when the files actually exist, so a mesh is never bound a wrong
-// texture. The convention holds for landscape and natural materials; architecture
-// and ships route textures through the compiled material database and stay gray
-// until that reader lands.
+// texture. The convention holds for landscape and natural materials; the
+// material database resolves the rest.
 void BindConventionTextures(asset::AssetDatabase& database, const std::string& mat_path,
                             asset::Material* material) {
   size_t anchor = mat_path.find("materials/");
   if (anchor == std::string::npos || mat_path.size() < anchor + 14) return;
   std::string stem = mat_path.substr(anchor + 10, mat_path.size() - anchor - 10 - 4);  // drop ".mat"
-  const std::string color = "textures/" + stem + "_color.dds";
-  const std::string normal = "textures/" + stem + "_normal.dds";
-  const std::string emissive = "textures/" + stem + "_emissive.dds";
-  if (database.vfs().Contains(color)) {
-    material->base_color = asset::MakeAssetId(color);
-    database.LoadTexture(color);
+  BindTextureIfExists(database, "textures/" + stem + "_color.dds", &material->base_color);
+  BindTextureIfExists(database, "textures/" + stem + "_normal.dds", &material->normal);
+  BindEmissiveIfExists(database, "textures/" + stem + "_emissive.dds", material);
+}
+
+// Resolves a Starfield mesh's textures: the compiled material database first (it
+// maps most materials, including architecture and ships), then the path
+// convention (landscape), then nothing (the gray factor shows through).
+void BindStarfieldMaterial(asset::AssetDatabase& database, const StarfieldMaterialDb& mat_db,
+                           const std::string& mat_path, asset::Material* material) {
+  std::string color, normal, emissive;
+  if (mat_db.Lookup(mat_path, &color, &normal, &emissive)) {
+    BindTextureIfExists(database, color, &material->base_color);
+    BindTextureIfExists(database, normal, &material->normal);
+    BindEmissiveIfExists(database, emissive, material);
+    return;
   }
-  if (database.vfs().Contains(normal)) {
-    material->normal = asset::MakeAssetId(normal);
-    database.LoadTexture(normal);
-  }
-  // Emissive is a single unambiguous channel, so it is safe to bind even when
-  // the rest of the material is unknown; lights, signs and screens then glow.
-  if (database.vfs().Contains(emissive)) {
-    material->emissive = asset::MakeAssetId(emissive);
-    for (int k = 0; k < 3; ++k) material->emissive_factor[k] = 1.0f;
-    database.LoadTexture(emissive);
-  }
+  BindConventionTextures(database, mat_path, material);
 }
 
 // Starfield NIFs reference external ".mesh" geometry by hash rather than
@@ -304,8 +323,10 @@ void BindConventionTextures(asset::AssetDatabase& database, const std::string& m
 // bakes the node transform into the vertices, and assigns one material with the
 // convention-derived textures when they exist (gray otherwise). Returns null
 // when nothing converts.
-base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& database, ByteSpan data,
-                                                     asset::AssetId id, std::string_view path) {
+base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& database,
+                                                     const StarfieldMaterialDb& mat_db,
+                                                     ByteSpan data, asset::AssetId id,
+                                                     std::string_view path) {
   base::Vector<StarfieldGeometryRef> refs;
   if (!ParseStarfieldNif(data, &refs)) return nullptr;
 
@@ -314,16 +335,16 @@ base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& datab
   mesh->lods.emplace_back();
   asset::MeshLod& lod = mesh->lods[0];
 
-  // One shared material: mid gray, with the .mat's textures bound when the path
-  // convention resolves to files that exist; an unset base_color falls back to
-  // the gray factor.
+  // One shared material: mid gray, with the .mat's textures bound from the
+  // material database (or the path convention); an unset base_color falls back
+  // to the gray factor.
   asset::Material material;
   material.id = asset::MakeAssetId(std::string(path) + "#m0");
   for (int k = 0; k < 3; ++k) material.base_color_factor[k] = 0.5f;
   material.roughness_factor = 0.8f;
   material.metallic_factor = 0;
   if (std::string mat_path = SingleMaterialPath(data); !mat_path.empty()) {
-    BindConventionTextures(database, mat_path, &material);
+    BindStarfieldMaterial(database, mat_db, mat_path, &material);
   }
   database.AddMaterial(material);
 
@@ -380,9 +401,20 @@ base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& datab
 
 void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profile) {
   if (profile.game == Game::kStarfield) {
+    // Parse the compiled material database once: the 105MB blob is read, the
+    // material->texture index extracted, then the blob dropped. The converter
+    // lambda holds the small index by shared pointer.
+    auto material_db = std::make_shared<StarfieldMaterialDb>();
+    if (auto cdb = database.vfs().Read("materials/materialsbeta.cdb")) {
+      material_db->Build(ByteSpan(cdb->data(), cdb->size()));
+      REC_INFO("starfield material database: {} materials indexed", material_db->size());
+    } else {
+      REC_WARN("starfield material database not found; meshes use the path convention only");
+    }
     database.RegisterMeshConverter(
-        ".nif", [&database](ByteSpan data, asset::AssetId id, std::string_view path) {
-          return ConvertStarfieldNif(database, data, id, path);
+        ".nif",
+        [&database, material_db](ByteSpan data, asset::AssetId id, std::string_view path) {
+          return ConvertStarfieldNif(database, *material_db, data, id, path);
         });
     database.RegisterTextureConverter(".dds", ConvertDds);
     REC_INFO("registered bethesda converters for {}", profile.name);

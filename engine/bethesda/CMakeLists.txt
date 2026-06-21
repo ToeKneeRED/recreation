@@ -7,6 +7,7 @@ recreation_add_module(bethesda
   ba2.cc
   nif.cc
   starfield_mesh.cc
+  material_db.cc
   converters.cc
   strings.cc
   script_attachment.cc
