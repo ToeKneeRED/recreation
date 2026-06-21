@@ -198,6 +198,11 @@ std::string BuildEditorSection() {
       }
     }
 
+    panel ed_marquee {
+      position: absolute; left: 0; top: 0; width: 0; height: 0;
+      background: #ffcc5518; border-color: #ffcc55cc; border-width: 1;
+    }
+
     panel ed_select {
       position: absolute; left: 0; top: 0; width: 64; height: 64;
       panel { position: absolute; left: 0; top: 0; width: 18; height: 3; background: #ffcc55; }
@@ -744,6 +749,20 @@ void GameUi::Impl::ApplyEditorView() {
     } else {
       SetVisible(row.c_str(), false);
     }
+  }
+
+  // Marquee box-select rectangle.
+  SetVisible("ed_marquee", editor.marquee_active);
+  if (editor.marquee_active) {
+    const float x0 = std::min(editor.marquee[0], editor.marquee[2]);
+    const float y0 = std::min(editor.marquee[1], editor.marquee[3]);
+    const float w = std::fabs(editor.marquee[2] - editor.marquee[0]);
+    const float h = std::fabs(editor.marquee[3] - editor.marquee[1]);
+    SetStyleField(
+        "ed_marquee", [](ugui::Style& s, float v) { s.left_offset = ugui::Length::Px(v); }, x0);
+    SetStyleField("ed_marquee", [](ugui::Style& s, float v) { s.top = ugui::Length::Px(v); }, y0);
+    SetStyleField("ed_marquee", [](ugui::Style& s, float v) { s.width = ugui::Length::Px(v); }, w);
+    SetStyleField("ed_marquee", [](ugui::Style& s, float v) { s.height = ugui::Length::Px(v); }, h);
   }
 
   // Selection reticle: a fixed 64px corner bracket centred on the selected

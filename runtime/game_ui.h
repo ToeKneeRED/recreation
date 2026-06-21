@@ -94,6 +94,10 @@ struct EditorView {
   float sel_screen[2] = {0, 0};
   float sel_screen_half = 40;
 
+  // Marquee box-select rectangle (window pixels). Inactive hides it.
+  bool marquee_active = false;
+  float marquee[4] = {0, 0, 0, 0};  // x0, y0, x1, y1
+
   // Status bar (bottom).
   std::string brush;     // armed asset name ("" = none, in select mode)
   std::string status;    // transient hint / confirmation message

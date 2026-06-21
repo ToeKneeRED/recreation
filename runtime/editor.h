@@ -169,6 +169,8 @@ class MapEditor {
   bool AimPoint(const InputState& input, Vec3* out) const;            // ray vs ground
   Vec3 Snap(const Vec3& p) const;                                     // grid-snap x/z when snap_
   ecs::Entity PickEntity(const InputState& input, f32* out_t) const;  // ray vs spheres
+  bool ProjectToScreen(const Vec3& world, f32* sx, f32* sy) const;    // world -> window px
+  void BoxSelect(f32 x0, f32 y0, f32 x1, f32 y1, bool additive);      // marquee select
   ecs::Entity Primary() const;            // the active selection (inspector/reticle/move)
   world::Transform* SelectedTransform();  // the primary's transform
   void PruneDeadSelection();              // drop selected entities that were destroyed
@@ -207,6 +209,11 @@ class MapEditor {
   std::vector<world::Transform> move_origins_;  // per-selected transform at grab start
   Vec3 move_pivot_{};                           // primary's position at grab start
   bool prev_lmb_ = false;                       // left-button edge detection (clicks, not holds)
+
+  // Marquee box-select: a click-drag in empty space; on release everything whose
+  // screen projection falls in the rect is selected.
+  bool marquee_dragging_ = false;
+  f32 marquee_x0_ = 0, marquee_y0_ = 0, marquee_x1_ = 0, marquee_y1_ = 0;
 
   // Paint-scatter: holding the place button and dragging drops a copy every
   // `scatter_spacing_` metres, each at a varied yaw, for fast forests / clutter.

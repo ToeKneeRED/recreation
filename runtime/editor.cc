@@ -145,8 +145,27 @@ void MapEditor::Update(const InputState& input, f32 dt, bool allow_input) {
           }
         }
       }
-    } else if (click) {
-      SelectUnderCursor(input, input.key(Key::kLeftShift));
+    } else {
+      // No brush armed: a click selects what's under the cursor; a click-drag in
+      // empty space sweeps a marquee box and selects everything inside it.
+      const bool over = PointerOverUi(input);
+      const bool look = ctx_.camera->looking();
+      if (lmb && !prev_lmb_ && !over && !look) {
+        marquee_dragging_ = true;
+        marquee_x0_ = marquee_x1_ = input.mouse_x;
+        marquee_y0_ = marquee_y1_ = input.mouse_y;
+      } else if (lmb && marquee_dragging_) {
+        marquee_x1_ = input.mouse_x;
+        marquee_y1_ = input.mouse_y;
+      } else if (!lmb && marquee_dragging_) {
+        marquee_dragging_ = false;
+        const f32 ddx = marquee_x1_ - marquee_x0_, ddy = marquee_y1_ - marquee_y0_;
+        const bool additive = input.key(Key::kLeftShift);
+        if (ddx * ddx + ddy * ddy < 25.0f)
+          SelectUnderCursor(input, additive);  // it was a click, not a drag
+        else
+          BoxSelect(marquee_x0_, marquee_y0_, marquee_x1_, marquee_y1_, additive);
+      }
     }
     ApplyKeyboard(input);
     UpdateGhost(input);
@@ -236,6 +255,7 @@ void MapEditor::ArmBrush(int catalog_index) {
   if (catalog_index < 0 || catalog_index >= static_cast<int>(catalog_.size())) return;
   brush_ = catalog_index;
   moving_ = false;
+  marquee_dragging_ = false;
   SetStatus("Placing: " + catalog_[brush_].name + "  (click to drop, Esc to clear)");
 }
 
@@ -510,6 +530,7 @@ void MapEditor::BeginMove() {
   PruneDeadSelection();
   if (selected_.empty()) return;
   moving_ = true;
+  marquee_dragging_ = false;
   move_origins_.clear();
   for (ecs::Entity e : selected_) {
     RecordTransform(e);
@@ -697,6 +718,42 @@ ecs::Entity MapEditor::PickEntity(const InputState& input, f32* out_t) const {
   return best;
 }
 
+bool MapEditor::ProjectToScreen(const Vec3& world, f32* sx, f32* sy) const {
+  const Vec3 eye = ctx_.camera->position();
+  const Vec3 cf = ctx_.camera->forward();
+  const Vec3 cr = Normalize(Cross(cf, {0, 1, 0}));
+  const Vec3 cu = Cross(cr, cf);
+  const Vec3 to = world - eye;
+  const f32 zc = Dot(to, cf);
+  if (zc <= 0.1f) return false;  // behind the camera
+  const f32 w = static_cast<f32>(ctx_.renderer->output_width());
+  const f32 h = static_cast<f32>(ctx_.renderer->output_height());
+  const f32 aspect = h > 0 ? w / h : 1.0f;
+  const f32 tan_half = std::tan(kFovY * 0.5f);
+  const f32 ndc_x = (Dot(to, cr) / zc) / (tan_half * aspect);
+  const f32 ndc_y = (Dot(to, cu) / zc) / tan_half;
+  *sx = (ndc_x * 0.5f + 0.5f) * w;
+  *sy = (0.5f - ndc_y * 0.5f) * h;
+  return true;
+}
+
+void MapEditor::BoxSelect(f32 x0, f32 y0, f32 x1, f32 y1, bool additive) {
+  const f32 lo_x = std::min(x0, x1), hi_x = std::max(x0, x1);
+  const f32 lo_y = std::min(y0, y1), hi_y = std::max(y0, y1);
+  if (!additive) selected_.clear();
+  ctx_.world->Each<world::Transform, world::Renderable>(
+      [&](ecs::Entity e, world::Transform& t, world::Renderable&) {
+        if (e == ghost_entity_ || ctx_.world->Has<world::Hidden>(e)) return;
+        f32 sx, sy;
+        if (!ProjectToScreen(Vec3{t.position[0], t.position[1], t.position[2]}, &sx, &sy)) return;
+        if (sx < lo_x || sx > hi_x || sy < lo_y || sy > hi_y) return;
+        if (std::find(selected_.begin(), selected_.end(), e) == selected_.end())
+          selected_.push_back(e);
+      });
+  SetStatus(selected_.empty() ? "Nothing in the box"
+                              : std::to_string(selected_.size()) + " selected");
+}
+
 void MapEditor::HandleUiEvent(const EditorUiEvent& e) {
   using Kind = EditorUiEvent::Kind;
   switch (e.kind) {
@@ -803,6 +860,14 @@ void MapEditor::PushView() {
     ar.armed = brush_ == filtered_[idx];
     v.rows.push_back(std::move(ar));
   }
+
+  // Marquee box (only once it is an actual drag, not a click).
+  const f32 mdx = marquee_x1_ - marquee_x0_, mdy = marquee_y1_ - marquee_y0_;
+  v.marquee_active = marquee_dragging_ && (mdx * mdx + mdy * mdy >= 25.0f);
+  v.marquee[0] = marquee_x0_;
+  v.marquee[1] = marquee_y0_;
+  v.marquee[2] = marquee_x1_;
+  v.marquee[3] = marquee_y1_;
 
   const ecs::Entity sel = Primary();
   if (sel != ecs::kInvalidEntity && ctx_.world->IsAlive(sel)) {
