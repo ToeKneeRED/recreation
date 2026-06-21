@@ -127,6 +127,14 @@ public sealed class OxygenCo2 : GameBehaviour
         AdjustOxygen(RestorePerSource * e.Count);
     }
 
+    // Tops oxygen back to full and clears the carbon-dioxide debt, the way a rest
+    // recovers the breath meters. Fires the stage events the change crosses.
+    public void Restore()
+    {
+        AdjustOxygen(100f - Oxygen);
+        AdjustCarbonDioxide(-CarbonDioxide);
+    }
+
     private void AdjustOxygen(float delta)
     {
         Oxygen = Math.Clamp(Oxygen + delta, 0f, 100f);

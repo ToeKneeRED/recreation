@@ -24,9 +24,11 @@ public static class StarfieldGameplayDebugTests
 
         var oxygen = new OxygenCo2 { HypoxiaAfterSeconds = 1000f };
         var hazards = new EnvironmentalHazards();
+        var rested = new WellRested();
         var debug = new StarfieldGameplayDebug { XpPerGrant = 100f };
         ModHost.Register(oxygen);
         ModHost.Register(hazards);
+        ModHost.Register(rested);
         ModHost.Register(debug);
 
         // Num3 grants XP through the real progression system.
@@ -52,6 +54,10 @@ public static class StarfieldGameplayDebugTests
         check.Equal("an affliction is carried", 1, Afflictions.Count(player));
         EventBus.Publish(new KeyPressed(Key.Num4));
         check.Equal("afflictions cleared", 0, Afflictions.Count(player));
+
+        // J rests through the WellRested system.
+        EventBus.Publish(new KeyPressed(Key.J));
+        check.That("the rest shortcut rested the player", rested.Rested);
 
         check.That("the panel reported notifications", fake.Notifications.Count > 0);
         check.That("a grant was announced",

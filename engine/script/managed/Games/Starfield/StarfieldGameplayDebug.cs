@@ -15,6 +15,7 @@ namespace Recreation.Games.Starfield;
 //   Num2  toggle a radiation hazard field
 //   Num3  grant character experience
 //   Num4  clear afflictions
+//   J     rest (restore the breath meters and start the rested bonus)
 public sealed class StarfieldGameplayDebug : GameBehaviour
 {
     // Character XP granted per Num3 press.
@@ -28,6 +29,7 @@ public sealed class StarfieldGameplayDebug : GameBehaviour
         _binds.Add(Hotkeys.Bind(Key.Num2, ToggleHazard));
         _binds.Add(Hotkeys.Bind(Key.Num3, GrantXp));
         _binds.Add(Hotkeys.Bind(Key.Num4, ClearAfflictions));
+        _binds.Add(Hotkeys.Bind(Key.J, Rest));
     }
 
     protected override void OnDestroy()
@@ -63,5 +65,12 @@ public sealed class StarfieldGameplayDebug : GameBehaviour
     {
         int cured = Afflictions.Cure(Game.Player);
         Debug.Notification($"Debug: cleared {cured} affliction(s)");
+    }
+
+    private void Rest()
+    {
+        if (Find<WellRested>() is not { } rested) return;
+        rested.Rest();
+        Debug.Notification("Debug: rested");
     }
 }

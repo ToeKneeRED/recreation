@@ -26,6 +26,10 @@ public static class CharacterProgress
     public static float ThresholdBase { get; set; } = 100f;
     public static float ThresholdPerLevel { get; set; } = 75f;
 
+    // Scales every XP gain; the rested bonus (see WellRested) raises it for a
+    // while. 1 is the unmodified rate. Session state, reset by Clear.
+    public static float XpMultiplier { get; set; } = 1f;
+
     private readonly record struct Progress(int Level, float Xp, int SkillPoints);
     private static readonly Dictionary<ulong, Progress> State = new();
 
@@ -50,6 +54,7 @@ public static class CharacterProgress
     public static void GainXp(Actor actor, float xp)
     {
         if (xp <= 0f) return;
+        xp *= XpMultiplier;
         Progress p = Of(actor);
         p = p with { Xp = p.Xp + xp };
         while (p.Xp >= Threshold(p.Level))
@@ -71,5 +76,9 @@ public static class CharacterProgress
         return true;
     }
 
-    public static void Clear() => State.Clear();
+    public static void Clear()
+    {
+        State.Clear();
+        XpMultiplier = 1f;
+    }
 }

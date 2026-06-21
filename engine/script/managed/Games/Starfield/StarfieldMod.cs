@@ -44,6 +44,12 @@ public sealed class StarfieldMod : IMod
         {
             SpeedPenalty = config.GetFloat("massSpeedPenalty", 35f),
         });
+        // Sleep recovery: rest tops up the breath meters and grants a rested bonus.
+        ModHost.Register(new WellRested
+        {
+            Bonus = config.GetFloat("wellRestedBonus", 0.1f),
+            DurationGameHours = config.GetFloat("wellRestedHours", 24f),
+        });
         // Quest progress pays character XP, driving leveling from real play.
         ModHost.Register(new StarfieldQuestRewards
         {
