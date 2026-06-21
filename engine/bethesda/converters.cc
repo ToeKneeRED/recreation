@@ -9,6 +9,7 @@
 #include "bethesda/nif.h"
 #include "bethesda/starfield_mesh.h"
 #include "core/log.h"
+#include "core/math.h"
 
 namespace rec::bethesda {
 namespace {
@@ -318,6 +319,79 @@ void BindStarfieldMaterial(asset::AssetDatabase& database, const StarfieldMateri
   BindConventionTextures(database, mat_path, material);
 }
 
+// A Starfield body NIF carries its skin binding in three blocks: SkinAttach
+// (the ordered list of skin bone names, length-prefixed), BSSkin::BoneData (the
+// per-bone inverse-bind transform), and BSSkin::Instance (refs, mostly -1 since
+// the bones resolve by name against an external skeleton). The weight stream's
+// boneIndex indexes this list. Fills `skin` from SkinAttach + BoneData; returns
+// false when either is absent or their bone counts disagree. The inverse-bind
+// translations stay in metres, matching the metres-space skeleton.
+bool ParseStarfieldSkin(ByteSpan data, asset::SkinBinding* skin) {
+  auto header = ParseNifHeader(data);
+  if (!header) return false;
+  u32 block_count = static_cast<u32>(header->block_sizes.size());
+
+  base::Vector<std::string> names;
+  base::Vector<Mat4> inverse_bind;
+  for (u32 i = 0; i < block_count; ++i) {
+    const std::string& type = header->block_types[header->block_type_index[i]];
+    const u8* block = data.data() + header->block_offsets[i];
+    size_t size = header->block_sizes[i];
+    if (type == "SkinAttach") {
+      // u32 (ref, unused), u32 bone count, then `count` length-prefixed strings.
+      if (size < 8) continue;
+      u32 count;
+      std::memcpy(&count, block + 4, 4);
+      if (count > 256) continue;
+      size_t cursor = 8;
+      bool ok = true;
+      for (u32 b = 0; b < count && ok; ++b) {
+        if (cursor + 4 > size) { ok = false; break; }
+        u32 len;
+        std::memcpy(&len, block + cursor, 4);
+        cursor += 4;
+        if (len > 256 || cursor + len > size) { ok = false; break; }
+        names.emplace_back(reinterpret_cast<const char*>(block + cursor), len);
+        cursor += len;
+      }
+      if (!ok) names.clear();
+    } else if (type == "BSSkin::BoneData") {
+      // u32 bone count, then per bone: NiBound (center vec3 + radius, 16 bytes)
+      // followed by NiTransform (9 f32 row-major rotation, vec3 translation, f32
+      // scale, 52 bytes). The transform is the inverse bind (bind vertex -> bone
+      // local) the GPU palette wants.
+      if (size < 4) continue;
+      u32 count;
+      std::memcpy(&count, block, 4);
+      constexpr size_t kBoneStride = 16 + 52;
+      if (count > 256 || 4 + static_cast<size_t>(count) * kBoneStride > size) continue;
+      inverse_bind.reserve(count);
+      for (u32 b = 0; b < count; ++b) {
+        const u8* t = block + 4 + static_cast<size_t>(b) * kBoneStride + 16;  // skip NiBound
+        f32 rot[9], trans[3], scale;
+        std::memcpy(rot, t, 36);
+        std::memcpy(trans, t + 36, 12);
+        std::memcpy(&scale, t + 48, 4);
+        // Row-major rotation (r[row*3+col]) and scale into the column-major Mat4
+        // (m[col*4+row]), then the translation, matching the engine's MakeTransform.
+        Mat4 m = Mat4::Identity();
+        for (int row = 0; row < 3; ++row) {
+          for (int col = 0; col < 3; ++col) m.m[col * 4 + row] = rot[row * 3 + col] * scale;
+        }
+        m.m[12] = trans[0];
+        m.m[13] = trans[1];
+        m.m[14] = trans[2];
+        inverse_bind.push_back(m);
+      }
+    }
+  }
+
+  if (names.empty() || names.size() != inverse_bind.size()) return false;
+  skin->bones = std::move(names);
+  skin->inverse_bind = std::move(inverse_bind);
+  return true;
+}
+
 // Starfield NIFs reference external ".mesh" geometry by hash rather than
 // inlining vertices, so its converter loads each referenced mesh from the vfs,
 // bakes the node transform into the vertices, and assigns one material with the
@@ -398,6 +472,73 @@ base::UniquePointer<asset::Mesh> ConvertStarfieldNif(asset::AssetDatabase& datab
 }
 
 }  // namespace
+
+base::UniquePointer<asset::Mesh> ConvertStarfieldSkinnedNif(asset::AssetDatabase& database,
+                                                            const StarfieldMaterialDb& mat_db,
+                                                            ByteSpan data, asset::AssetId id,
+                                                            std::string_view path) {
+  asset::SkinBinding skin;
+  if (!ParseStarfieldSkin(data, &skin)) return nullptr;
+  base::Vector<StarfieldGeometryRef> refs;
+  if (!ParseStarfieldNif(data, &refs)) return nullptr;
+
+  auto mesh = base::MakeUnique<asset::Mesh>();
+  mesh->id = id;
+  mesh->lods.emplace_back();
+  asset::MeshLod& lod = mesh->lods[0];
+
+  asset::Material material;
+  material.id = asset::MakeAssetId(std::string(path) + "#m0");
+  for (int k = 0; k < 3; ++k) material.base_color_factor[k] = 0.5f;
+  material.roughness_factor = 0.8f;
+  material.metallic_factor = 0;
+  if (std::string mat_path = SingleMaterialPath(data); !mat_path.empty()) {
+    BindStarfieldMaterial(database, mat_db, mat_path, &material);
+  }
+  database.AddMaterial(material);
+
+  f32 bounds_min[3] = {1e30f, 1e30f, 1e30f};
+  f32 bounds_max[3] = {-1e30f, -1e30f, -1e30f};
+  for (const StarfieldGeometryRef& ref : refs) {
+    auto bytes = database.vfs().Read(ref.mesh_path);
+    if (!bytes) continue;
+    StarfieldSkinnedMeshData geometry;
+    if (!ParseStarfieldSkinnedMesh(ByteSpan(bytes->data(), bytes->size()), &geometry)) continue;
+
+    // Skinned vertices stay in bind space: the node transform is the skeleton's
+    // job, so unlike ConvertStarfieldNif it is not baked into the vertices here.
+    u32 vertex_base = static_cast<u32>(lod.vertices.size());
+    u32 index_offset = static_cast<u32>(lod.indices.size());
+    for (size_t vi = 0; vi < geometry.vertices.size(); ++vi) {
+      const asset::Vertex& v = geometry.vertices[vi];
+      for (int k = 0; k < 3; ++k) {
+        bounds_min[k] = std::min(bounds_min[k], v.position[k]);
+        bounds_max[k] = std::max(bounds_max[k], v.position[k]);
+      }
+      lod.vertices.push_back(v);
+      lod.skinning.push_back(geometry.skinning[vi]);
+    }
+    for (u32 index : geometry.indices) lod.indices.push_back(vertex_base + index);
+
+    asset::Submesh submesh;
+    submesh.index_offset = index_offset;
+    submesh.index_count = static_cast<u32>(geometry.indices.size());
+    submesh.material = material.id;
+    lod.submeshes.push_back(submesh);
+  }
+
+  if (lod.vertices.empty()) return nullptr;
+  mesh->skinned = true;
+  mesh->skin = std::move(skin);
+  for (int k = 0; k < 3; ++k) mesh->bounds_center[k] = (bounds_min[k] + bounds_max[k]) * 0.5f;
+  f32 radius_sq = 0;
+  for (int k = 0; k < 3; ++k) {
+    f32 d = bounds_max[k] - mesh->bounds_center[k];
+    radius_sq += d * d;
+  }
+  mesh->bounds_radius = std::sqrt(radius_sq);
+  return mesh;
+}
 
 void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profile) {
   if (profile.game == Game::kStarfield) {

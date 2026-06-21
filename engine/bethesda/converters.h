@@ -32,6 +32,20 @@ struct BgsmMaterial {
 // a non-material blob, or a short read. Exposed for the asset layer and tests.
 bool ParseBgsm(ByteSpan data, BgsmMaterial* out);
 
+// Forward declaration: the Starfield material index, defined in material_db.h.
+class StarfieldMaterialDb;
+
+// Converts a Starfield skinned body NIF (a BSGeometry plus BSSkin::Instance /
+// BoneData / SkinAttach) into a runtime-skinned asset::Mesh: vertices stay in
+// bind space (metres), MeshLod::skinning carries the per-vertex bone
+// indices/weights, and mesh->skin names the skin bones with their inverse-bind
+// transforms so a skeleton can drive it. Textures are resolved exactly as
+// ConvertStarfieldNif. Returns null when the NIF carries no skinned geometry.
+base::UniquePointer<asset::Mesh> ConvertStarfieldSkinnedNif(asset::AssetDatabase& database,
+                                                            const StarfieldMaterialDb& mat_db,
+                                                            ByteSpan data, asset::AssetId id,
+                                                            std::string_view path);
+
 // Hooks the bethesda format converters into the asset database:
 //   .nif        -> asset::Mesh
 //   .dds        -> asset::Texture (BCn passthrough)
