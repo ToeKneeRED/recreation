@@ -13,7 +13,6 @@
 #include "script/papyrus/value.h"
 #include "world/components.h"
 #include "world/npc_ai.h"
-#include "world/pathfind.h"
 #include "world/steering_avoidance.h"
 
 namespace rec {
@@ -195,43 +194,22 @@ void NpcDirector::UpdateFollowers(f32 dt) {
 
 Vec3 NpcDirector::NavigateTo(const Vec3& from, const Vec3& goal) {
   if (!physics_.initialized()) return goal;
-  constexpr int kN = 21;       // odd so the NPC sits at the centre cell
-  constexpr f32 kCell = 0.8f;  // meters per cell (~17 m grid span, routes a keep room)
-  const int c = kN / 2;
-  const Vec3 origin{from.x - static_cast<f32>(c) * kCell, from.y,
-                    from.z - static_cast<f32>(c) * kCell};  // grid (0,0) world
-  auto cell_world = [&](int gx, int gy) {
-    return Vec3{origin.x + static_cast<f32>(gx) * kCell, from.y,
-                origin.z + static_cast<f32>(gy) * kCell};
-  };
-  // A cell is blocked when a downward ray from above it finds no floor at a
-  // walkable height: a void / ledge (no hit, or floor far below) or a wall
-  // footprint (the ray hits the wall top / interior, well above the NPC's feet).
-  // Downward rays read floors cleanly, unlike horizontal rays grazing terrain.
-  bool grid[kN * kN];
-  for (int gy = 0; gy < kN; ++gy)
-    for (int gx = 0; gx < kN; ++gx) {
-      if (gx == c && gy == c) {
-        grid[gy * kN + gx] = false;  // the NPC's own cell
-        continue;
-      }
-      const Vec3 w = cell_world(gx, gy);
+  // Route over a cached, cell-spanning navgrid (built from downward floor rays)
+  // so an NPC or the player rounds interior walls toward the goal. The grid is
+  // rebuilt only when the query point leaves the covered region, so most calls
+  // are a cheap A* with no raycasting, unlike the old per-call grid.
+  if (navgrid_.Empty() || !navgrid_.Covers(from)) {
+    auto probe = [this, &from](f32 x, f32 z, f32* floor_y) {
       physics::PhysicsWorld::RayHit hit;
-      const bool floor = physics_.Raycast(Vec3{w.x, from.y + 2.0f, w.z}, Vec3{0, -1, 0}, 4.0f, &hit);
-      grid[gy * kN + gx] = !floor || std::fabs(hit.position.y - from.y) > 0.6f;
-    }
-  auto blocked = [&](int gx, int gy) -> bool { return grid[gy * kN + gx]; };
-  const world::PathNode start{c, c};
-  int ggx = std::clamp(static_cast<int>(std::lround((goal.x - origin.x) / kCell)), 0, kN - 1);
-  int ggy = std::clamp(static_cast<int>(std::lround((goal.z - origin.z) / kCell)), 0, kN - 1);
-  std::vector<world::PathNode> path;
-  if (!world::FindPath(kN, kN, blocked, start, {ggx, ggy}, &path, kN * kN) || path.size() < 2)
-    return goal;  // no route: head straight and let local avoidance cope
-  // Aim a few cells ahead along the path for smooth motion, not the next cell;
-  // drop the waypoint onto the floor so it is reachable on stairs / ramps.
-  const world::PathNode& step = path[std::min<size_t>(3, path.size() - 1)];
-  const Vec3 w = cell_world(step.x, step.y);
-  return Vec3{w.x, GroundY(w.x, w.z, from.y), w.z};
+      if (physics_.Raycast(Vec3{x, from.y + 1.5f, z}, Vec3{0, -1, 0}, 4.0f, &hit)) {
+        *floor_y = hit.position.y;
+        return true;
+      }
+      return false;
+    };
+    navgrid_.Build(from, 11.0f, 0.8f, from.y, 0.6f, probe);
+  }
+  return navgrid_.Next(from, goal);
 }
 
 Vec3 NpcDirector::PathToward(const Vec3& from, const Vec3& goal) { return NavigateTo(from, goal); }

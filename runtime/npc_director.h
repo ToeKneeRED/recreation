@@ -8,6 +8,7 @@
 #include "ecs/world.h"
 #include "engine_context.h"
 #include "quest/scene.h"
+#include "world/navgrid.h"
 
 namespace rec {
 
@@ -78,6 +79,7 @@ class NpcDirector {
   ecs::World& world_;
   physics::PhysicsWorld& physics_;
 
+  world::NavGrid navgrid_;  // cached interior routing for followers/guides/player
   base::UnorderedMap<u64, i32> followers_;
   base::UnorderedMap<u64, Vec3> guides_;
   bool mq101_demo_pending_ = false;
