@@ -459,6 +459,7 @@ bool Engine::RunFrame() {
       prev_transforms_ = std::move(transforms);
       actors_->EmitDraws(view);
       demos_->EmitToView(frame_delta, view);
+      if (editor_) editor_->CollectLights(view.lights);  // placed torches/lamps light the scene
       quest_->RefreshQuestPanel(frame_delta);
       quest_->RefreshNativeTrace(frame_delta);
       // Outside a scripted playthrough, the auto-walk test player heads for the

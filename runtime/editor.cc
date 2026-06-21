@@ -4,8 +4,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <utility>
 
+#include "bethesda/record.h"
 #include "core/input.h"
 #include "core/log.h"
 #include "ecs/world.h"
@@ -91,6 +93,58 @@ world::CellStreamer* MapEditor::StreamerFor(int domain) const {
   if (domain >= 0 && domain < static_cast<int>(domains_.size()) && domains_[domain].streamer)
     return domains_[domain].streamer;
   return ctx_.streamer;
+}
+
+const MapEditor::LightParams* MapEditor::LightFor(bethesda::GlobalFormId base, int domain) const {
+  const u64 key = base.packed();
+  if (auto it = light_cache_.find(key); it != light_cache_.end())
+    return it->second ? &*it->second : nullptr;
+
+  std::optional<LightParams> result;
+  if (domain >= 0 && domain < static_cast<int>(domains_.size()) && domains_[domain].records) {
+    bethesda::RecordStore& records = *domains_[domain].records;
+    const bethesda::RecordStore::StoredRecord* stored = records.Find(base);
+    bethesda::Record record;
+    if (stored && stored->header.type == FourCc('L', 'I', 'G', 'H') &&
+        records.Parse(base, &record)) {
+      LightParams lp;
+      // LIGH DATA: time(i32) radius(u32 @4, game units) colour(rgba @8) ...
+      if (const bethesda::Subrecord* d = record.Find(FourCc('D', 'A', 'T', 'A'));
+          d && d->data.size() >= 12) {
+        u32 radius_units;
+        std::memcpy(&radius_units, d->data.data() + 4, 4);
+        if (radius_units > 0 && radius_units < 20000) lp.radius = radius_units * kUnitsToMeters;
+        const u8* c = d->data.data() + 8;
+        lp.color[0] = c[0] / 255.0f;
+        lp.color[1] = c[1] / 255.0f;
+        lp.color[2] = c[2] / 255.0f;
+        if (lp.color[0] + lp.color[1] + lp.color[2] < 0.05f)  // a black record reads as warm
+          lp = LightParams{};
+      }
+      result = lp;
+    }
+  }
+  auto [it, _] = light_cache_.emplace(key, result);
+  return it->second ? &*it->second : nullptr;
+}
+
+void MapEditor::CollectLights(base::Vector<render::PointLight>& out) const {
+  for (const PlacedObject& p : placed_) {
+    const LightParams* lp = LightFor(p.base, p.domain);
+    if (!lp) continue;
+    const world::Transform* t = ctx_.world->Get<world::Transform>(p.entity);
+    if (!t) continue;
+    render::PointLight l;
+    l.pos_radius[0] = t->position[0];
+    l.pos_radius[1] = t->position[1];
+    l.pos_radius[2] = t->position[2];
+    l.pos_radius[3] = lp->radius;
+    l.color_intensity[0] = lp->color[0];
+    l.color_intensity[1] = lp->color[1];
+    l.color_intensity[2] = lp->color[2];
+    l.color_intensity[3] = lp->intensity;
+    out.push_back(l);
+  }
 }
 
 void MapEditor::Update(const InputState& input, f32 dt, bool allow_input) {
@@ -374,6 +428,27 @@ void MapEditor::PlaceDemoBuild() {
         if (ctx_.streamer->GroundHeight(p.x, p.z, &g)) p.y = g;
         if (PlaceArmedAt(p, ScatterYaw()) != ecs::kInvalidEntity) ++total;
       }
+    }
+    brush_ = -1;
+  }
+
+  // Showcase light placement: a short line of primary-game LIGH props that emit
+  // (CollectLights turns each into a dynamic point light).
+  int light = -1;
+  for (size_t i = 0; i < catalog_.size(); ++i) {
+    if (catalog_[i].domain == 0 && catalog_[i].category == 6) {
+      light = static_cast<int>(i);
+      break;
+    }
+  }
+  if (light >= 0) {
+    brush_ = light;
+    const Vec3 line = base_center + right * 13.0f;
+    for (int i = 0; i < 4; ++i) {
+      Vec3 p = line + fwd_h * (static_cast<f32>(i - 1) * 2.5f);
+      f32 g = 0;
+      if (ctx_.streamer->GroundHeight(p.x, p.z, &g)) p.y = g + 1.0f;  // lift lamps off the ground
+      if (PlaceArmedAt(p, 0.0f) != ecs::kInvalidEntity) ++total;
     }
     brush_ = -1;
   }

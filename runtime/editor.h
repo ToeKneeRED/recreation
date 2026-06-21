@@ -1,7 +1,11 @@
 #ifndef RECREATION_RUNTIME_EDITOR_H_
 #define RECREATION_RUNTIME_EDITOR_H_
 
+#include <base/containers/vector.h>
+
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "bethesda/form_id.h"
@@ -18,6 +22,9 @@ class StringTable;
 namespace rec::world {
 class CellStreamer;
 }  // namespace rec::world
+namespace rec::render {
+struct PointLight;
+}  // namespace rec::render
 
 namespace rec {
 
@@ -88,6 +95,12 @@ class MapEditor {
   // pushes the rebuilt EditorView into the HUD.
   void Update(const InputState& input, f32 dt, bool allow_input);
 
+  // Appends a dynamic point light for every placed LIGH form (with its record's
+  // colour and radius), so a dropped torch or lamp actually lights the scene.
+  // Called by the engine each frame whether or not the editor is open, so placed
+  // lights stay lit during play. A no-op when nothing light-shaped was placed.
+  void CollectLights(base::Vector<render::PointLight>& out) const;
+
  private:
   // One placeable base form discovered in the load order.
   struct CatalogEntry {
@@ -136,6 +149,14 @@ class MapEditor {
 
   // The streamer that converts/uploads/places a given domain's assets.
   world::CellStreamer* StreamerFor(int domain) const;
+
+  // Emissive parameters of a LIGH base form, parsed once and cached.
+  struct LightParams {
+    f32 color[3] = {1.0f, 0.9f, 0.7f};
+    f32 radius = 5.0f;  // metres
+    f32 intensity = 6.0f;
+  };
+  const LightParams* LightFor(bethesda::GlobalFormId base, int domain) const;
 
   // --- persistence (editor_io.cc) ---
   // The layout file is a tiny line-based record of placed objects (base form +
@@ -232,6 +253,9 @@ class MapEditor {
   // Current prefab (a reusable group) and whether a click stamps it.
   std::vector<PrefabMember> prefab_;
   bool prefab_armed_ = false;
+
+  // base form id -> emissive params (nullopt = not a light), built lazily.
+  mutable std::unordered_map<u64, std::optional<LightParams>> light_cache_;
 
   // Paint-scatter: holding the place button and dragging drops a copy every
   // `scatter_spacing_` metres, each at a varied yaw, for fast forests / clutter.
