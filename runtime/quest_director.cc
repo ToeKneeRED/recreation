@@ -767,10 +767,12 @@ void QuestDirector::UpdateQuestHud(const std::vector<quest::QuestStatus>& runnin
 void QuestDirector::UpdateObjectiveMarkers(const std::vector<quest::QuestStatus>& running) {
   // A multiplayer client never owns markers or triggers; it shows the host's
   // replicated marker, driven from its own camera.
+#if RECREATION_HAS_NET
   if (ctx_.client_session) {
     DriveObjectiveMarkerHud(remote_marker_active_, remote_marker_pos_);
     return;
   }
+#endif
 
   // A marker is armed when its own quest is running and its objective is the
   // current displayed-and-incomplete one. Checked per marker against its own
@@ -806,11 +808,13 @@ void QuestDirector::UpdateObjectiveMarkers(const std::vector<quest::QuestStatus>
       const float pp3[3] = {pp.x, pp.y, pp.z};
       reached = world::MarkerReached(pp3, marker, armed->radius);
     }
+#if RECREATION_HAS_NET
     if (!reached)
       world_.Each<net::NetworkId, world::Transform>(
           [&](ecs::Entity, net::NetworkId&, world::Transform& t) {
             if (world::MarkerReached(t.position, marker, armed->radius)) reached = true;
           });
+#endif
     if (reached) {
       armed->fired = true;
       const u64 quest = armed->quest;

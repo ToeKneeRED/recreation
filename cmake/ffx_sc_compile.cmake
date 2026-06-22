@@ -29,8 +29,10 @@ execute_process(
     -DFFX_HALF=${HALF}
     -output=${OUT_DIR}
     ${SHADER}
-  RESULT_VARIABLE result)
+  RESULT_VARIABLE result
+  OUTPUT_VARIABLE out
+  ERROR_VARIABLE err)
 
 if(NOT result EQUAL 0)
-  message(FATAL_ERROR "ffx_sc failed for ${NAME} (${result})")
+  message(FATAL_ERROR "ffx_sc failed for ${NAME} (${result})\n--- stdout ---\n${out}\n--- stderr ---\n${err}")
 endif()

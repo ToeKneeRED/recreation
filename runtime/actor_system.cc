@@ -608,7 +608,7 @@ void ActorSystem::SyncSolidBodies() {
   if (config_.headless || !physics_.initialized()) return;
   constexpr f32 kRadius = 0.3f, kHalfHeight = 0.55f;
   constexpr f32 kCentreOffset = kRadius + kHalfHeight;  // feet -> capsule centre
-  const ecs::Entity local =
+  [[maybe_unused]] const ecs::Entity local =
       player_actor_ >= 0 ? actors_[player_actor_].entity : ecs::kInvalidEntity;
 
   auto ensure = [&](ecs::Entity e, const world::Transform& t) {
@@ -624,11 +624,13 @@ void ActorSystem::SyncSolidBodies() {
   world_.Each<world::Npc, world::Transform>(
       [&](ecs::Entity e, world::Npc&, world::Transform& t) { ensure(e, t); });
   // Other (networked) players are solid too; never block the local player itself.
+#if RECREATION_HAS_NET
   world_.Each<net::NetworkId, world::Transform>(
       [&](ecs::Entity e, net::NetworkId&, world::Transform& t) {
         if (e.index == local.index && e.generation == local.generation) return;
         ensure(e, t);
       });
+#endif
 
   // Drop capsules whose entity is gone (cell unload / player disconnect).
   scratch_dead_actors_.clear();

@@ -328,7 +328,9 @@ void Engine::ApplyQuestWorld() {
   std::vector<world::WorldCommand> commands = quest_world_queue_.Drain();
   if (commands.empty()) return;
   quest_world_.Apply(commands);  // host/single-player: apply locally + record provenance
+#if RECREATION_HAS_NET
   if (server_session_) server_session_->SendWorldCommands(commands);  // mirror to clients
+#endif
 }
 
 void Engine::ServerSimulateActors(f32 /*dt*/) {
@@ -340,10 +342,12 @@ void Engine::ServerSimulateActors(f32 /*dt*/) {
   if (world_.IsAlive(local))
     if (const world::Transform* t = world_.Get<world::Transform>(local))
       pushers.push_back({t->position[0], t->position[1], t->position[2]});
+#if RECREATION_HAS_NET
   world_.Each<net::NetworkId, world::Transform>(
       [&](ecs::Entity, net::NetworkId&, world::Transform& t) {
         pushers.push_back({t.position[0], t.position[1], t.position[2]});
       });
+#endif
   if (pushers.empty()) return;
 
   constexpr f32 kPushRadius = 0.6f;  // ~capsule radius in meters
@@ -407,7 +411,11 @@ bool Engine::RunFrame() {
     }
     // Advance any scenes a quest fragment Started; the ScenePlayer fires their
     // phase fragments over time (host-authoritative; runs on the guest thread).
+#if RECREATION_HAS_NET
     if (scripts_ && ctx_.bindings && !client_session_) {
+#else
+    if (scripts_ && ctx_.bindings) {
+#endif
       auto* binds = ctx_.bindings;
       const f32 sdt = static_cast<f32>(timer_.frame_delta());
       scripts_->guest().Submit(
@@ -420,7 +428,11 @@ bool Engine::RunFrame() {
 
     // Authoritative NPC simulation runs on the host / single-player only; a
     // client receives the results via actor sync instead of simulating.
+#if RECREATION_HAS_NET
     if (!client_session_) ServerSimulateActors(static_cast<f32>(timer_.frame_delta()));
+#else
+    ServerSimulateActors(static_cast<f32>(timer_.frame_delta()));
+#endif
     // Steer follower NPCs toward the player and scene guides toward their
     // targets (host authoritative; streams to clients via actor sync).
     npc_->UpdateFollowers(static_cast<f32>(timer_.frame_delta()));
