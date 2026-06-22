@@ -37,8 +37,13 @@ class GpuCull {
     u32 first_instance = 0;
   };
 
-  static constexpr u32 kMaxCommands = 1u << 15;   // 32768 opaque submeshes
-  static constexpr u32 kMaxInstances = 1u << 14;  // 16384 draws
+  // Sized for the densest streamed scenes (a full New Atlantis cell, or several
+  // games' worldspaces loaded at once). The draw loops clamp to the count the
+  // build actually wrote (cull_total_commands_), so exceeding these caps drops the
+  // overflow geometry rather than reading past the indirect buffer (which renders
+  // as garbage scanlines).
+  static constexpr u32 kMaxCommands = 1u << 18;   // 262144 opaque submeshes
+  static constexpr u32 kMaxInstances = 1u << 17;  // 131072 draws
 
   bool Initialize(Device& device, VkFormat color_format);
   void Destroy(Device& device);

@@ -1098,6 +1098,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         for (const DrawItem& item : view.draws) {
           const GpuMesh* mesh = meshes_.find(item.mesh);
           if (!mesh || mesh->all_blend) continue;
+          // Stay within the commands the cull build wrote; past that the indirect
+          // buffer holds no valid command and reading it renders as garbage.
+          if (cull_cmd_index >= cull_total_commands_) break;
           bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
           if (draw_skinned != skinned_bound) {
             mesh_pipeline_->SetPrepassSkinned(ctx.cmd, draw_skinned);
@@ -1111,6 +1114,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           mesh_pipeline_->Draw(ctx.cmd, *mesh, push);
           for (const GpuSubmesh& submesh : mesh->submeshes) {
             if (submesh.blend) continue;  // transparency owns its own depth
+            if (cull_cmd_index >= cull_total_commands_) break;  // partial-mesh boundary
             VkDescriptorSet material = material_system_->set(submesh.material);
             if (material != bound_material) {
               mesh_pipeline_->BindMaterial(ctx.cmd, material);
@@ -1284,6 +1288,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         for (const DrawItem& item : view.draws) {
           const GpuMesh* mesh = meshes_.find(item.mesh);
           if (!mesh || mesh->all_blend) continue;
+          if (cull_cmd_index >= cull_total_commands_) break;  // clamp to the built commands
           bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
           if (draw_skinned != skinned_bound) {
             mesh_pipeline_->SetSkinned(ctx.cmd, draw_skinned, use_rt_frag, settings_.wireframe);
@@ -1297,6 +1302,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           mesh_pipeline_->Draw(ctx.cmd, *mesh, push);
           for (const GpuSubmesh& submesh : mesh->submeshes) {
             if (submesh.blend) continue;
+            if (cull_cmd_index >= cull_total_commands_) break;  // partial-mesh boundary
             VkDescriptorSet material = material_system_->set(submesh.material);
             if (material != bound_material) {
               mesh_pipeline_->BindMaterial(ctx.cmd, material);
