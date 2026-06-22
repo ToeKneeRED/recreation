@@ -41,6 +41,9 @@ public sealed class ActionPoints : GameBehaviour
     {
         if (deltaTime <= 0f) return;
 
+        // Persistent VATS action-point bar (amber), always shown like Fallout's.
+        Hud.Gauge("ap", Max > 0f ? Current / Max : 0f, "Action Points", 0xf0d24affu);
+
         if (_regenPauseRemaining > 0f)
         {
             _regenPauseRemaining = Math.Max(0f, _regenPauseRemaining - deltaTime);

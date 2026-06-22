@@ -43,6 +43,10 @@ public sealed class Adrenaline : GameBehaviour
 
     protected override void OnUpdate(float deltaTime)
     {
+        // Show the adrenaline rank as a HUD bar (red) while a kill streak holds.
+        if (Rank > 0) Hud.Gauge("adrenaline", (float)Rank / MaxRank, "Adrenaline", 0xe04848ffu);
+        else Hud.ClearGauge("adrenaline");
+
         if (deltaTime <= 0f || Rank == 0) return;
 
         // Only idle (out-of-combat) time decays the meter; a sustained fight holds
