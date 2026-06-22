@@ -122,6 +122,92 @@ bool NpcDirector::StepNpcSteering(ecs::Entity actor, const float goal[3], float 
   return !out.arrived;
 }
 
+f32 NpcDirector::AmbientRand(f32 lo, f32 hi) {
+  ambient_rng_ ^= ambient_rng_ << 13;
+  ambient_rng_ ^= ambient_rng_ >> 7;
+  ambient_rng_ ^= ambient_rng_ << 17;
+  return lo + (hi - lo) * static_cast<f32>((ambient_rng_ >> 40) & 0xffffff) / 16777216.0f;
+}
+
+void NpcDirector::UpdateAmbient(f32 dt) {
+  // Host / single-player only; a client receives this motion via actor sync (like
+  // followers), so it must not double-simulate (the RNG would diverge).
+#if RECREATION_HAS_NET
+  if (!actors_->HasPlayer() || ctx_.client_session) {
+    ambient_.clear();
+    return;
+  }
+#else
+  if (!actors_->HasPlayer()) {
+    ambient_.clear();
+    return;
+  }
+#endif
+  Vec3 ppos;
+  if (!actors_->PlayerWorldPos(&ppos)) return;
+
+  constexpr f32 kActiveRadius = 26.0f;  // only NPCs near the player sandbox
+  constexpr f32 kFaceRadius = 6.0f;     // turn to face the player within this
+  constexpr f32 kWanderRadius = 4.5f;   // how far an idle goal sits from home
+  constexpr f32 kIdleMin = 3.0f, kIdleMax = 7.0f;
+  constexpr f32 kWalkSpeed = 1.3f;
+  constexpr int kMaxStepsPerFrame = 8;  // cap the per-frame steering cost
+
+  // Gather the near, unmanaged NPCs first (no ECS mutation during iteration).
+  struct Nearby {
+    ecs::Entity e;
+    u64 handle;
+    world::Transform* t;
+    f32 dist2;
+  };
+  base::Vector<Nearby> nearby;
+  world_.Each<world::Npc, world::FormLink, world::Transform>(
+      [&](ecs::Entity e, world::Npc&, world::FormLink& link, world::Transform& t) {
+        const u64 handle = link.form.packed();
+        if (followers_.find(handle) || guides_.find(handle)) return;  // driven elsewhere
+        const f32 dx = t.position[0] - ppos.x, dz = t.position[2] - ppos.z;
+        const f32 d2 = dx * dx + dz * dz;
+        if (d2 <= kActiveRadius * kActiveRadius) nearby.push_back({e, handle, &t, d2});
+      });
+
+  base::UnorderedMap<u64, AmbientState> kept;  // rebuilt, pruning NPCs no longer near
+  int steps = 0;
+  for (const Nearby& n : nearby) {
+    AmbientState state;
+    if (const AmbientState* prev = ambient_.find(n.handle)) {
+      state = *prev;
+    } else {
+      state.home = {n.t->position[0], n.t->position[1], n.t->position[2]};
+      state.idle_timer = AmbientRand(kIdleMin, kIdleMax);
+    }
+    if (state.walking) {
+      if (steps < kMaxStepsPerFrame) {  // over the cap: stay walking, resume next frame
+        ++steps;
+        const float goal[3] = {state.goal.x, state.goal.y, state.goal.z};
+        if (!StepNpcSteering(n.e, goal, n.t->position, n.t->rotation, kWalkSpeed, 0.6f, 0.4f, dt)) {
+          state.walking = false;
+          state.idle_timer = AmbientRand(kIdleMin, kIdleMax);
+        }
+      }
+    } else {
+      state.idle_timer -= dt;
+      if (n.dist2 < kFaceRadius * kFaceRadius) {  // acknowledge a close player
+        const f32 yaw = std::atan2(ppos.x - n.t->position[0], ppos.z - n.t->position[2]);
+        actors_->SetNpcGait(n.e, 0.0f, true, yaw);
+      }
+      if (state.idle_timer <= 0.0f) {  // wander to a new spot near home
+        const f32 ang = AmbientRand(0.0f, 6.2831853f);
+        const f32 r = AmbientRand(1.0f, kWanderRadius);
+        state.goal = {state.home.x + std::cos(ang) * r, n.t->position[1],
+                      state.home.z + std::sin(ang) * r};
+        state.walking = true;
+      }
+    }
+    kept.insert(n.handle, state);
+  }
+  ambient_ = std::move(kept);
+}
+
 void NpcDirector::UpdateFollowers(f32 dt) {
   // Host authoritative: a client receives follower motion via actor sync.
 #if RECREATION_HAS_NET

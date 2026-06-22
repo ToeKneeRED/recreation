@@ -40,6 +40,12 @@ class NpcDirector {
 
   void UpdateFollowers(f32 dt);
   void UpdateGuides(f32 dt);
+  // Ambient sandbox for the streamed NPCs near the player: idle-wander within a
+  // small radius of where each was placed, and turn to face a close player, so
+  // the world is not full of statues. Host/single-player authoritative; the
+  // motion streams to clients via actor sync, like followers. Cheap: only NPCs
+  // near the player are simulated and the per-frame steering work is capped.
+  void UpdateAmbient(f32 dt);
   // A reachable waypoint from `from` toward `goal` that rounds interior walls
   // (grid A* over a downward-ray floor map). Lets the engine route the walking
   // player through the keep instead of pressing it straight into geometry.
@@ -82,6 +88,18 @@ class NpcDirector {
   world::NavGrid navgrid_;  // cached interior routing for followers/guides/player
   base::UnorderedMap<u64, i32> followers_;
   base::UnorderedMap<u64, Vec3> guides_;
+  // Ambient-wander state per nearby NPC (keyed by its form handle), pruned each
+  // frame to the NPCs still near the player. xorshift jitter is local sandbox
+  // noise (host-only), never replicated, so it needs no determinism guarantee.
+  struct AmbientState {
+    Vec3 home{};
+    Vec3 goal{};
+    f32 idle_timer = 0;
+    bool walking = false;
+  };
+  base::UnorderedMap<u64, AmbientState> ambient_;
+  u64 ambient_rng_ = 0x243f6a8885a308d3ull;
+  f32 AmbientRand(f32 lo, f32 hi);
   bool mq101_demo_pending_ = false;
   u64 mq101_demo_quest_ = 0;
   base::Vector<i32> mq101_demo_stages_;

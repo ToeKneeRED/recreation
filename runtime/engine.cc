@@ -452,6 +452,7 @@ bool Engine::RunFrame() {
     // targets (host authoritative; streams to clients via actor sync).
     npc_->UpdateFollowers(static_cast<f32>(timer_.frame_delta()));
     npc_->UpdateGuides(static_cast<f32>(timer_.frame_delta()));
+    npc_->UpdateAmbient(static_cast<f32>(timer_.frame_delta()));  // idle sandbox for streamed NPCs
     npc_->Mq101DemoTick(static_cast<f32>(timer_.frame_delta()));
     npc_->Mq101SceneTick(static_cast<f32>(timer_.frame_delta()));
     // World-driven progression: the player walking into a scripted trigger box
