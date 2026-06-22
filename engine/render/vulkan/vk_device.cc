@@ -234,10 +234,13 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   base::Vector<const char*> device_extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
   // A portability-subset device (MoltenVK) must have this extension enabled when
-  // it advertises it, otherwise vkCreateDevice fails.
+  // it advertises it, otherwise vkCreateDevice fails. The name macro lives
+  // behind VK_ENABLE_BETA_EXTENSIONS, so spell it literally to avoid pulling in
+  // the beta headers just for the string.
 #if defined(__APPLE__)
-  if (HasExtension(available, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
-    device_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+  constexpr const char* kPortabilitySubset = "VK_KHR_portability_subset";
+  if (HasExtension(available, kPortabilitySubset)) {
+    device_extensions.push_back(kPortabilitySubset);
   }
 #endif
 
