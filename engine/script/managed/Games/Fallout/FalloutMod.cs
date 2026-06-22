@@ -30,5 +30,46 @@ public sealed class FalloutMod : IMod
         });
         // Quest progress surfaces through the Pip-Boy as journal notifications.
         ModHost.Register(new PipBoyQuestLog());
+        // Radiation eats max Health out in the hot zones; RadAway and sleep cure it.
+        ModHost.Register(new Radiation
+        {
+            RadsPerSecond = config.GetFloat("radsPerSecond", 8f),
+            CurePerDose = config.GetFloat("radAwayCure", 300f),
+            MinorAt = config.GetFloat("radMinorAt", 200f),
+            AdvancedAt = config.GetFloat("radAdvancedAt", 500f),
+            CriticalAt = config.GetFloat("radCriticalAt", 800f),
+            MaxRads = config.GetFloat("radMax", 1000f),
+        });
+        ModHost.Register(new Encumbrance
+        {
+            SpeedPenalty = config.GetFloat("encumbranceSpeedPenalty", 40f),
+        });
+        // Quest, kills and survival adrenaline drive XP -> level -> perk points.
+        ModHost.Register(new FalloutQuestRewards
+        {
+            XpPerStage = config.GetFloat("questXpPerStage", 50f),
+        });
+        ModHost.Register(new FalloutCombatRewards
+        {
+            XpPerKill = config.GetFloat("combatXpPerKill", 15f),
+        });
+        ModHost.Register(new Adrenaline
+        {
+            KillsPerRank = config.GetInt("adrenalineKillsPerRank", 5),
+            DamagePerRank = config.GetFloat("adrenalineDamagePerRank", 0.05f),
+            DecaySeconds = config.GetFloat("adrenalineDecaySeconds", 60f),
+        });
+        ModHost.Register(new ActionPoints
+        {
+            RegenPerSecond = config.GetFloat("apRegenPerSecond", 30f),
+            RegenDelay = config.GetFloat("apRegenDelay", 1.0f),
+            BaseMax = config.GetFloat("apBaseMax", 60f),
+        });
+        // Surfaces the systems above to the player as corner notifications.
+        ModHost.Register(new CommonwealthNotifications());
+
+        // A keypad panel to exercise the gameplay by hand; off unless asked for.
+        if (config.GetBool("debug", false))
+            ModHost.Register(new FalloutGameplayDebug());
     }
 }
