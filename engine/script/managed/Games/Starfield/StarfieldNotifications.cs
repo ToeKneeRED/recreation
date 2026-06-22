@@ -36,6 +36,12 @@ public sealed class StarfieldNotifications : GameBehaviour
         On<LocationDiscovered>(_ => "Location discovered");
         On<ResearchCompleted>(e => $"Research complete: {e.ProjectId}");
         On<ItemCrafted>(e => "Item crafted");
+        On<FactionRankChanged>(e => $"Reputation: {e.Rank}");
+        On<AffinityThresholdChanged>(e => $"Companion {e.Tier}");
+        On<CompanionPerkUnlocked>(_ => "Companion perk unlocked");
+        On<BountyChanged>(e => e.Bounty > 0 ? $"Bounty {e.Bounty}" : "Bounty cleared");
+        On<GravJumped>(_ => "Grav jump");
+        On<CargoOverCapacityChanged>(e => e.Over ? "Cargo over capacity" : null);
     }
 
     protected override void OnDestroy()

@@ -65,6 +65,16 @@ public sealed class StarfieldMod : IMod
         {
             XpPerDiscovery = config.GetFloat("discoveryXp", 25f),
         });
+        // The ship layer: grav-drive fuel/range and the cargo-hold mass limit. The
+        // social/crime systems (FactionReputation, CrewAffinity, Bounties) are static
+        // registries driven on demand by quests and deeds, so they stay unregistered.
+        ModHost.Register(new ShipSystems
+        {
+            MaxFuel = config.GetFloat("shipMaxFuel", 100f),
+            FuelPerLightYear = config.GetFloat("shipFuelPerLightYear", 4f),
+            JumpRangeLy = config.GetFloat("shipJumpRangeLy", 18f),
+            CargoCapacity = config.GetFloat("shipCargoCapacity", 600f),
+        });
         // Surfaces the systems above to the player as corner notifications.
         ModHost.Register(new StarfieldNotifications());
 

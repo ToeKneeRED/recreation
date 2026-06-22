@@ -121,6 +121,12 @@ public sealed class OxygenCo2 : GameBehaviour
         else if (CarbonDioxide > 0f) AdjustCarbonDioxide(-CarbonDioxideDecayPerSecond * deltaTime);
 
         UpdateHypoxia(deltaTime);
+
+        // Surface the breath meters on the HUD: oxygen (cyan) always, CO2 (amber)
+        // only while it is rising, so the survival state reads at a glance.
+        Hud.Gauge("oxygen", Oxygen / 100f, "Oxygen", 0x5ad6f0ffu);
+        if (CarbonDioxide > 0f) Hud.Gauge("co2", CarbonDioxide / 100f, "CO2", 0xe0a23cffu);
+        else Hud.ClearGauge("co2");
     }
 
     private void OnItemAdded(ItemAdded e)

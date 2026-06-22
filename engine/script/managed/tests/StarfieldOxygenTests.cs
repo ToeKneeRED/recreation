@@ -47,6 +47,9 @@ public static class StarfieldOxygenTests
         check.Equal("crossed into Low", OxygenStage.Low, o2Stage);
         check.Equal("one oxygen stage change so far", 1, o2Stages);
         check.Equal("no CO2 while oxygen remains", 0f, lungs.CarbonDioxide);
+        // The breath meter reaches the HUD as a gauge tracking the live value.
+        check.That("oxygen gauge pushed to HUD",
+            fake.Gauges.TryGetValue("oxygen", out var og) && og > 0.24f && og < 0.26f);
 
         // Two more seconds of exertion floors oxygen at 0 (Empty), and CO2 starts.
         ModHost.Tick(2f);
