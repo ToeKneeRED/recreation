@@ -1,5 +1,6 @@
 #include "world/grass_baker.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
