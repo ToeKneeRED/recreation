@@ -78,6 +78,12 @@ public static class StarfieldOxygenTests
         EventBus.Publish(new ItemAdded(fake.Player, rock, 1));
         check.Equal("a plain item does not refill", 100f, lungs.Oxygen);
 
+        // Combat counts as exertion: oxygen drains in a fight with no manual flag.
+        fake.SetInCombat(fake.Player, true);
+        ModHost.Tick(1f);
+        check.That("combat drains oxygen", lungs.Oxygen < 100f);
+        fake.SetInCombat(fake.Player, false);
+
         ModHost.Shutdown();
         Afflictions.Clear();
         EventBus.Clear();

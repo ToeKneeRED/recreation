@@ -35,11 +35,11 @@ public readonly struct CarbonDioxideStageChanged(CarbonDioxideStage stage) : IGa
 }
 
 // Starfield's signature O2/CO2 survival loop, a GameBehaviour that runs the whole
-// mechanic in managed code. Exertion (sprinting or over-encumbrance) spends
-// oxygen; once oxygen is gone the player accrues a carbon-dioxide debt that decays
-// again as soon as oxygen returns. Both meters are kept here as managed state
-// rather than actor values, since the engine models no O2/CO2 stat. Sustained
-// maxed CO2 inflicts the Hypoxia affliction (which the Afflictions registry holds
+// mechanic in managed code. Exertion (a sprint flag, over-encumbrance, or being in
+// combat) spends oxygen; once oxygen is gone the player accrues a carbon-dioxide
+// debt that decays again as soon as oxygen returns. Both meters are kept here as
+// managed state rather than actor values, since the engine models no O2/CO2 stat.
+// Sustained maxed CO2 inflicts the Hypoxia affliction (the Afflictions registry holds
 // against the player's Health) and clearing the debt cures it, so the cascade
 // O2 -> CO2 -> affliction is real. Tunable from Starfield.json; it announces stage
 // changes on the event bus and otherwise leaves the consequences to subscribers.
@@ -110,7 +110,10 @@ public sealed class OxygenCo2 : GameBehaviour
     {
         if (deltaTime <= 0f) return;
 
-        if (Exerting || Overburdened) AdjustOxygen(-DrainPerSecond * deltaTime);
+        // Exertion drains oxygen: a manual sprint flag, hauling over-mass, or being
+        // in a fight (the live source that needs no external wiring, so the loop
+        // actually runs during play). Otherwise it regenerates at rest.
+        if (Exerting || Overburdened || Game.Player.IsInCombat) AdjustOxygen(-DrainPerSecond * deltaTime);
         else if (Oxygen < 100f) AdjustOxygen(RegenPerSecond * deltaTime);
 
         // CO2 only builds once oxygen is gone; with air to breathe it decays.
