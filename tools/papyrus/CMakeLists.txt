@@ -172,3 +172,30 @@ if(RECREATION_NET)
   add_test(NAME objective_marker_nettest COMMAND objective_marker_nettest)
   add_test(NAME quest_net_progressiontest COMMAND quest_net_progressiontest)
 endif()
+
+# Managed (C#) scripting gates, wired only when a .NET SDK is on the configure
+# PATH. A setup fixture builds the assembly and its test runner once; the unit
+# tests cover the pure-managed modding framework, and hosttest drives the full
+# C#<->engine dispatch path through the real bridge (it skips cleanly without a
+# .NET runtime at test time).
+find_program(DOTNET_EXE dotnet)
+if(DOTNET_EXE)
+  set(MANAGED_DIR ${CMAKE_SOURCE_DIR}/engine/script/managed)
+  set(MANAGED_OUT ${CMAKE_CURRENT_BINARY_DIR}/managed)
+  set(MANAGED_DLL ${MANAGED_OUT}/Recreation.Scripting.dll)
+  set(MANAGED_CFG ${MANAGED_OUT}/Recreation.Scripting.runtimeconfig.json)
+  set(MANAGED_TESTS ${MANAGED_OUT}/Recreation.Scripting.Tests.dll)
+
+  add_test(NAME managed_build
+    COMMAND ${DOTNET_EXE} build ${MANAGED_DIR}/tests/Recreation.Scripting.Tests.csproj
+            -c Release -o ${MANAGED_OUT} --nologo)
+  set_tests_properties(managed_build PROPERTIES FIXTURES_SETUP managed_fx)
+
+  add_test(NAME managed_scripting_tests COMMAND ${DOTNET_EXE} ${MANAGED_TESTS})
+  set_tests_properties(managed_scripting_tests PROPERTIES FIXTURES_REQUIRED managed_fx)
+
+  add_test(NAME papyrus_hosttest COMMAND pexrun hosttest ${MANAGED_CFG} ${MANAGED_DLL})
+  set_tests_properties(papyrus_hosttest PROPERTIES FIXTURES_REQUIRED managed_fx)
+else()
+  message(STATUS "dotnet not found: managed scripting tests disabled")
+endif()
