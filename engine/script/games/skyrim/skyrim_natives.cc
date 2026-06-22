@@ -145,6 +145,21 @@ void RegisterGameControls(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   });
 }
 
+// Hud.Gauge(id, fraction, label, color) / Hud.ClearGauge(id): a managed gameplay
+// system pushes a named persistent HUD bar (the survival meters), the persistent
+// counterpart to Debug.Notification's transient toast. The engine snapshots the
+// gauges onto the HUD each frame.
+void RegisterHud(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
+  reg.Register("Hud", "Gauge", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    Resolve(bindings).SetHudGauge(ArgS(a, 0), ArgF(a, 1), ArgS(a, 2), static_cast<u32>(ArgI(a, 3)));
+    return Value();
+  });
+  reg.Register("Hud", "ClearGauge", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    Resolve(bindings).ClearHudGauge(ArgS(a, 0));
+    return Value();
+  });
+}
+
 void RegisterUtility(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Utility", "RandomInt", [](VirtualMachine&, ObjectRef, Args& a) {
     i32 lo = a.size() > 0 ? ArgI(a, 0) : 0;
@@ -711,6 +726,7 @@ void RegisterActor(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
 void RegisterSkyrimNatives(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   RegisterMath(reg);
   RegisterDebug(reg);
+  RegisterHud(reg, bindings);
   RegisterUtility(reg, bindings);
   RegisterGameAndForms(reg, bindings);
   RegisterGameControls(reg, bindings);

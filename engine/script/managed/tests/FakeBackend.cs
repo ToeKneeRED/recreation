@@ -211,6 +211,9 @@ public sealed class FakeBackend : IEngineBackend
 
     // Every Debug.Notification message shown, in order, for asserting UI prompts.
     public List<string> Notifications { get; } = new();
+    // The latest Hud.Gauge push per id (id -> fraction), for asserting a survival
+    // meter reaches the HUD; ClearGauge removes the entry.
+    public Dictionary<string, float> Gauges { get; } = new();
 
     public Value CallGlobal(string type, string function, ReadOnlySpan<Value> args)
     {
@@ -219,6 +222,8 @@ public sealed class FakeBackend : IEngineBackend
         LastStringArg = args.Length > 0 && args[0].Kind == ValueKind.String ? args[0].AsString() : "";
         LastBoolArg = args.Length > 0 && args[0].AsBool();
         if (type == "Debug" && function == "Notification") Notifications.Add(LastStringArg);
+        if (type == "Hud" && function == "Gauge") Gauges[args[0].AsString()] = args[1].AsFloat();
+        if (type == "Hud" && function == "ClearGauge") Gauges.Remove(args[0].AsString());
         if (type == "Game" && function == "GetPlayer") return Value.Object(Player);
         if (type == "Game" && function == "GetForm") return Value.Object((ulong)args[0].AsInt() & 0xFFFFFFFF);
         if (type == "Game" && function == "EnableFastTravel") FastTravelEnabled = LastBoolArg;

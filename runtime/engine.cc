@@ -512,6 +512,16 @@ bool Engine::RunFrame() {
         }
         for (const std::string& message : notifications) game_ui_.FlashQuestUpdate(message);
       }
+      // Surface managed HUD gauges (oxygen, radiation, ...) pushed via Hud.Gauge
+      // by the primary game's gameplay systems.
+      if (script_bindings_) {
+        std::vector<script::skyrim::RecordBackedSkyrimBindings::HudGauge> gauges;
+        script_bindings_->SnapshotHudGauges(gauges);
+        std::vector<HudGauge> hud;
+        hud.reserve(gauges.size());
+        for (const auto& g : gauges) hud.push_back({g.id, g.label, g.fraction, g.color});
+        game_ui_.SetHudGauges(hud);
+      }
       game_ui_.Build(*window_, renderer_, camera_, frame_delta, &view);
       renderer_.RenderFrame(view);
     } else {

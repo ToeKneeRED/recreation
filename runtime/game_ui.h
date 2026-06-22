@@ -29,6 +29,16 @@ struct HudQuest {
   std::vector<Objective> objectives;
 };
 
+// A persistent labeled HUD gauge pushed from managed gameplay (oxygen, radiation,
+// adrenaline, ...) through the Hud.Gauge native. The engine snapshots the live
+// set each frame; an empty list hides the gauge stack.
+struct HudGauge {
+  std::string id;
+  std::string label;
+  float fraction = 0;  // 0..1
+  u32 color = 0;       // packed rgba8; 0 = HUD default
+};
+
 // The open conversation the dialogue panel shows: the speaker, their last line,
 // and the numbered player topics to choose from. open == false hides the panel.
 struct DialogueView {
@@ -221,6 +231,9 @@ class GameUi {
   // "quest updated" banner. SetActivatePrompt shows a centered prompt such as
   // "Talk to Ralof" (empty hides it).
   void SetQuest(const HudQuest& quest);
+  // Persistent managed gameplay gauges (oxygen, radiation, ...), shown as a
+  // labeled bar stack above the vitals. Replaces the whole set each frame.
+  void SetHudGauges(const std::vector<HudGauge>& gauges);
   void FlashQuestUpdate(const std::string& message);
   void SetActivatePrompt(const std::string& prompt);
   // Objective compass waypoint. active shows a pip on the compass at

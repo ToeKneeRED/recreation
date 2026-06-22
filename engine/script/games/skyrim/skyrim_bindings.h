@@ -109,6 +109,20 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   quest::QuestSystem& quest_system() { return quest_system_; }
   const quest::QuestSystem& quest_system() const { return quest_system_; }
 
+  // Managed HUD gauges (Hud.Gauge native): named persistent bars the gameplay
+  // systems push from the guest thread; the runtime snapshots them onto the HUD
+  // on the main thread, so the store is mutex-guarded like live_positions_.
+  struct HudGauge {
+    std::string id;
+    std::string label;
+    f32 fraction = 0;
+    u32 color = 0;  // packed rgba8; 0 = HUD default
+  };
+  void SetHudGauge(const std::string& id, f32 fraction, const std::string& label,
+                   u32 color) override;
+  void ClearHudGauge(const std::string& id) override;
+  void SnapshotHudGauges(std::vector<HudGauge>& out) const;
+
   // Applies a server-replicated quest status on a multiplayer client and, when it
   // carries a fresh stage, fires the managed QuestStageChanged event so C# mods
   // (XP rewards, the journal) react to the host's progress exactly as a local
@@ -417,6 +431,11 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // bindings state touched from two threads.
   std::mutex live_positions_mutex_;
   std::unordered_map<u64, std::array<f32, 3>> live_positions_;
+  // Managed HUD gauges, id-keyed, insertion-ordered for a stable HUD layout.
+  // Written on the guest thread (SetHudGauge), read on the main thread
+  // (SnapshotHudGauges); guarded by its own mutex.
+  mutable std::mutex hud_gauges_mutex_;
+  std::vector<HudGauge> hud_gauges_;
   std::vector<std::pair<u64, f32>> nearby_cache_;  // last result: (handle, distance in game units)
   // Last GetMagicEffectCount result, read by the GetNthMagicEffect* accessors.
   // Guest-thread only (record parsing), so it needs no lock.

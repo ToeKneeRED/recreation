@@ -278,6 +278,15 @@ class SkyrimBindings {
   virtual f32 GetGameSettingFloat(const std::string& name) { return 0; }
   virtual f32 GetRealHoursPassed() { return 0; }
   virtual f32 GetCurrentGameTime() { return 0; }  // days since game start
+
+  // Managed HUD gauges: a named persistent bar a gameplay system (oxygen,
+  // radiation, ...) pushes each tick, the counterpart to Debug.Notification's
+  // transient toast. `fraction` is clamped 0..1, `color` is packed rgba8 (0 lets
+  // the HUD pick one). The engine snapshots them onto the HUD each frame.
+  // Clearing one removes its bar. Default no-ops for the neutral bindings.
+  virtual void SetHudGauge(const std::string& id, f32 fraction, const std::string& label,
+                           u32 color) {}
+  virtual void ClearHudGauge(const std::string& id) {}
 };
 
 // Registers the Skyrim Papyrus native surface into reg, bound against bindings

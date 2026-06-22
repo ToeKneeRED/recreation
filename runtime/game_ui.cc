@@ -53,6 +53,7 @@ constexpr int kDialogueOptionRows = 4;  // matches the 1-4 selection keys
 constexpr int kJournalRows = 6;         // quests listed in the journal (1-N pick, 1-4 usable)
 constexpr int kJournalObjRows = 6;      // objectives shown for the selected journal quest
 constexpr int kContainerRows = 14;      // item rows in the container loot panel
+constexpr int kHudGaugeRows = 6;        // pooled managed-gameplay gauge bars (oxygen, rads, ...)
 constexpr float kToastSeconds = 4.0f;
 
 // NEXUS main menu.
@@ -709,6 +710,32 @@ std::string MenuGlyph(const std::string& k, const char* c, float sz) {
   return std::string(b) + body + " }\n";
 }
 
+// Managed-gameplay gauges (oxygen, radiation, adrenaline, ...): a pooled stack of
+// labeled bars above the vitals, pushed from C# via the Hud.Gauge native. Each
+// row starts collapsed and is filled/toggled each frame from SetHudGauges.
+std::string BuildHudGaugeSection() {
+  std::string s =
+      "  panel hud_gauges { position: absolute; left: 30; bottom: 100; layout: column;"
+      " align: start; gap: 9;\n";
+  for (int i = 0; i < kHudGaugeRows; ++i) {
+    const std::string id = std::to_string(i);
+    s += "    panel hud_gauge" + id +
+         " { layout: column; align: start; gap: 3; visibility: collapsed;\n"
+         "      text hud_gauge" + id +
+         "_lbl { text: \"\"; font-size: 11; color: #cfd6e6; letter-spacing: 1;"
+         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n"
+         "      panel hud_gauge" + id +
+         "_track { width: 210; height: 9; overflow: hidden; background: #0c0e16cc;"
+         " corner-radius: 5; border-color: #00000077; border-width: 1;"
+         " shadow-color: #00000066; shadow-blur: 10; shadow-y: 2;\n"
+         "        panel hud_gauge" + id +
+         "_fill { width: 100%; height: 100%; corner-radius: 5; background: #5d92e8; }\n"
+         "      }\n    }\n";
+  }
+  s += "  }\n";
+  return s;
+}
+
 // The main menu sub-screens (multiplayer / mods / settings / profile): one
 // dimmed overlay with a centred card whose title and body swap by which nav
 // item opened it. Collapsed until a nav item is picked; ApplyMainMenu shows the
@@ -1108,6 +1135,7 @@ panel root {
 )";
 
   s += BuildQuestSection();
+  s += BuildHudGaugeSection();
   s += BuildJournalSection();
   s += BuildDialogueSection();
   s += BuildContainerSection();
@@ -1259,6 +1287,7 @@ struct GameUi::Impl {
 
   // Quest HUD state, set by the engine and applied each frame.
   HudQuest quest;
+  std::vector<HudGauge> hud_gauges;  // managed gameplay bars (oxygen, rads, ...)
   std::string toast_text;
   float toast_age = kToastSeconds + 1.0f;  // starts expired, so hidden
   std::string activate_prompt;
@@ -1979,6 +2008,10 @@ void GameUi::SetQuest(const HudQuest& quest) {
   if (impl_->initialized) impl_->quest = quest;
 }
 
+void GameUi::SetHudGauges(const std::vector<HudGauge>& gauges) {
+  if (impl_->initialized) impl_->hud_gauges = gauges;
+}
+
 void GameUi::FlashQuestUpdate(const std::string& message) {
   if (!impl_->initialized) return;
   impl_->toast_text = message;
@@ -2101,6 +2134,23 @@ void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 fra
   const char* card = kCardinals[static_cast<int>(std::fmod(heading + 22.5f, 360.0f) / 45.0f) % 8];
   std::snprintf(buf, sizeof(buf), "%s  %.0f deg", card, heading);
   ugui::SetText(impl->ui.FindWidget("hud_heading"), buf);
+
+  // Managed gameplay gauges (oxygen, radiation, ...): the pooled labeled bar
+  // stack above the vitals, one row per active gauge.
+  for (int i = 0; i < kHudGaugeRows; ++i) {
+    const std::string row = "hud_gauge" + std::to_string(i);
+    if (i < static_cast<int>(impl->hud_gauges.size())) {
+      const HudGauge& g = impl->hud_gauges[i];
+      impl->SetVisible(row.c_str(), true);
+      ugui::SetText(impl->ui.FindWidget((row + "_lbl").c_str()), g.label.c_str());
+      impl->SetStyleField(
+          (row + "_fill").c_str(), [](ugui::Style& s, float v) { s.width = ugui::Length::Pct(v); },
+          std::clamp(g.fraction, 0.0f, 1.0f) * 100.0f);
+      impl->SetBackground((row + "_fill").c_str(), Rgba(g.color ? g.color : 0x5d92e8ffu));
+    } else {
+      impl->SetVisible(row.c_str(), false);
+    }
+  }
 
   // --- Quest HUD ---
   const bool has_quest = !impl->quest.title.empty();
@@ -2241,6 +2291,7 @@ bool GameUi::Initialize(Window&, render::Renderer&) { return false; }
 void GameUi::Shutdown() {}
 void GameUi::Build(Window&, render::Renderer&, FlyCamera&, f32, render::FrameView*) {}
 void GameUi::SetQuest(const HudQuest&) {}
+void GameUi::SetHudGauges(const std::vector<HudGauge>&) {}
 void GameUi::FlashQuestUpdate(const std::string&) {}
 void GameUi::SetActivatePrompt(const std::string&) {}
 void GameUi::SetHudVisible(bool) {}

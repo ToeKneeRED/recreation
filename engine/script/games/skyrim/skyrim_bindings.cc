@@ -797,6 +797,35 @@ void RecordBackedSkyrimBindings::ApplyReplicatedStatus(const quest::QuestStatus&
   if (fresh) EmitManagedEvent(host::ManagedEventId::kQuestStageChanged, status.handle, 0, status.stage);
 }
 
+void RecordBackedSkyrimBindings::SetHudGauge(const std::string& id, f32 fraction,
+                                             const std::string& label, u32 color) {
+  if (id.empty()) return;
+  const f32 clamped = std::clamp(fraction, 0.0f, 1.0f);
+  std::lock_guard<std::mutex> lock(hud_gauges_mutex_);
+  for (HudGauge& g : hud_gauges_) {
+    if (g.id == id) {  // update in place, preserving HUD order
+      g.fraction = clamped;
+      g.label = label;
+      g.color = color;
+      return;
+    }
+  }
+  hud_gauges_.push_back({id, label, clamped, color});
+}
+
+void RecordBackedSkyrimBindings::ClearHudGauge(const std::string& id) {
+  std::lock_guard<std::mutex> lock(hud_gauges_mutex_);
+  hud_gauges_.erase(
+      std::remove_if(hud_gauges_.begin(), hud_gauges_.end(),
+                     [&](const HudGauge& g) { return g.id == id; }),
+      hud_gauges_.end());
+}
+
+void RecordBackedSkyrimBindings::SnapshotHudGauges(std::vector<HudGauge>& out) const {
+  std::lock_guard<std::mutex> lock(hud_gauges_mutex_);
+  out = hud_gauges_;
+}
+
 void RecordBackedSkyrimBindings::SetStage(ObjectRef quest, i32 stage) {
   if (replica_mode_) return;  // server-authoritative: stage arrives via ApplyStatus
   // The quest system owns the state and tells us whether this is a fresh stage;
