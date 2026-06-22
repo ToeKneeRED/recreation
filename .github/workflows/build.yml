@@ -78,6 +78,11 @@ jobs:
           curl.exe -fsSL -o dxc.zip https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602.24/dxc_2026_05_27.zip
           Expand-Archive dxc.zip -DestinationPath $env:GITHUB_WORKSPACE\dxc
           Add-Content -Path $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE\dxc\bin\x64"
+      - name: glslang
+        run: |
+          curl.exe -fsSL -o glslang.zip https://github.com/KhronosGroup/glslang/releases/download/main-tot/glslang-master-windows-x64-Release.zip
+          Expand-Archive glslang.zip -DestinationPath $env:GITHUB_WORKSPACE\glslang
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE\glslang\bin"
       - name: third-party deps
         shell: bash
         run: |
