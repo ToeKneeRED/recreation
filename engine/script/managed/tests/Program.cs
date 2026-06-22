@@ -13,6 +13,7 @@ internal static class Program
         ValueTests.Run(check);
         EventBusTests.Run(check);
         ModHostTests.Run(check);
+        SkyrimRegenTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;
