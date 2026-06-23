@@ -54,6 +54,20 @@ add_executable(ba2test ba2test.cc)
 target_link_libraries(ba2test PRIVATE recreation::bethesda recreation::asset)
 recreation_set_warnings(ba2test)
 
+add_executable(modstreamtest modstreamtest.cc)
+target_link_libraries(modstreamtest PRIVATE recreation::modstream recreation::asset)
+recreation_set_warnings(modstreamtest)
+
+add_executable(rpctest rpctest.cc)
+target_link_libraries(rpctest PRIVATE recreation::rpc)
+recreation_set_warnings(rpctest)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # GCC 15 mis-fires -Wfree-nonheap-object when it inlines std::variant's
+  # copy-assignment (the string/blob alternatives) at -O2. Known compiler bug,
+  # not our code; silence it on this TU which copies RpcValue heavily.
+  set_source_files_properties(rpctest.cc PROPERTIES COMPILE_OPTIONS -Wno-free-nonheap-object)
+endif()
+
 add_executable(pexfo4test pexfo4test.cc)
 target_link_libraries(pexfo4test PRIVATE recreation::script)
 recreation_set_warnings(pexfo4test)
@@ -191,6 +205,8 @@ add_test(NAME scene_compiletest COMMAND scene_compiletest)
 add_test(NAME scene_playertest COMMAND scene_playertest)
 add_test(NAME conditiontest COMMAND conditiontest)
 add_test(NAME ba2test COMMAND ba2test)
+add_test(NAME modstreamtest COMMAND modstreamtest)
+add_test(NAME rpctest COMMAND rpctest)
 add_test(NAME pexfo4test COMMAND pexfo4test)
 add_test(NAME vmad_fo4test COMMAND vmad_fo4test)
 add_test(NAME nif_fo4test COMMAND nif_fo4test)

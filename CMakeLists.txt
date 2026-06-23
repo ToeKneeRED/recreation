@@ -224,6 +224,8 @@ set(RECREATION_MODULES
   quest
   dialogue
   script
+  modstream
+  rpc
 )
 if(RECREATION_NET)
   list(APPEND RECREATION_MODULES net)
