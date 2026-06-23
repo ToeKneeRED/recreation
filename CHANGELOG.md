@@ -3,6 +3,14 @@
 All notable changes to Recreation are documented here. The main menu's NEWS rail
 shows the most recent entries (the first bullet of each release is its headline).
 
+## [0.4.0] - 2026-06-23
+### Added
+- FiveM-style asset streaming: a server distributes its mods to players on join
+- The host catalogs a mods directory (--mods-dir); clients pull only the content
+  they are missing into a content-addressed cache, then mount it into the asset Vfs
+- Scripting RPC channel woven into multiplayer: C# mods emit and receive calls
+  (Rpc.Emit / Rpc.ToClient / Rpc.Broadcast / Rpc.On) over the session
+
 ## [0.3.0] - 2026-06-23
 ### Added
 - Cinematic main menu is live

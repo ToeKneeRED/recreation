@@ -19,6 +19,8 @@ networking) only knows engine formats.
 | `engine/bethesda` | ESM/ESL/BSA/BA2/NIF readers and converters |
 | `engine/world` | cell streaming and gameplay components |
 | `engine/net` | server authoritative replication of ECS state |
+| `engine/modstream` | content-addressed mod catalog, cache and Vfs mount |
+| `engine/rpc` | typed scripting RPC value, wire codec and registry |
 | `engine/script` | scripting host, per game Papyrus adapters |
 | `runtime` | entry point and main loop |
 | `tools` | offline tooling |
@@ -51,3 +53,29 @@ Mod compatibility follows the same rules the original games use. Plugins merge
 records with last loaded winning, loose files override archives, and mount
 order in the VFS decides priority. Papyrus is game specific and handled by per
 game adapters in `engine/script`.
+
+### Multiplayer asset streaming
+
+A server distributes its own UGC to joining players, FiveM style. Point the host
+at a mods directory whose immediate subdirectories are resources:
+
+```sh
+recreation-server --mods-dir ./server_mods --port 29700
+```
+
+The host catalogs every file (content hashed) and offers the manifest on join.
+A connecting client diffs it against its local cache, pulls only the content it
+is missing over the reliable file transporter, verifies it, and mounts the
+resources into its asset Vfs so the host's custom meshes, textures and scripts
+resolve like loose files:
+
+```sh
+recreation --connect <host> --asset-cache ./cache
+```
+
+### Scripting RPC
+
+Server-side mod scripts drive multiplayer through a typed RPC channel. A C# mod
+calls `Rpc.Emit(name, args)` (client to host), `Rpc.ToClient(peer, name, args)`
+or `Rpc.Broadcast(name, args)` (host to clients), and subscribes with
+`Rpc.On(name, e => ...)`. Calls ride the session's reliable channel.
