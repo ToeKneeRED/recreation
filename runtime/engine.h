@@ -151,6 +151,10 @@ class Engine {
   friend void EnterUniverse(Engine&, int, bool, bool, const std::string&);
 #if RECREATION_HAS_NET
   friend bool StartNetworking(Engine&);
+  friend void EngineRpcEmitImpl(Engine&, std::int32_t, std::uint64_t, const char*,
+                                const script::host::ApiValue*, std::int32_t);
+  friend void EngineRpcSubscribeImpl(Engine&, const char*);
+  friend void RegisterManagedRpcForwarding(Engine&);
 #endif
 
   // NEXUS main menu, per frame: UpdateMainMenu drives nav + dispatch (it enters a
@@ -314,6 +318,10 @@ class Engine {
   // content cache. The session holds pointers into these, so they outlive it.
   std::unique_ptr<modstream::ModCatalog> mod_catalog_;
   std::unique_ptr<modstream::ContentStore> content_store_;
+  // Scripting RPC names the managed world subscribed to (before the session
+  // exists, since managed boots first). StartNetworking forwards each of these
+  // from the session into managed code.
+  std::vector<std::string> managed_rpc_names_;
 #endif
 
   // Shared service bundle handed to the subsystems, plus the subsystems
@@ -358,6 +366,14 @@ void EnterUniverse(Engine& engine, int idx, bool multiplayer, bool host,
 // Opens the authoritative server or replica client session and wires the
 // replication sinks between the net layer and the script/quest systems.
 bool StartNetworking(Engine& engine);
+// Builds the multiplayer RPC surface handed to the managed world (before Boot,
+// before the session exists): emit routes to the live session, on records a
+// subscription StartNetworking later forwards.
+script::host::RpcBridge MakeManagedRpcBridge(Engine& engine);
+// Registers a forwarding handler on the live session's RPC registry for every
+// name the managed world subscribed to, so inbound calls reach C#. Called once
+// the session is up.
+void RegisterManagedRpcForwarding(Engine& engine);
 #endif
 
 }  // namespace rec

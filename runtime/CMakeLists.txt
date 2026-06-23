@@ -5,6 +5,7 @@ set(RECREATION_RUNTIME_SOURCES
   engine.cc
   frame_loop.cc
   networking.cc
+  managed_rpc.cc
   content_load.cc
   managed_scripting.cc
   main_menu.cc

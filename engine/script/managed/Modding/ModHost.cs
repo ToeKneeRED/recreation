@@ -113,6 +113,7 @@ public static class ModHost
         FastTravel.Clear();
         PlayerControls.Clear();
         Zones.Clear();
+        Rpc.Clear();
         Time.Reset();
         EventBus.Clear();
         _booted = false;

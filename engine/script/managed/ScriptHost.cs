@@ -24,6 +24,9 @@ public static unsafe class ScriptHost
         // so [UiHandler] methods drive ultragui in place of Lua. Absent (null) on
         // the dedicated server; Ui then stays an inert no-op.
         if (handshake->UiWidgetOps != null) Ui.Bind(handshake->UiWidgetOps);
+        // Wire the multiplayer RPC layer. Emit is null in single-player, leaving
+        // Rpc unbound so sends and dispatch are inert.
+        if (handshake->Rpc.Emit != null) Rpc.Bind(new NativeRpcBackend(handshake->Rpc));
         Console.WriteLine($"[managed] Recreation scripting host online, {Domains.Count} game(s)");
         if (Environment.GetEnvironmentVariable("REC_DOMAINS_REPORT") != null) ReportDomains();
         ModHost.Boot();
@@ -36,6 +39,7 @@ public static unsafe class ScriptHost
         handshake->Callbacks.PublishEvent = &OnPublishEvent;
         handshake->Callbacks.Shutdown = &OnShutdown;
         handshake->Callbacks.DispatchUi = &OnDispatchUi;
+        handshake->Callbacks.DispatchRpc = &OnDispatchRpc;
         return 0;
     }
 
@@ -93,6 +97,29 @@ public static unsafe class ScriptHost
         string name = Marshal.PtrToStringUTF8((IntPtr)funcName) ?? string.Empty;
         return Ui.Dispatch(name, widget);
     }
+
+    // An inbound multiplayer RPC arrived; unpack the wire args and route it to the
+    // managed Rpc layer, where the registered handler (if any) runs.
+    [UnmanagedCallersOnly]
+    private static void OnDispatchRpc(byte* name, int sender, int fromServer, ApiValue* args, int argc)
+    {
+        string n = Marshal.PtrToStringUTF8((IntPtr)name) ?? string.Empty;
+        var values = new Value[argc < 0 ? 0 : argc];
+        for (int i = 0; i < values.Length; i++) values[i] = FromApi(args[i]);
+        Rpc.Dispatch(n, (uint)sender, fromServer != 0, values);
+    }
+
+    // Wire ApiValue -> Value, matching NativeBackend.FromApi (private there).
+    private static Value FromApi(in ApiValue v) => v.Kind switch
+    {
+        ApiKind.Int => Value.Int(v.I),
+        ApiKind.Float => Value.Float(v.F),
+        ApiKind.Bool => Value.Bool(v.I != 0),
+        ApiKind.String => Value.String(v.S != null ? Marshal.PtrToStringUTF8((IntPtr)v.S) ?? "" : ""),
+        ApiKind.Object => Value.Object(v.H),
+        ApiKind.Array => Value.Array(v.H),
+        _ => Value.None,
+    };
 
     [UnmanagedCallersOnly]
     private static void OnPublishEvent(ManagedEvent* e) => EngineEvents.Dispatch(*e);

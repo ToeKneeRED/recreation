@@ -200,6 +200,9 @@ bool StartNetworking(Engine& engine) {
     self->scheduler_.AddSystem(stage, "net_interpolation",
                          [](ecs::World& world, f32 dt) { net::TickInterpolation(world, dt); });
   }
+  // The managed world booted before the session, so forward any RPC names its
+  // mods subscribed to into the live session's registry now.
+  if (self->managed_) RegisterManagedRpcForwarding(*self);
   return true;
 }
 #endif  // RECREATION_HAS_NET

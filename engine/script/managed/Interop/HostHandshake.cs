@@ -42,6 +42,28 @@ internal unsafe struct HostCallbacks
     // layer. (funcName UTF-8, packed widget) -> 1 if a handler claimed it.
     // Append-only: keep after the originals.
     public delegate* unmanaged<byte*, ulong, int> DispatchUi;
+    // Delivers an inbound multiplayer RPC to the managed layer. (name UTF-8,
+    // sender peer, 1 if it came from the server, packed args, argc). Append-only.
+    public delegate* unmanaged<byte*, int, int, ApiValue*, int, void> DispatchRpc;
+}
+
+// Where an outbound RPC goes. Mirrors host/bridge.h RpcTarget exactly.
+public enum RpcTarget : int
+{
+    ToServer = 0,
+    ToClient = 1,
+    Broadcast = 2,
+}
+
+// The multiplayer RPC table the engine hands the managed host: emit lets the
+// guest send an RPC, on subscribes a name so the engine forwards it back in.
+// Mirror of host/bridge.h RpcBridge. Null table (Emit == null) on single-player.
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct RpcBridge
+{
+    public void* Ctx;
+    public delegate* unmanaged<void*, int, ulong, byte*, ApiValue*, int, void> Emit;
+    public delegate* unmanaged<void*, byte*, void> On;
 }
 
 // One loaded game's content domain. Mirror of host/bridge.h DomainBridge.
@@ -66,4 +88,7 @@ internal unsafe struct HostHandshake
     // The ultragui widget-operation table (WidgetOps*), so UI handlers can read
     // and mutate live widgets. Null when there is no UI backend. Append-only.
     public WidgetOps* UiWidgetOps;
+    // The multiplayer RPC table. Its Emit is null in single-player; the SDK then
+    // leaves Rpc unbound and every Emit/Broadcast is an inert no-op. Append-only.
+    public RpcBridge Rpc;
 }

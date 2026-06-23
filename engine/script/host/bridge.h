@@ -124,6 +124,34 @@ struct HostCallbacks {
   // packed ugui WidgetId. Returns 1 if a managed handler claimed it. Null if the
   // managed side declines UI scripting. Append-only: keep after the originals.
   std::int32_t (*dispatch_ui)(const char* func_name, std::uint64_t widget);
+  // Delivers an inbound multiplayer RPC to the managed world. name is the call
+  // name (UTF-8); sender is the originating peer id (0 from the host); from_server
+  // is 1 when the host sent it. args points at argc ApiValues. Null when the
+  // managed side declines RPC. Append-only: keep after the originals.
+  void (*dispatch_rpc)(const char* name, std::int32_t sender, std::int32_t from_server,
+                       const ApiValue* args, std::int32_t argc);
+};
+
+// Where an outbound scripting RPC goes. Mirrors the managed RpcTarget; append
+// only.
+enum class RpcTarget : std::int32_t {
+  kToServer = 0,    // client -> the host
+  kToClient = 1,    // host -> one client (peer)
+  kBroadcast = 2,   // host -> every client
+};
+
+// The multiplayer RPC surface handed to the managed world so server-side mod
+// scripts can drive the session. ctx is engine-owned, opaque to managed code.
+// emit sends a call (args points at argc ApiValues; peer is the destination for
+// kToClient, ignored otherwise). on subscribes the managed world to inbound
+// calls of a name, so the engine forwards matching calls through
+// HostCallbacks::dispatch_rpc. Both no-op when the relevant session role is not
+// active (e.g. a broadcast with no server). Append-only.
+struct RpcBridge {
+  void* ctx;
+  void (*emit)(void* ctx, std::int32_t target, std::uint64_t peer, const char* name,
+               const ApiValue* args, std::int32_t argc);
+  void (*on)(void* ctx, const char* name);
 };
 
 // One loaded game's content domain, exposed to managed code so a mod can reach
@@ -152,6 +180,10 @@ struct HostHandshake {
   // (dedicated server, or no ultragui). Opaque here -- the runtime, not this
   // header, knows the concrete type. Append-only.
   const void* ui_widget_ops;
+  // The multiplayer RPC surface, so mod scripts emit and receive session RPCs.
+  // emit/on are null when networking is compiled out; calls then no-op.
+  // Append-only.
+  RpcBridge rpc;
 };
 
 // Signature of the managed entrypoint, exported [UnmanagedCallersOnly]. The host

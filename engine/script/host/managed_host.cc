@@ -33,6 +33,7 @@ bool ManagedHost::Boot(const std::string& dotnet_root, const std::string& runtim
   handshake_.domain_count = static_cast<std::int32_t>(domain_table_.size());
   handshake_.domains = domain_table_.data();
   handshake_.ui_widget_ops = ui_widget_ops_;  // null when there is no UI backend
+  handshake_.rpc = rpc_bridge_;  // emit/on null when networking is off
 
   if (!clr_.Initialize(dotnet_root, runtime_config, assembly,
                        "Recreation.ScriptHost, Recreation.Scripting", "Main")) {
@@ -59,6 +60,13 @@ std::int32_t ManagedHost::DispatchUi(const char* func_name, std::uint64_t widget
   if (available_ && handshake_.callbacks.dispatch_ui)
     return handshake_.callbacks.dispatch_ui(func_name, widget);
   return 0;
+}
+
+void ManagedHost::DispatchRpc(const char* name, std::int32_t sender,
+                              std::int32_t from_server, const ApiValue* args,
+                              std::int32_t argc) {
+  if (available_ && handshake_.callbacks.dispatch_rpc)
+    handshake_.callbacks.dispatch_rpc(name, sender, from_server, args, argc);
 }
 
 void ManagedHost::PublishEvent(const ManagedEvent& event) {

@@ -63,6 +63,12 @@ void BootManagedScripting(Engine& engine) {
   // the table is handed to the managed entrypoint through the handshake.
   self->managed_->SetUiWidgetOps(rec::ugui_cs::GetWidgetOps());
 #endif
+#if RECREATION_HAS_NET
+  // Hand the managed world the multiplayer RPC surface so mod scripts emit and
+  // receive session calls. Subscriptions made now are forwarded once the session
+  // opens (StartNetworking runs after this).
+  self->managed_->SetRpcBridge(MakeManagedRpcBridge(*self));
+#endif
   if (!self->managed_->Boot(/*dotnet_root=*/"", runtime_config, assembly)) {
     self->managed_.reset();  // unavailable: run without it
     return;

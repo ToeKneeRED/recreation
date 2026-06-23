@@ -124,6 +124,7 @@ internal static class Program
         EnchantingPowerTests.Run(check);
         SoulGemTests.Run(check);
         UiTests.Run(check);
+        RpcTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;

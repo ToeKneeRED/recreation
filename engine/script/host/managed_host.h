@@ -61,6 +61,15 @@ class ManagedHost {
   // 0 when unavailable or the managed side declined UI scripting.
   std::int32_t DispatchUi(const char* func_name, std::uint64_t widget);
 
+  // Hands the managed world the multiplayer RPC surface (emit/subscribe), so mod
+  // scripts drive the session. Call before Boot; passed through the handshake.
+  void SetRpcBridge(const RpcBridge& rpc) { rpc_bridge_ = rpc; }
+
+  // Delivers an inbound session RPC to the managed world. Must run on the host
+  // (main) thread; no-op when unavailable or the managed side declined RPC.
+  void DispatchRpc(const char* name, std::int32_t sender, std::int32_t from_server,
+                   const ApiValue* args, std::int32_t argc);
+
   bool available() const { return available_; }
 
   // Advances the managed world one frame. No-op when unavailable.
@@ -93,6 +102,7 @@ class ManagedHost {
   std::vector<DomainBridge> domain_table_;  // handshake view: borrows name/bridge
   HostHandshake handshake_{};
   const void* ui_widget_ops_ = nullptr;  // rec::ugui_cs::WidgetOps*, set before Boot
+  RpcBridge rpc_bridge_{};               // multiplayer RPC surface, set before Boot
   bool available_ = false;
 
   std::mutex event_mutex_;
