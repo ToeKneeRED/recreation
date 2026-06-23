@@ -185,6 +185,10 @@ struct HostHandshake {
   // emit/on are null when networking is compiled out; calls then no-op.
   // Append-only.
   RpcBridge rpc;
+  // The process's role: 0 server (host), 1 client (replica), 2 standalone
+  // (single-player). The managed world starts server+shared mods on a host,
+  // client+shared on a client, and everything standalone. Append-only.
+  std::int32_t realm;
 };
 
 // Signature of the managed entrypoint, exported [UnmanagedCallersOnly]. The host

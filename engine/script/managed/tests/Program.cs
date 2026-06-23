@@ -125,6 +125,7 @@ internal static class Program
         SoulGemTests.Run(check);
         UiTests.Run(check);
         RpcTests.Run(check);
+        RealmTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;

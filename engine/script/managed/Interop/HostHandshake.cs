@@ -92,4 +92,7 @@ internal unsafe struct HostHandshake
     // The multiplayer RPC table. Its Emit is null in single-player; the SDK then
     // leaves Rpc unbound and every Emit/Broadcast is an inert no-op. Append-only.
     public RpcBridge Rpc;
+    // The process role: 0 server (host), 1 client (replica), 2 standalone. The
+    // mod host starts only the mods this role admits. Append-only.
+    public int Realm;
 }

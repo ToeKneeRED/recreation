@@ -29,6 +29,9 @@ public static unsafe class ScriptHost
         if (handshake->Rpc.Emit != null) Rpc.Bind(new NativeRpcBackend(handshake->Rpc));
         Console.WriteLine($"[managed] Recreation scripting host online, {Domains.Count} game(s)");
         if (Environment.GetEnvironmentVariable("REC_DOMAINS_REPORT") != null) ReportDomains();
+        // Filter which mods start by the process role: server + shared on a host,
+        // client + shared on a client, everything in single-player.
+        ModHost.SetHostRealm(handshake->Realm);
         ModHost.Boot();
 
         // Load drop-in user mods from RECREATION_MODS_DIR, if set.

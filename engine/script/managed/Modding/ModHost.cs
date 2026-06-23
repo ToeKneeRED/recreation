@@ -16,9 +16,16 @@ public static class ModHost
     private static readonly List<GameBehaviour> Behaviours = new();
     private static readonly List<IMod> Mods = new();
     private static bool _booted;
+    // The engine's role, set from the handshake before Boot. Standalone (run
+    // everything) until told otherwise, so single-player and tests are unchanged.
+    private static int _hostRealm = ModDiscovery.HostStandalone;
 
     public static IReadOnlyList<GameBehaviour> ActiveBehaviours => Behaviours;
     public static bool Booted => _booted;
+
+    // Sets which role this process runs as (server, client or standalone), so Boot
+    // starts only the mods that role admits. Call before Boot.
+    public static void SetHostRealm(int hostRealm) => _hostRealm = hostRealm;
 
     // Discovers and loads every mod in the currently loaded assemblies, then
     // starts the auto-start behaviours. Idempotent.
@@ -41,7 +48,7 @@ public static class ModHost
     public static void LoadFrom(IEnumerable<Assembly> assemblies)
     {
         var list = new List<Assembly>(assemblies);
-        foreach (Type modType in ModDiscovery.FindMods(list))
+        foreach (Type modType in ModDiscovery.FindMods(list, _hostRealm))
         {
             if (Activator.CreateInstance(modType) is not IMod mod) continue;
             var meta = modType.GetCustomAttribute<ModAttribute>();
@@ -57,7 +64,7 @@ public static class ModHost
             }
         }
 
-        foreach (Type behaviourType in ModDiscovery.FindAutoStartBehaviours(list))
+        foreach (Type behaviourType in ModDiscovery.FindAutoStartBehaviours(list, _hostRealm))
         {
             if (Activator.CreateInstance(behaviourType) is GameBehaviour behaviour)
                 Register(behaviour);

@@ -34,6 +34,7 @@ bool ManagedHost::Boot(const std::string& dotnet_root, const std::string& runtim
   handshake_.domains = domain_table_.data();
   handshake_.ui_widget_ops = ui_widget_ops_;  // null when there is no UI backend
   handshake_.rpc = rpc_bridge_;  // emit/on null when networking is off
+  handshake_.realm = realm_;     // server / client / standalone
 
   if (!clr_.Initialize(dotnet_root, runtime_config, assembly,
                        "Recreation.ScriptHost, Recreation.Scripting", "Main")) {

@@ -65,6 +65,10 @@ class ManagedHost {
   // scripts drive the session. Call before Boot; passed through the handshake.
   void SetRpcBridge(const RpcBridge& rpc) { rpc_bridge_ = rpc; }
 
+  // Sets the process role (0 server, 1 client, 2 standalone) the managed world
+  // filters mods by. Call before Boot; passed through the handshake.
+  void SetRealm(std::int32_t realm) { realm_ = realm; }
+
   // Delivers an inbound session RPC to the managed world. Must run on the host
   // (main) thread; no-op when unavailable or the managed side declined RPC.
   void DispatchRpc(const char* name, std::int32_t sender, std::int32_t from_server,
@@ -103,6 +107,7 @@ class ManagedHost {
   HostHandshake handshake_{};
   const void* ui_widget_ops_ = nullptr;  // rec::ugui_cs::WidgetOps*, set before Boot
   RpcBridge rpc_bridge_{};               // multiplayer RPC surface, set before Boot
+  std::int32_t realm_ = 2;               // process role, standalone until set
   bool available_ = false;
 
   std::mutex event_mutex_;

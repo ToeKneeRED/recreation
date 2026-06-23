@@ -25,12 +25,15 @@ static std::int32_t DispatchUiToManaged(void* ctx, const char* func_name, std::u
 
 void BootManagedScripting(Engine& engine) {
   Engine* const self = &engine;
-  // A replica client mirrors the server; its scripts must not mutate
-  // authoritative state, so the managed world stays off here.
-  if (self->script_bindings_ && self->script_bindings_->replica_mode()) {
-    REC_INFO("managed: skipped on a replica client (server-authoritative)");
-    return;
-  }
+  // The managed world runs in every role now, but filters which mods start by
+  // realm: a host (server) runs server + shared mods, a replica client runs
+  // client + shared, single-player runs everything. Authoritative mutations stay
+  // gated by the bindings' replica_mode, so a client's scripts cannot diverge
+  // from the server: they read state, request through RPC and react to events.
+  const bool replica =
+      self->script_bindings_ && self->script_bindings_->replica_mode();
+  const std::int32_t realm = self->config_.host_server ? 0 : (replica ? 1 : 2);
+
   const char* dir = std::getenv("RECREATION_SCRIPTING_DIR");
   if (!dir || !*dir) {
     REC_INFO("managed: RECREATION_SCRIPTING_DIR unset, C# scripting disabled");
@@ -69,6 +72,7 @@ void BootManagedScripting(Engine& engine) {
   // opens (StartNetworking runs after this).
   self->managed_->SetRpcBridge(MakeManagedRpcBridge(*self));
 #endif
+  self->managed_->SetRealm(realm);  // server / client / standalone mod filtering
   if (!self->managed_->Boot(/*dotnet_root=*/"", runtime_config, assembly)) {
     self->managed_.reset();  // unavailable: run without it
     return;
