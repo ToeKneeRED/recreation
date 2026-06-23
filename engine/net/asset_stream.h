@@ -74,6 +74,10 @@ class AssetStreamClient {
  public:
   AssetStreamClient(tx::network::ZClient& client, modstream::ContentStore& store,
                     std::filesystem::path incoming_dir);
+  ~AssetStreamClient();
+
+  AssetStreamClient(const AssetStreamClient&) = delete;
+  AssetStreamClient& operator=(const AssetStreamClient&) = delete;
 
   // Fired once the cache holds every file the manifest names; carries the
   // manifest so the engine can mount it into the asset Vfs. Invoked on the
@@ -86,10 +90,6 @@ class AssetStreamClient {
   // against the cache and the missing content is requested (or ready fires when
   // nothing is missing).
   void OnManifestChunk(const u8* data, size_t size);
-
-  // Drains the control channel for incoming file chunks and advances transfers.
-  // Call once per tick, after the client's Update.
-  void Poll();
 
   bool ready() const { return ready_; }
   bool downloading() const { return downloading_; }
@@ -110,6 +110,10 @@ class AssetStreamClient {
   void OnManifestComplete();
   void HandleChunk(const tx::network::ZFileTransporter::TransferChunk& chunk);
   void OnFileFinished(const std::filesystem::path& path);
+
+  // Registered with the ZClient as its file-transfer sink. Update() invokes it
+  // for every incoming FileTransfer control packet, on the session thread.
+  static void SinkThunk(void* context, const tx::network::IncomingPacket& packet);
 
   tx::network::ZClient& client_;
   modstream::ContentStore& store_;

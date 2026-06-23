@@ -172,6 +172,10 @@ if(RECREATION_NET)
   target_link_libraries(stage_requesttest PRIVATE recreation::net)
   recreation_set_warnings(stage_requesttest)
 
+  add_executable(asset_streamtest asset_streamtest.cc)
+  target_link_libraries(asset_streamtest PRIVATE recreation::net recreation::modstream recreation::asset)
+  recreation_set_warnings(asset_streamtest)
+
   add_executable(objective_marker_nettest objective_marker_nettest.cc)
   target_link_libraries(objective_marker_nettest PRIVATE recreation::net)
   recreation_set_warnings(objective_marker_nettest)
@@ -237,6 +241,7 @@ if(RECREATION_NET)
   add_test(NAME stage_requesttest COMMAND stage_requesttest)
   add_test(NAME objective_marker_nettest COMMAND objective_marker_nettest)
   add_test(NAME quest_net_progressiontest COMMAND quest_net_progressiontest)
+  add_test(NAME asset_streamtest COMMAND asset_streamtest)
 endif()
 
 # Managed (C#) scripting gates, wired only when a .NET SDK is on the configure

@@ -14,8 +14,6 @@ namespace rec::net {
 namespace {
 
 namespace fs = std::filesystem;
-using tx::network::PacketChannelType;
-using tx::network::PacketType;
 
 // Manifest bytes carried per kAssetManifest packet. A datagram cannot be
 // fragmented, so this stays well under the ~64 KiB UDP payload ceiling with room
@@ -142,6 +140,20 @@ AssetStreamClient::AssetStreamClient(tx::network::ZClient& client,
       transporter_(client) {
   std::error_code ec;
   fs::create_directories(incoming_dir_, ec);
+  // ZClient::Update drains the control channel; without this sink the incoming
+  // file chunks would be discarded there. The sink runs on the session thread.
+  client_.SetFileTransferSink(&AssetStreamClient::SinkThunk, this);
+}
+
+AssetStreamClient::~AssetStreamClient() {
+  client_.SetFileTransferSink(nullptr, nullptr);
+}
+
+void AssetStreamClient::SinkThunk(void* context,
+                                  const tx::network::IncomingPacket& packet) {
+  auto* self = static_cast<AssetStreamClient*>(context);
+  tx::network::ZFileTransporter::TransferChunk chunk;
+  if (self->transporter_.ParseTransferChunkPacket(packet, chunk)) self->HandleChunk(chunk);
 }
 
 u64 AssetStreamClient::bytes_remaining() const {
@@ -216,15 +228,6 @@ void AssetStreamClient::OnManifestComplete() {
     for (size_t i = base; i < end; ++i) PutU64(payload, plan[i].hash);
     client_.Push(MakePacket(tx::network::ZPeerId::to_server, MessageType::kAssetRequest,
                             payload, /*reliable=*/true, tx::network::PacketPriority::High));
-  }
-}
-
-void AssetStreamClient::Poll() {
-  tx::network::IncomingPacket packet;
-  while (client_.Poll(PacketChannelType::Control, packet)) {
-    if (packet.type != PacketType::FileTransfer) continue;
-    tx::network::ZFileTransporter::TransferChunk chunk;
-    if (transporter_.ParseTransferChunkPacket(packet, chunk)) HandleChunk(chunk);
   }
 }
 

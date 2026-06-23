@@ -1,0 +1,159 @@
+// asset_streamtest: end-to-end loopback check of FiveM-style asset streaming and
+// the scripting RPC channel over a real zetanet session. A server catalogs a
+// temp mods directory and a client connects over localhost UDP, downloads the
+// content it is missing into a content cache, and mounts it through the asset
+// Vfs. It also round-trips an RPC: client to server and back. This exercises the
+// threaded transport, the worker-thread sender, and the control-channel receive
+// loop, so it is built (and gated) only with networking.
+//
+// zetanet's headers inject global arch_types scalar aliases, so rec:: scalar and
+// namespace symbols are fully qualified here to avoid the ambiguity, matching the
+// other net/bethesda tests.
+
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <thread>
+
+#include "asset/vfs.h"
+#include "core/types.h"
+#include "ecs/world.h"
+#include "modstream/content_provider.h"
+#include "modstream/content_store.h"
+#include "modstream/mod_catalog.h"
+#include "net/asset_stream.h"
+#include "net/rpc_channel.h"
+#include "net/session.h"
+#include "rpc/rpc_value.h"
+
+namespace fs = std::filesystem;
+namespace net = rec::net;
+namespace modstream = rec::modstream;
+namespace rpc = rec::rpc;
+namespace ecs = rec::ecs;
+namespace asset = rec::asset;
+
+namespace {
+
+int g_failures = 0;
+
+void Check(const char* what, bool ok) {
+  std::printf("  [%s] %s\n", ok ? "ok" : "FAIL", what);
+  if (!ok) ++g_failures;
+}
+
+void WriteFile(const fs::path& path, const std::string& contents) {
+  fs::create_directories(path.parent_path());
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+}
+
+// Pumps both sessions one fixed step and yields briefly so the threaded
+// transport makes progress.
+void Pump(net::ServerSession& server, ecs::World& sworld,
+          net::ClientSession& client, ecs::World& cworld) {
+  const float dt = 1.0f / 60.0f;
+  server.Tick(sworld, dt);
+  client.Tick(cworld, dt);
+  std::this_thread::sleep_for(std::chrono::milliseconds(4));
+}
+
+}  // namespace
+
+int main() {
+  std::printf("asset_streamtest\n");
+
+  const fs::path tmp = fs::temp_directory_path() / "rec_asset_stream_test";
+  std::error_code ec;
+  fs::remove_all(tmp, ec);
+  const fs::path mods_dir = tmp / "server_mods";
+  const fs::path cache_dir = tmp / "client_cache";
+
+  WriteFile(mods_dir / "weapons" / "meshes" / "sword.nif", "MESH" + std::string(3000, 'm'));
+  WriteFile(mods_dir / "weapons" / "textures" / "sword.dds", "TEX" + std::string(9000, 't'));
+  WriteFile(mods_dir / "scripts" / "main.lua", "print('hi')");
+
+  std::optional<modstream::ModCatalog> catalog = modstream::ModCatalog::Build(mods_dir);
+  Check("server catalogs the mods dir", catalog.has_value());
+  if (!catalog) {
+    std::printf("asset_streamtest: %d failure(s)\n", g_failures + 1);
+    return 1;
+  }
+  modstream::ContentStore store(cache_dir);
+
+  // --- bring up a loopback server and client ---
+  net::SessionConfig server_cfg;
+  server_cfg.port = 29751;
+  server_cfg.mod_catalog = &*catalog;
+  net::ServerSession server(server_cfg);
+  Check("server starts", server.Start());
+
+  net::SessionConfig client_cfg;
+  client_cfg.port = 29751;
+  client_cfg.address = base::String("127.0.0.1");
+  client_cfg.content_store = &store;
+  net::ClientSession client(client_cfg);
+  Check("client starts", client.Start());
+
+  // Register RPC handlers before any traffic flows. The server echoes back to
+  // the sender; the client records the reply.
+  bool server_saw_rpc = false;
+  rec::i64 echoed_value = 0;
+  bool client_saw_reply = false;
+  server.rpc()->registry().On("echo", [&](const rpc::RpcContext& ctx, const rpc::RpcArgs& args) {
+    server_saw_rpc = true;
+    const rec::i64 v = args.empty() ? 0 : args[0].as_int();
+    server.rpc()->EmitToClient(ctx.sender, "echo_reply", {rpc::RpcValue(rec::i64{v + 1})});
+  });
+  client.rpc()->registry().On("echo_reply", [&](const rpc::RpcContext&, const rpc::RpcArgs& args) {
+    client_saw_reply = true;
+    if (!args.empty()) echoed_value = args[0].as_int();
+  });
+
+  bool mounted_ok = false;
+  client.asset_stream()->set_on_ready([&](const modstream::ModManifest& manifest) {
+    asset::Vfs vfs;
+    modstream::MountManifest(vfs, manifest, store);
+    auto mesh = vfs.Read("meshes/sword.nif");
+    auto script = vfs.Read("main.lua");
+    mounted_ok = mesh && mesh->size() == 3004 && script && script->size() == 11;
+  });
+
+  ecs::World sworld;
+  ecs::World cworld;
+
+  // Stream the mods. Generous bound: localhost should finish in well under a
+  // second, but the handshake plus reliable retransmit timing varies.
+  bool ready = false;
+  for (int i = 0; i < 2000 && !ready; ++i) {
+    Pump(server, sworld, client, cworld);
+    if (client.asset_stream()->failed()) break;
+    ready = client.asset_stream()->ready();
+  }
+  Check("client joined the session", client.joined());
+  Check("asset stream did not fail", !client.asset_stream()->failed());
+  Check("all mod content streamed and cached", ready);
+  Check("streamed mods mount and read back through the Vfs", mounted_ok);
+
+  // Every catalogued file now lives in the cache, keyed by content hash.
+  bool all_cached = true;
+  for (const modstream::ModResource& resource : catalog->manifest().resources) {
+    for (const modstream::ResourceFile& file : resource.files) {
+      if (!store.Has(file.hash)) all_cached = false;
+    }
+  }
+  Check("content cache holds every catalogued file", all_cached);
+  Check("client reports no files remaining", client.asset_stream()->files_remaining() == 0);
+
+  // --- RPC round-trip ---
+  client.rpc()->EmitToServer("echo", {rpc::RpcValue(rec::i64{41})});
+  for (int i = 0; i < 600 && !client_saw_reply; ++i) Pump(server, sworld, client, cworld);
+  Check("server received the client's RPC", server_saw_rpc);
+  Check("client received the server's reply", client_saw_reply);
+  Check("RPC argument round-tripped", echoed_value == 42);
+
+  fs::remove_all(tmp, ec);
+  std::printf("asset_streamtest: %d failure(s)\n", g_failures);
+  return g_failures ? 1 : 0;
+}

@@ -9,6 +9,7 @@
 #include <znet/z_server.h>
 
 #include <functional>
+#include <memory>
 
 #include "ecs/world.h"
 #include "net/actor_sync.h"
@@ -20,7 +21,17 @@
 #include "quest/quest_system.h"
 #include "world/quest_world.h"
 
+namespace rec::modstream {
+class ModCatalog;
+class ContentStore;
+}  // namespace rec::modstream
+
 namespace rec::net {
+
+class AssetStreamServer;
+class AssetStreamClient;
+class RpcServerChannel;
+class RpcClientChannel;
 
 struct SessionConfig {
   u16 port = 29700;
@@ -32,6 +43,12 @@ struct SessionConfig {
   u32 keyframe_interval_ticks = 60;  // full snapshot every second
   f32 client_timeout_seconds = 10.0f;
   u64 player_mesh = 0;  // AssetId hash spawned for joining players
+
+  // Server: the catalogued mods directory to offer for streaming. Null leaves
+  // asset streaming off (the session runs exactly as before).
+  const modstream::ModCatalog* mod_catalog = nullptr;
+  // Client: where streamed mod content is cached. Null leaves streaming off.
+  modstream::ContentStore* content_store = nullptr;
 };
 
 // The server simulates, clients render what snapshots tell them. One process
@@ -93,6 +110,10 @@ class ServerSession final : public Session {
     actor_source_ = std::move(source);
   }
 
+  // The server's scripting RPC channel. Always present once Start succeeds; the
+  // engine registers handlers and emits client-bound calls through it.
+  RpcServerChannel* rpc() { return rpc_.get(); }
+
   u32 client_count() const { return static_cast<u32>(clients_.size()); }
   u64 tick() const { return tick_; }
 
@@ -127,6 +148,8 @@ class ServerSession final : public Session {
   std::function<std::vector<ActorState>()> actor_source_;
   QuestReplicator quest_replicator_;
   ActorReplicator actor_replicator_;
+  std::unique_ptr<AssetStreamServer> asset_stream_;
+  std::unique_ptr<RpcServerChannel> rpc_;
   u64 tick_ = 0;
   bool force_keyframe_ = false;
   bool started_ = false;
@@ -179,6 +202,14 @@ class ClientSession final : public Session {
     objective_marker_sink_ = std::move(sink);
   }
 
+  // The client's scripting RPC channel. Always present once Start succeeds; the
+  // engine registers handlers and emits server-bound calls through it.
+  RpcClientChannel* rpc() { return rpc_.get(); }
+
+  // The asset-stream downloader, or null when streaming is off. The engine wires
+  // its ready callback to mount the streamed mods into the asset Vfs.
+  AssetStreamClient* asset_stream() { return asset_stream_.get(); }
+
   bool joined() const { return joined_; }
   u64 player_net_id() const { return player_net_id_; }
   ecs::Entity player_entity() const { return applier_.Find(player_net_id_); }
@@ -190,6 +221,8 @@ class ClientSession final : public Session {
   SessionConfig config_;
   tx::network::ZClient client_;
   SnapshotApplier applier_;
+  std::unique_ptr<AssetStreamClient> asset_stream_;
+  std::unique_ptr<RpcClientChannel> rpc_;
   std::function<void(u8 domain, const quest::QuestStatus&)> quest_sink_;
   std::function<void(const ObjectiveMarkerState&)> objective_marker_sink_;
   std::function<void(const std::vector<world::WorldCommand>&)> world_command_sink_;

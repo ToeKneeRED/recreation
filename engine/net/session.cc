@@ -5,6 +5,10 @@
 #include <nanobuf.h>
 
 #include "core/log.h"
+#include "modstream/content_store.h"
+#include "modstream/mod_catalog.h"
+#include "net/asset_stream.h"
+#include "net/rpc_channel.h"
 #include "net/world_replication.h"
 
 namespace rec::net {
@@ -39,6 +43,10 @@ bool ServerSession::Start() {
     return false;
   }
   started_ = true;
+  rpc_ = std::make_unique<RpcServerChannel>(server_);
+  if (config_.mod_catalog) {
+    asset_stream_ = std::make_unique<AssetStreamServer>(server_, *config_.mod_catalog);
+  }
   REC_INFO("net: server listening on {}", config_.port);
   return true;
 }
@@ -108,6 +116,19 @@ void ServerSession::PollMessages(ecs::World& world) {
         if (auto req = DecodeStageRequest(blob)) stage_request_sink_(*req);
         break;
       }
+      case MessageType::kAssetRequest: {
+        if (asset_stream_) {
+          asset_stream_->HandleRequest(peer,
+                                       reinterpret_cast<const u8*>(packet.data.data()),
+                                       packet.data.size());
+        }
+        break;
+      }
+      case MessageType::kRpcCall: {
+        rpc_->OnPacket(peer, reinterpret_cast<const u8*>(packet.data.data()),
+                       packet.data.size());
+        break;
+      }
       default:
         REC_WARN("net: unhandled message type {} from peer {}",
                  static_cast<u16>(packet.type), peer);
@@ -129,6 +150,7 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer,
   }
 
   RemoteClient* client = clients_.find(peer);
+  const bool is_new_client = client == nullptr;
   if (!client) {
     if (clients_.size() >= config_.max_clients) {
       JoinRefuse refuse;
@@ -179,6 +201,10 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer,
       config_.tick_rate / config_.snapshot_interval_ticks);
   server_.Push(MakePacket(peer, MessageType::kJoinAccept, accept.Encode(),
                           /*reliable=*/true, tx::network::PacketPriority::High));
+
+  // Offer the mod manifest once, right after admitting the peer, so it can start
+  // streaming whatever content it is missing.
+  if (is_new_client && asset_stream_) asset_stream_->SendManifest(peer);
 }
 
 void ServerSession::DropClient(ecs::World& world, u32 peer) {
@@ -304,6 +330,11 @@ bool ClientSession::Start() {
     REC_ERROR("net: failed to start connecting to {}:{}",
               config_.address.c_str(), config_.port);
     return false;
+  }
+  rpc_ = std::make_unique<RpcClientChannel>(client_);
+  if (config_.content_store) {
+    asset_stream_ = std::make_unique<AssetStreamClient>(
+        client_, *config_.content_store, config_.content_store->root() / ".incoming");
   }
   REC_INFO("net: connecting to {}:{}", config_.address.c_str(), config_.port);
   return true;
@@ -457,6 +488,18 @@ void ClientSession::PollMessages(ecs::World& world) {
         } else {
           REC_WARN("net: dropped corrupt objective marker");
         }
+        break;
+      }
+      case MessageType::kAssetManifest: {
+        if (asset_stream_) {
+          asset_stream_->OnManifestChunk(
+              reinterpret_cast<const u8*>(packet.data.data()), packet.data.size());
+        }
+        break;
+      }
+      case MessageType::kRpcCall: {
+        rpc_->OnPacket(reinterpret_cast<const u8*>(packet.data.data()),
+                       packet.data.size());
         break;
       }
       default:
