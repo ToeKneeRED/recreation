@@ -117,6 +117,16 @@ class ServerSession final : public Session {
     client_ready_sink_ = std::move(sink);
   }
 
+  // Sinks invoked when a client joins and when it leaves (or times out), the
+  // fundamental multiplayer hooks for server-side scripts. Fired for every peer
+  // regardless of asset streaming. Unset sinks drop the notice.
+  void SetClientJoinedSink(std::function<void(u32)> sink) {
+    client_joined_sink_ = std::move(sink);
+  }
+  void SetClientLeftSink(std::function<void(u32)> sink) {
+    client_left_sink_ = std::move(sink);
+  }
+
   // The server's scripting RPC channel. Always present once Start succeeds; the
   // engine registers handlers and emits client-bound calls through it.
   RpcServerChannel* rpc() { return rpc_.get(); }
@@ -154,6 +164,8 @@ class ServerSession final : public Session {
   std::function<void(u64)> dialogue_sink_;
   std::function<std::vector<ActorState>()> actor_source_;
   std::function<void(u32)> client_ready_sink_;
+  std::function<void(u32)> client_joined_sink_;
+  std::function<void(u32)> client_left_sink_;
   QuestReplicator quest_replicator_;
   ActorReplicator actor_replicator_;
   std::unique_ptr<AssetStreamServer> asset_stream_;

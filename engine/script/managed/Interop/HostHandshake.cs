@@ -17,6 +17,8 @@ public enum ManagedEventId : int
     KeyPressed = 8,          // A = key code (the engine's Key enum)
     FormUnloaded = 9,        // A = form handle (it streamed out / left the world)
     ClientAssetsReady = 10,  // A = peer id (a client finished streaming the server's mods)
+    ClientJoined = 11,       // A = peer id (a client joined the session, host only)
+    ClientLeft = 12,         // A = peer id (a client left or timed out, host only)
 }
 
 // An engine event payload. Byte-for-byte mirror of host/bridge.h ManagedEvent;

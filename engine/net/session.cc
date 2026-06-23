@@ -209,6 +209,9 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer,
   // Offer the mod manifest once, right after admitting the peer, so it can start
   // streaming whatever content it is missing.
   if (is_new_client && asset_stream_) asset_stream_->SendManifest(peer);
+
+  // Fire the join hook once, for every new peer (with or without mods).
+  if (is_new_client && client_joined_sink_) client_joined_sink_(peer);
 }
 
 void ServerSession::DropClient(ecs::World& world, u32 peer) {
@@ -217,6 +220,7 @@ void ServerSession::DropClient(ecs::World& world, u32 peer) {
   REC_INFO("net: dropping peer {} ('{}')", peer, client->name.c_str());
   if (world.IsAlive(client->player)) world.Destroy(client->player);
   clients_.erase(peer);
+  if (client_left_sink_) client_left_sink_(peer);
 }
 
 void ServerSession::SimulatePlayers(ecs::World& world, f32 dt) {

@@ -112,6 +112,21 @@ public readonly struct ClientAssetsReady(uint peer) : IGameEvent
     public uint Peer { get; } = peer;
 }
 
+// Raised on the host when a player joins the session, the fundamental hook for
+// server-side multiplayer scripting. Fires for every peer, with or without mods;
+// ClientAssetsReady follows once that player's UGC has streamed in.
+public readonly struct ClientJoined(uint peer) : IGameEvent
+{
+    public uint Peer { get; } = peer;
+}
+
+// Raised on the host when a player leaves or times out. Mods clean up per-player
+// state here.
+public readonly struct ClientLeft(uint peer) : IGameEvent
+{
+    public uint Peer { get; } = peer;
+}
+
 // Raised by the time service when a new in-game hour begins. Mods drive NPC
 // schedules, shop hours and day/night mechanics off it.
 public readonly struct GameHourStarted(int hour, int day) : IGameEvent

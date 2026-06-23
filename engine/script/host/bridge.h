@@ -101,6 +101,8 @@ enum class ManagedEventId : std::int32_t {
   kKeyPressed = 8,          // a = key code (the engine's Key enum)
   kFormUnloaded = 9,        // a = form handle (it streamed out / left the world)
   kClientAssetsReady = 10,  // a = peer id (a client finished streaming the server's mods)
+  kClientJoined = 11,       // a = peer id (a client joined the session, host only)
+  kClientLeft = 12,         // a = peer id (a client left or timed out, host only)
 };
 
 struct ManagedEvent {

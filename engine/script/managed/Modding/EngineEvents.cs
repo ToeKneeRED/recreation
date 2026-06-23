@@ -42,6 +42,12 @@ public static class EngineEvents
             case ManagedEventId.ClientAssetsReady:
                 EventBus.Publish(new ClientAssetsReady((uint)e.A));
                 break;
+            case ManagedEventId.ClientJoined:
+                EventBus.Publish(new ClientJoined((uint)e.A));
+                break;
+            case ManagedEventId.ClientLeft:
+                EventBus.Publish(new ClientLeft((uint)e.A));
+                break;
         }
     }
 }

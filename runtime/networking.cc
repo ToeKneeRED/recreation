@@ -136,6 +136,18 @@ bool StartNetworking(Engine& engine) {
         self->managed_->QueueEvent({rec::script::host::ManagedEventId::kClientAssetsReady,
                                     peer, 0, 0, 0.0f});
     });
+    // The fundamental multiplayer hooks: a player joined, a player left. Raised
+    // for every peer so server-side scripts work even without streamed mods.
+    self->server_session_->SetClientJoinedSink([self](u32 peer) {
+      if (self->managed_)
+        self->managed_->QueueEvent({rec::script::host::ManagedEventId::kClientJoined,
+                                    peer, 0, 0, 0.0f});
+    });
+    self->server_session_->SetClientLeftSink([self](u32 peer) {
+      if (self->managed_)
+        self->managed_->QueueEvent({rec::script::host::ManagedEventId::kClientLeft,
+                                    peer, 0, 0, 0.0f});
+    });
   } else if (!self->config_.connect_address.empty()) {
     net_config.address = base::String(self->config_.connect_address.c_str());
     auto client = std::make_unique<net::ClientSession>(std::move(net_config));

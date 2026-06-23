@@ -86,6 +86,7 @@ int main() {
   net::SessionConfig server_cfg;
   server_cfg.port = 29751;
   server_cfg.mod_catalog = &*catalog;
+  server_cfg.client_timeout_seconds = 1.0f;  // so the leave hook is testable quickly
   net::ServerSession server(server_cfg);
   Check("server starts", server.Start());
 
@@ -120,6 +121,20 @@ int main() {
     ready_peer = peer;
   });
 
+  // The fundamental multiplayer lifecycle hooks.
+  bool server_saw_join = false;
+  rec::u32 join_peer = 9999;
+  server.SetClientJoinedSink([&](rec::u32 peer) {
+    server_saw_join = true;
+    join_peer = peer;
+  });
+  bool server_saw_left = false;
+  rec::u32 left_peer = 9999;
+  server.SetClientLeftSink([&](rec::u32 peer) {
+    server_saw_left = true;
+    left_peer = peer;
+  });
+
   bool mounted_ok = false;
   client.asset_stream()->set_on_ready([&](const modstream::ModManifest& manifest) {
     asset::Vfs vfs;
@@ -141,6 +156,8 @@ int main() {
     ready = client.asset_stream()->ready();
   }
   Check("client joined the session", client.joined());
+  Check("server raised the join hook", server_saw_join);
+  Check("join hook carries the peer id", join_peer == 0);
   Check("asset stream did not fail", !client.asset_stream()->failed());
   Check("all mod content streamed and cached", ready);
   Check("streamed mods mount and read back through the Vfs", mounted_ok);
@@ -166,6 +183,16 @@ int main() {
   Check("server received the client's RPC", server_saw_rpc);
   Check("client received the server's reply", client_saw_reply);
   Check("RPC argument round-tripped", echoed_value == 42);
+
+  // Stop ticking the client and run the server alone until it times the peer out,
+  // exercising the leave hook.
+  const float dt = 1.0f / 60.0f;
+  for (int i = 0; i < 200 && !server_saw_left; ++i) {
+    server.Tick(sworld, dt);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  Check("server raised the leave hook on timeout", server_saw_left);
+  Check("leave hook carries the peer id", left_peer == 0);
 
   fs::remove_all(tmp, ec);
   std::printf("asset_streamtest: %d failure(s)\n", g_failures);
