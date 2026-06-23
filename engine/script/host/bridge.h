@@ -86,9 +86,46 @@ struct ScriptBridge {
   void (*tick)(void* ctx, float dt);
 };
 
-// Signature of the managed entrypoint, exported [UnmanagedCallersOnly]. The
-// host resolves a function pointer of this type and calls it with the bridge.
-using ManagedEntry = std::int32_t (*)(ScriptBridge*);
+// An engine event delivered into the managed event bus, so mods react to the
+// world (gmod-style hooks). POD with a fixed layout the managed side mirrors.
+// Only the payload fields an id documents are meaningful. Append only.
+enum class ManagedEventId : std::int32_t {
+  kNone = 0,
+  kActorDied = 1,           // a = actor handle
+  kItemAdded = 2,           // a = container handle, b = item handle, i = count
+  kQuestStageChanged = 3,   // a = quest form id, i = stage
+};
+
+struct ManagedEvent {
+  ManagedEventId id = ManagedEventId::kNone;
+  std::uint64_t a = 0;
+  std::uint64_t b = 0;
+  std::int32_t i = 0;
+  float f = 0.0f;
+};
+
+// The outbound half of the boundary: calls from the engine into the managed
+// world. The managed entrypoint fills these during boot, and the engine then
+// drives the managed host through them: tick once per frame, publish_event when
+// the world raises an event, shutdown on teardown. Any pointer may be null if
+// the managed side declines that hook.
+struct HostCallbacks {
+  void (*tick)(float dt);
+  void (*publish_event)(const ManagedEvent* e);
+  void (*shutdown)();
+};
+
+// What the managed entrypoint receives: the inbound bridge it drives the engine
+// through, plus the outbound callbacks slot it fills. One struct keeps the
+// entrypoint a single-argument call.
+struct HostHandshake {
+  ScriptBridge* bridge;
+  HostCallbacks callbacks;
+};
+
+// Signature of the managed entrypoint, exported [UnmanagedCallersOnly]. The host
+// resolves a function pointer of this type and calls it with the handshake.
+using ManagedEntry = std::int32_t (*)(HostHandshake*);
 
 }  // namespace rec::script::host
 
