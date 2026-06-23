@@ -29,6 +29,11 @@
 #include "quest_director.h"
 #include "showcase_camera.h"
 
+#if RECREATION_HAS_NET
+#include "modstream/content_store.h"
+#include "modstream/mod_catalog.h"
+#endif
+
 namespace rec {
 
 // WorldEffectSink implementation: the Skyrim bindings call this on the guest
@@ -305,6 +310,10 @@ class Engine {
   // Typed views into session_, null unless that role is active.
   net::ServerSession* server_session_ = nullptr;
   net::ClientSession* client_session_ = nullptr;
+  // Asset streaming: the host's catalogued mods directory, and the client's
+  // content cache. The session holds pointers into these, so they outlive it.
+  std::unique_ptr<modstream::ModCatalog> mod_catalog_;
+  std::unique_ptr<modstream::ContentStore> content_store_;
 #endif
 
   // Shared service bundle handed to the subsystems, plus the subsystems

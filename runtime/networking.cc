@@ -1,6 +1,8 @@
 #include "engine.h"
 
 #include <cstdlib>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -8,6 +10,13 @@
 #include "core/log.h"
 #include "quest/quest_def.h"
 #include "script/papyrus/value.h"
+
+#if RECREATION_HAS_NET
+#include "modstream/content_provider.h"
+#include "modstream/content_store.h"
+#include "modstream/mod_catalog.h"
+#include "net/asset_stream.h"
+#endif
 
 // Engine network bringup: opens the authoritative server or replica client
 // session and wires the replication sinks (quest journal, quest-driven world
@@ -25,6 +34,31 @@ bool StartNetworking(Engine& engine) {
   net_config.max_clients = self->config_.max_clients;
   // Joining players replicate as cubes until there are real actor assets.
   net_config.player_mesh = asset::MakeAssetId("builtin/cube").hash;
+
+  // Asset streaming endpoints: the host catalogs its mods directory to offer, a
+  // connecting client opens the content cache it streams into. A configured but
+  // unreadable mods directory is a hard error, not a silent skip.
+  if (self->config_.host_server) {
+    if (!self->config_.mods_dir.empty()) {
+      std::optional<modstream::ModCatalog> catalog =
+          modstream::ModCatalog::Build(self->config_.mods_dir);
+      if (!catalog) {
+        REC_ERROR("net: could not catalog mods directory '{}'", self->config_.mods_dir);
+        return false;
+      }
+      REC_INFO("net: offering {} mod files ({} bytes) from {}",
+               catalog->manifest().TotalFiles(), catalog->manifest().TotalBytes(),
+               self->config_.mods_dir);
+      self->mod_catalog_ = std::make_unique<modstream::ModCatalog>(std::move(*catalog));
+      net_config.mod_catalog = self->mod_catalog_.get();
+    }
+  } else if (!self->config_.connect_address.empty()) {
+    const std::string cache_dir = self->config_.asset_cache_dir.empty()
+                                      ? std::string("recreation_asset_cache")
+                                      : self->config_.asset_cache_dir;
+    self->content_store_ = std::make_unique<modstream::ContentStore>(cache_dir);
+    net_config.content_store = self->content_store_.get();
+  }
 
   if (self->config_.host_server) {
     auto server = std::make_unique<net::ServerSession>(std::move(net_config));
@@ -101,6 +135,16 @@ bool StartNetworking(Engine& engine) {
     self->client_session_ = client.get();
     self->ctx_.client_session = self->client_session_;
     self->session_ = std::move(client);
+    // Mount the streamed mods into the asset Vfs once the whole manifest has
+    // landed in the cache, so the host's custom content resolves like loose files.
+    if (self->content_store_ && self->client_session_->asset_stream()) {
+      self->client_session_->asset_stream()->set_on_ready(
+          [self](const modstream::ModManifest& manifest) {
+            modstream::MountManifest(self->vfs_, manifest, *self->content_store_);
+            REC_INFO("net: mounted {} streamed mod files into the asset vfs",
+                     manifest.TotalFiles());
+          });
+    }
     // Mirror the server's journal onto our quest system. ApplyStatus mutates
     // quest state, so it has to run on the guest thread like every other write.
     if (self->scripts_ && self->script_bindings_) {

@@ -95,6 +95,8 @@ int main(int argc, char** argv) {
     else if (arg == "--connect") config.connect_address = next();
     else if (arg == "--port") config.port = static_cast<rec::u16>(std::stoi(next()));
     else if (arg == "--name") config.player_name = next();
+    else if (arg == "--mods-dir") config.mods_dir = next();
+    else if (arg == "--asset-cache") config.asset_cache_dir = next();
     else if (arg == "--cell") {
       std::string cell = next();
       size_t comma = cell.find(',');

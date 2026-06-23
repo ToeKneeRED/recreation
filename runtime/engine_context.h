@@ -78,6 +78,14 @@ struct EngineConfig {
   std::string connect_address;
   std::string player_name = "player";
   u32 max_clients = 64;
+  // Server: directory of streamable UGC resources (FiveM-style). Each immediate
+  // subdirectory is a resource catalogued and offered to joining clients. Empty
+  // leaves asset streaming off.
+  std::string mods_dir;
+  // Client: where streamed mod content is cached, content-addressed. Empty falls
+  // back to "recreation_asset_cache" beside the working directory. A connecting
+  // client always streams the host's mods into this cache.
+  std::string asset_cache_dir;
 };
 
 // A dynamic physics body mirrored into an ECS transform after each step.

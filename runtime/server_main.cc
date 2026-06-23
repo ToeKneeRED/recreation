@@ -24,6 +24,7 @@ void PrintUsage() {
   REC_INFO("  --game <id>           skyrimse | fo4 | fo76 (default: autodetect)");
   REC_INFO("  --port <port>         listen port (default: 29700)");
   REC_INFO("  --max-clients <n>     player slots (default: 64)");
+  REC_INFO("  --mods-dir <path>     UGC resources to stream to clients (FiveM-style)");
 }
 
 rec::bethesda::Game ParseGame(const std::string& id) {
@@ -50,6 +51,7 @@ int main(int argc, char** argv) {
     else if (arg == "--game") config.game = ParseGame(next());
     else if (arg == "--port") config.port = static_cast<rec::u16>(std::stoi(next()));
     else if (arg == "--max-clients") config.max_clients = static_cast<rec::u32>(std::stoi(next()));
+    else if (arg == "--mods-dir") config.mods_dir = next();
     else {
       PrintUsage();
       return arg == "--help" ? 0 : 1;
