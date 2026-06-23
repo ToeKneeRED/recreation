@@ -104,6 +104,14 @@ public readonly struct KeyPressed(Key key) : IGameEvent
     public Key Key { get; } = key;
 }
 
+// Raised on the host when a connected client finishes streaming the server's
+// mods into its cache. Server-side mods react here, gating spawn or greeting the
+// player once their UGC has arrived.
+public readonly struct ClientAssetsReady(uint peer) : IGameEvent
+{
+    public uint Peer { get; } = peer;
+}
+
 // Raised by the time service when a new in-game hour begins. Mods drive NPC
 // schedules, shop hours and day/night mechanics off it.
 public readonly struct GameHourStarted(int hour, int day) : IGameEvent

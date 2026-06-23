@@ -16,7 +16,8 @@ namespace rec::net {
 // Bumped whenever nbuf/protocol.nb or a hand-encoded payload changes shape.
 // v2 adds the per-quest domain tag (multi-game quest replication).
 // v3 adds asset streaming (manifest/request) and the scripting RPC channel.
-inline constexpr u32 kProtocolVersion = 3;
+// v4 adds the client asset-ready notification.
+inline constexpr u32 kProtocolVersion = 4;
 
 // Application packet ids. Zetanet owns everything below PacketType::Message
 // (100), recreation ids start at 101. Every payload is a nanobuf message
@@ -37,6 +38,7 @@ enum class MessageType : u16 {
   kAssetManifest = 113,   // server -> client: the mod manifest offered for streaming
   kAssetRequest = 114,    // client -> server: content hashes the client wants streamed
   kRpcCall = 115,         // either direction: an encoded scripting RPC (rpc::EncodeCall)
+  kAssetReady = 116,      // client -> server: the client finished streaming the mods
 };
 
 inline tx::network::PacketType ToPacketType(MessageType type) {

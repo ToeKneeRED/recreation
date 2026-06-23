@@ -111,6 +111,15 @@ int main() {
     if (!args.empty()) echoed_value = args[0].as_int();
   });
 
+  // The server learns when the client finished streaming, the hook server-side
+  // scripts use to gate spawn or greet the player.
+  bool server_saw_ready = false;
+  rec::u32 ready_peer = 9999;
+  server.SetClientReadySink([&](rec::u32 peer) {
+    server_saw_ready = true;
+    ready_peer = peer;
+  });
+
   bool mounted_ok = false;
   client.asset_stream()->set_on_ready([&](const modstream::ModManifest& manifest) {
     asset::Vfs vfs;
@@ -145,6 +154,11 @@ int main() {
   }
   Check("content cache holds every catalogued file", all_cached);
   Check("client reports no files remaining", client.asset_stream()->files_remaining() == 0);
+
+  // The ready notice rides the wire after the client mounts; settle a few ticks.
+  for (int i = 0; i < 120 && !server_saw_ready; ++i) Pump(server, sworld, client, cworld);
+  Check("server was notified the client's assets are ready", server_saw_ready);
+  Check("ready notice carries the client's peer id", ready_peer == 0);
 
   // --- RPC round-trip ---
   client.rpc()->EmitToServer("echo", {rpc::RpcValue(rec::i64{41})});

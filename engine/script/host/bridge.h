@@ -100,6 +100,7 @@ enum class ManagedEventId : std::int32_t {
   kLocationChanged = 7,     // a = interior cell id (0 outside), i = 1 if interior
   kKeyPressed = 8,          // a = key code (the engine's Key enum)
   kFormUnloaded = 9,        // a = form handle (it streamed out / left the world)
+  kClientAssetsReady = 10,  // a = peer id (a client finished streaming the server's mods)
 };
 
 struct ManagedEvent {

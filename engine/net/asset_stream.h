@@ -111,6 +111,10 @@ class AssetStreamClient {
   void HandleChunk(const tx::network::ZFileTransporter::TransferChunk& chunk);
   void OnFileFinished(const std::filesystem::path& path);
 
+  // Tells the server this client now holds every mod file, so server-side scripts
+  // can react (gate spawn, greet, ...). Sent once, when the cache is complete.
+  void SendReady();
+
   // Registered with the ZClient as its file-transfer sink. Update() invokes it
   // for every incoming FileTransfer control packet, on the session thread.
   static void SinkThunk(void* context, const tx::network::IncomingPacket& packet);

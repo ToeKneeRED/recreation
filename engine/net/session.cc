@@ -129,6 +129,10 @@ void ServerSession::PollMessages(ecs::World& world) {
                        packet.data.size());
         break;
       }
+      case MessageType::kAssetReady: {
+        if (clients_.find(peer) && client_ready_sink_) client_ready_sink_(peer);
+        break;
+      }
       default:
         REC_WARN("net: unhandled message type {} from peer {}",
                  static_cast<u16>(packet.type), peer);

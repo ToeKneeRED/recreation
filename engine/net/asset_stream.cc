@@ -208,6 +208,7 @@ void AssetStreamClient::OnManifestComplete() {
     REC_INFO("net: asset manifest complete, {} files already cached",
              manifest_.TotalFiles());
     ready_ = true;
+    SendReady();
     if (on_ready_) on_ready_(manifest_);
     return;
   }
@@ -280,8 +281,15 @@ void AssetStreamClient::OnFileFinished(const fs::path& path) {
     downloading_ = false;
     ready_ = true;
     REC_INFO("net: all mod assets streamed, mounting {} files", manifest_.TotalFiles());
+    SendReady();
     if (on_ready_) on_ready_(manifest_);
   }
+}
+
+void AssetStreamClient::SendReady() {
+  client_.Push(MakePacket(tx::network::ZPeerId::to_server, MessageType::kAssetReady,
+                          std::vector<u8>{}, /*reliable=*/true,
+                          tx::network::PacketPriority::High));
 }
 
 }  // namespace rec::net

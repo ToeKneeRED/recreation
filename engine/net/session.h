@@ -110,6 +110,13 @@ class ServerSession final : public Session {
     actor_source_ = std::move(source);
   }
 
+  // Sink invoked with the peer id when a client reports it finished streaming the
+  // server's mods. The engine raises a managed event so server-side scripts can
+  // react (gate spawn, greet the player). When unset, the notice is dropped.
+  void SetClientReadySink(std::function<void(u32)> sink) {
+    client_ready_sink_ = std::move(sink);
+  }
+
   // The server's scripting RPC channel. Always present once Start succeeds; the
   // engine registers handlers and emits client-bound calls through it.
   RpcServerChannel* rpc() { return rpc_.get(); }
@@ -146,6 +153,7 @@ class ServerSession final : public Session {
   std::function<void(u64)> activate_sink_;
   std::function<void(u64)> dialogue_sink_;
   std::function<std::vector<ActorState>()> actor_source_;
+  std::function<void(u32)> client_ready_sink_;
   QuestReplicator quest_replicator_;
   ActorReplicator actor_replicator_;
   std::unique_ptr<AssetStreamServer> asset_stream_;

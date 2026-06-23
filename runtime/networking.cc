@@ -128,6 +128,14 @@ bool StartNetworking(Engine& engine) {
     // Stream authoritative NPC transforms; the session deltas them so only the
     // NPCs that actually moved this tick go out.
     self->server_session_->SetActorSource([self]() { return net::CollectActorStates(self->world_); });
+    // When a client finishes streaming the mods, raise a managed event so
+    // server-side C# scripts can react (gate spawn, greet the player).
+    self->server_session_->SetClientReadySink([self](u32 peer) {
+      REC_INFO("net: peer {} finished streaming the server's mods", peer);
+      if (self->managed_)
+        self->managed_->QueueEvent({rec::script::host::ManagedEventId::kClientAssetsReady,
+                                    peer, 0, 0, 0.0f});
+    });
   } else if (!self->config_.connect_address.empty()) {
     net_config.address = base::String(self->config_.connect_address.c_str());
     auto client = std::make_unique<net::ClientSession>(std::move(net_config));

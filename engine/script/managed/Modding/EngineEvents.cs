@@ -39,6 +39,9 @@ public static class EngineEvents
             case ManagedEventId.KeyPressed:
                 EventBus.Publish(new KeyPressed((Key)e.A));
                 break;
+            case ManagedEventId.ClientAssetsReady:
+                EventBus.Publish(new ClientAssetsReady((uint)e.A));
+                break;
         }
     }
 }
