@@ -30,6 +30,7 @@
 #include "script/host/bridge.h"
 #include "script/host/clr_host.h"
 #include "script/host/guest_bridge.h"
+#include "script/host/managed_host.h"
 #include "script/games/skyrim/skyrim_bindings.h"
 #include "script/games/skyrim/skyrim_natives.h"
 
@@ -782,6 +783,56 @@ int HostTest(const std::string& runtime_config, const std::string& assembly) {
   return ok ? 0 : 1;
 }
 
+// Drives the engine->managed direction end to end through the ManagedHost: boots
+// the production managed world (which loads the Skyrim mod and its attribute
+// regeneration), ticks it, and confirms the player's health rose back toward its
+// base. That round trip proves the full path: engine tick -> managed OnUpdate ->
+// SDK call back into the engine -> bindings state changes -> engine observes.
+// Skips cleanly (rc 0) when no .NET runtime is present.
+int ManagedHostTest(const std::string& runtime_config, const std::string& assembly) {
+  using rec::script::PapyrusGuest;
+  using rec::script::skyrim::RecordBackedSkyrimBindings;
+
+  RecordBackedSkyrimBindings bindings;
+  const ObjectRef player{0x14};
+  bindings.set_player(player);
+  // Player at half health: base 100, current 50.
+  bindings.SetActorValue(player, "Health", 100.0f);
+  bindings.ModActorValue(player, "Health", -50.0f);
+
+  PapyrusGuest guest(bethesda::Game::kSkyrimSe);
+  rec::script::skyrim::RegisterSkyrimNatives(guest.natives(), &bindings);
+  guest.Start();
+
+  rec::script::host::ManagedHost host;
+  if (!host.Boot(guest, /*loader=*/{}, /*dotnet_root=*/"", runtime_config, assembly)) {
+    std::printf("MANAGEDHOSTTEST SKIPPED (no .NET runtime / entrypoint)\n");
+    guest.Stop();
+    return 0;
+  }
+
+  const f32 before = bindings.GetActorValue(player, "Health");
+  for (int i = 0; i < 10; ++i) host.Tick(1.0f);  // ~0.7 hp/s * 10s
+  const f32 after = bindings.GetActorValue(player, "Health");
+
+  // Event delivery must not fault even without a consumer.
+  host.PublishEvent({rec::script::host::ManagedEventId::kActorDied, player.handle, 0, 0, 0.0f});
+
+  host.Shutdown();
+  guest.Stop();
+
+  int failures = 0;
+  auto check = [&](const char* what, bool ok) {
+    std::printf("  %-44s %s\n", what, ok ? "ok" : "FAIL");
+    if (!ok) ++failures;
+  };
+  check("health regenerated over ticks", after > before);
+  check("regen stays within base", after <= 100.0f);
+  check("regen advanced roughly 7 hp", after > 56.0f && after < 58.0f);
+  std::printf("%s\n", failures ? "MANAGEDHOSTTEST FAILED" : "MANAGEDHOSTTEST PASSED");
+  return failures ? 1 : 0;
+}
+
 // A native method on a synthetic script (is_native, no body).
 NamedFunction NativeMethod(Builder& b, const char* name,
                            std::vector<std::pair<const char*, const char*>> params) {
@@ -1051,6 +1102,8 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::string(argv[1]) == "tracetest") return TraceTest();
   if (argc == 3 && std::string(argv[1]) == "vmtest") return VmTest(argv[2]);
   if (argc == 4 && std::string(argv[1]) == "hosttest") return HostTest(argv[2], argv[3]);
+  if (argc == 4 && std::string(argv[1]) == "managedhosttest")
+    return ManagedHostTest(argv[2], argv[3]);
   if (argc == 5 && std::string(argv[1]) == "disasm") return DisasmReal(argv[2], argv[3], argv[4]);
   if (argc == 4) return RunReal(argv[1], argv[2], argv[3]);
   std::fprintf(stderr,

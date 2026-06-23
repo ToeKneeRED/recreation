@@ -196,6 +196,10 @@ if(DOTNET_EXE)
 
   add_test(NAME papyrus_hosttest COMMAND pexrun hosttest ${MANAGED_CFG} ${MANAGED_DLL})
   set_tests_properties(papyrus_hosttest PROPERTIES FIXTURES_REQUIRED managed_fx)
+
+  add_test(NAME papyrus_managed_hosttest
+    COMMAND pexrun managedhosttest ${MANAGED_CFG} ${MANAGED_DLL})
+  set_tests_properties(papyrus_managed_hosttest PROPERTIES FIXTURES_REQUIRED managed_fx)
 else()
   message(STATUS "dotnet not found: managed scripting tests disabled")
 endif()
