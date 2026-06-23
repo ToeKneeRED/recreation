@@ -7,7 +7,11 @@
 
 #include <base/containers/unordered_map.h>
 
+#include "anim/foot_ik.h"
+#include "anim/locomotion.h"
+#include "anim/pose.h"
 #include "asset/asset_database.h"
+#include "asset/skeleton.h"
 #include "asset/vfs.h"
 #include "bethesda/game_profile.h"
 #include "bethesda/load_order.h"
@@ -59,15 +63,68 @@ class Engine {
   void RequestQuit() { quit_.store(true, std::memory_order_relaxed); }
 
  private:
+  // Skinned, animated characters. Each owns a skeleton + pose; its parts are
+  // skinned meshes sharing that pose. Kept engine-side (not ECS components)
+  // because the renderer needs the CPU skin bindings to build palettes.
+  struct ActorPart {
+    asset::AssetId mesh;
+    asset::SkinBinding skin;
+    base::Vector<i32> remap;  // skin bone -> skeleton bone index
+    // Rigid parts (head, hair) are not skinned: they ride a single bone.
+    // attach_bone >= 0 selects it; the part follows bone_model * inverse bind.
+    i32 attach_bone = -1;
+    Mat4 attach_inverse_bind = Mat4::Identity();
+  };
+  struct Actor {
+    ecs::Entity entity;
+    asset::Skeleton skeleton;
+    anim::Locomotion locomotion;
+    anim::SkeletonPose pose;
+    base::Vector<Mat4> bone_model;     // model-space per skeleton bone
+    base::Vector<ActorPart> parts;
+    bool animate = true;               // false = hold the bind pose
+    f32 speed = 0;                     // planar speed feeding the gait
+    Mat4 skeleton_to_local = Mat4::Identity();  // skeleton space -> entity local
+    Mat4 prev_model = Mat4::Identity();
+    // Foot IK config, in model space. up/forward are the ground-up and facing
+    // axes (engine rig: +Y/+Z; Skyrim: +Z/+Y).
+    bool foot_ik = false;
+    Vec3 ik_up{0, 1, 0};
+    Vec3 ik_forward{0, 0, 1};
+    f32 ankle_height = 0.02f;
+    // Walk mode: a Jolt character capsule drives the entity; yaw faces movement.
+    physics::CharacterId character = 0;
+    f32 yaw = 0;             // facing, radians about engine up (+Y)
+    f32 capsule_offset = 0;  // entity origin to capsule centre, along up
+  };
+
   bool LoadGameData();
   bool LoadInterior();
   void MountArchives();
   bool StartNetworking();
   void CreateDemoScene();
   void CreateWaterDemoScene();
+  void CreateTestCharacter();
+  // Assembles an animated actor from real Skyrim data: loads skeleton.nif into
+  // an engine Skeleton and the worn body-part NIFs as skinned meshes bound to
+  // it by bone name. Returns false if the core skeleton/body could not load.
+  bool CreateSkyrimActor();
+  // Loads one body-part NIF, uploads it, and appends it to `actor`. Skinned
+  // parts bind to the skeleton by name; a part with no skin falls back to a
+  // rigid mesh riding `attach_bone` (>= 0), used for the head and hair.
+  bool LoadActorPart(const std::string& path, Actor& actor, i32 attach_bone = -1);
+  // Collects up to `max` non-female HDPT model paths of a head-part type
+  // (3 = hair, 1 = face), for assembling an actor's head.
+  base::Vector<std::string> FindHeadPartModels(u32 part_type, u32 max);
   void ThrowPhysicsCube();
   bool LoadGltfScene();
   void UpdateCamera(f32 frame_delta);
+  // Walk mode step: input -> character move -> entity transform + follow camera.
+  void WalkUpdate(f32 dt, bool allow_input);
+  // Advances every actor's gait and recomputes its model-space bone matrices.
+  void UpdateActors(f32 dt);
+  // Appends each actor's skinned draws + bone palettes to the frame view.
+  void EmitActorDraws(render::FrameView& view);
 
   EngineConfig config_;
   bethesda::Game game_ = bethesda::Game::kUnknown;
@@ -96,6 +153,19 @@ class Engine {
   };
   base::Vector<PhysicsEntity> physics_entities_;
   asset::AssetId physics_cube_mesh_;
+
+  base::Vector<Actor> actors_;
+  i32 player_actor_ = -1;  // index into actors_ the walk mode drives, -1 = none
+
+  // Walk-on-the-map mode: WASD drives the player actor, mouse looks, C swaps
+  // first/third person. Toggled with T; otherwise the fly camera roams.
+  bool walk_mode_ = false;
+  bool third_person_ = true;
+  bool auto_walk_ = false;  // REC_AUTOWALK: force walk mode + forward for testing
+  f32 cam_yaw_ = 0;
+  f32 cam_pitch_ = -0.15f;
+  Vec3 walk_eye_{};
+  Vec3 walk_target_{};
   // Last frame's world matrices keyed by entity, for motion vectors.
   base::UnorderedMap<u64, Mat4> prev_transforms_;
   std::unique_ptr<net::Session> session_;

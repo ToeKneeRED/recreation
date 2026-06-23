@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include "asset/primitives.h"
 #include "bethesda/archive.h"
 #include "bethesda/converters.h"
+#include "bethesda/nif.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "world/components.h"
@@ -252,7 +254,7 @@ void Engine::CreateDemoScene() {
   }
 
   ecs::Entity entity = world_.Create();
-  world_.Add(entity, world::Transform{});
+  world_.Add(entity, world::Transform{.position = {-2.4f, 0.5f, 0}});
   world_.Add(entity, world::Renderable{cube.id});
   world_.Add(entity, Spin{});
 
@@ -273,7 +275,300 @@ void Engine::CreateDemoScene() {
       t.rotation[3] = std::cos(spin.angle * 0.5f);
     });
   });
+  CreateTestCharacter();
   REC_INFO("no game data given, spinning a cube instead");
+}
+
+void Engine::CreateTestCharacter() {
+  if (config_.headless) return;
+  asset::Skeleton skeleton;
+  asset::Mesh mesh;
+  asset::MakeSkinnedBiped(asset::MakeAssetId("builtin/biped"), &skeleton, &mesh);
+  renderer_.UploadMesh(mesh);
+
+  // Ground the character stands on. Flat slab (top at y = 0.06, the sole rest
+  // height) plus a raised step under the left foot so foot IK has something to
+  // adapt to. Both get a static collider the IK raycast hits.
+  asset::Mesh slab = asset::MakeCube(10.0f, asset::MakeAssetId("builtin/ik_ground"));
+  asset::Mesh step = asset::MakeCube(0.4f, asset::MakeAssetId("builtin/ik_step"));
+  renderer_.UploadMesh(slab);
+  renderer_.UploadMesh(step);
+  ecs::Entity ground_e = world_.Create();
+  world_.Add(ground_e, world::Transform{.position = {0, -9.94f, 0}});
+  world_.Add(ground_e, world::Renderable{slab.id});
+  physics_.AddStaticBox({0, -9.94f, 0}, {10.0f, 10.0f, 10.0f});
+  ecs::Entity step_e = world_.Create();
+  world_.Add(step_e, world::Transform{.position = {0.45f, -0.15f, 0.1f}});
+  world_.Add(step_e, world::Renderable{step.id});
+  physics_.AddStaticBox({0.45f, -0.15f, 0.1f}, {0.4f, 0.4f, 0.4f});
+
+  // Front view of the figure so the leg adaptation reads clearly (bringup).
+  camera_.set_position({0.0f, 1.0f, 3.2f});
+  camera_.set_yaw_pitch(0.0f, -0.093f);
+
+  // Centre stage where the fly camera looks by default; the cube spins aside.
+  ecs::Entity entity = world_.Create();
+  world_.Add(entity, world::Transform{.position = {0.0f, 0.0f, 0.0f}});
+
+  Actor actor;
+  actor.entity = entity;
+  actor.skeleton = std::move(skeleton);
+  actor.pose.ResetToBind(actor.skeleton);
+  actor.speed = 0.0f;  // idle so foot IK on the uneven ground is the focus
+  actor.foot_ik = true;
+  actor.ik_up = {0, 1, 0};
+  actor.ik_forward = {0, 0, 1};
+  actor.ankle_height = 0.02f;
+  // Character capsule so walk mode (T) can drive it. Capsule centre sits ~0.9m
+  // above the entity origin (feet), total height ~1.7m.
+  actor.capsule_offset = 0.9f;
+  actor.character = physics_.CreateCharacter({0.0f, actor.capsule_offset, 0.0f}, 0.3f, 0.55f);
+  ActorPart part;
+  part.mesh = mesh.id;
+  part.skin = mesh.skin;
+  part.remap = anim::BuildBoneRemap(actor.skeleton, part.skin);
+  actor.parts.push_back(std::move(part));
+  anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+  size_t bone_count = actor.skeleton.bones.size();
+  player_actor_ = static_cast<i32>(actors_.size());
+  actors_.push_back(std::move(actor));
+  REC_INFO("spawned test biped ({} bones); press T to walk it", bone_count);
+
+  if (std::getenv("REC_AUTOWALK")) {
+    auto_walk_ = true;
+    walk_mode_ = true;
+  }
+}
+
+bool Engine::LoadActorPart(const std::string& path, Actor& actor, i32 attach_bone) {
+  auto bytes = vfs_.Read(asset::NormalizePath(path));
+  if (!bytes) {
+    REC_WARN("actor part not found: {}", path);
+    return false;
+  }
+  ByteSpan span(bytes->data(), bytes->size());
+  asset::AssetId id = asset::MakeAssetId(path);
+  bethesda::NifConversion conv = bethesda::ConvertNifSkinnedMesh(span, id, path);
+  bool rigid = false;
+  if (!conv.mesh || !conv.mesh->skinned || conv.mesh->skin.bones.empty()) {
+    // Head/hair are static meshes rigged to a single bone, not skinned.
+    if (attach_bone < 0) {
+      REC_WARN("actor part {} has no skinned geometry", path);
+      return false;
+    }
+    conv = bethesda::ConvertNifRigid(span, id, path);
+    if (!conv.mesh || conv.mesh->lods.empty() || conv.mesh->lods[0].vertices.empty()) {
+      REC_WARN("actor part {} has no geometry", path);
+      return false;
+    }
+    rigid = true;
+  }
+  // Textures, then materials, then mesh: the cell streamer's upload order.
+  for (const std::string& tex : conv.texture_paths) {
+    if (const asset::Texture* t = assets_->LoadTexture(tex)) renderer_.UploadTexture(*t);
+  }
+  for (const asset::Material& material : conv.materials) {
+    assets_->AddMaterial(material);
+    renderer_.UploadMaterial(material);
+  }
+  renderer_.UploadMesh(*conv.mesh);
+
+  ActorPart part;
+  part.mesh = conv.mesh->id;
+  if (rigid) {
+    part.attach_bone = attach_bone;
+    if (attach_bone < static_cast<i32>(actor.bone_model.size())) {
+      part.attach_inverse_bind = Inverse(actor.bone_model[attach_bone]);
+    }
+    REC_INFO("actor part {}: rigid, riding bone {}", path, attach_bone);
+  } else {
+    part.skin = conv.mesh->skin;
+    part.remap = anim::BuildBoneRemap(actor.skeleton, part.skin);
+    u32 matched = 0;
+    for (i32 b : part.remap) {
+      if (b >= 0) ++matched;
+    }
+    REC_INFO("actor part {}: {} skin bones, {} matched to skeleton", path, part.skin.bones.size(),
+             matched);
+  }
+  actor.parts.push_back(std::move(part));
+  return true;
+}
+
+base::Vector<std::string> Engine::FindHeadPartModels(u32 part_type, u32 max) {
+  base::Vector<std::string> out;
+  records_.EachOfType(FourCc('H', 'D', 'P', 'T'),
+                      [&](bethesda::GlobalFormId id,
+                          const bethesda::RecordStore::StoredRecord&) {
+                        if (out.size() >= max) return;
+                        bethesda::Record rec;
+                        if (!records_.Parse(id, &rec)) return;
+                        const bethesda::Subrecord* pnam = rec.Find(FourCc('P', 'N', 'A', 'M'));
+                        if (!pnam || pnam->data.size() < 4) return;
+                        u32 type = 0;
+                        std::memcpy(&type, pnam->data.data(), 4);
+                        if (type != part_type) return;
+                        std::string edid = rec.GetString(FourCc('E', 'D', 'I', 'D'));
+                        if (edid.find("Female") != std::string::npos ||
+                            edid.find("Child") != std::string::npos) {
+                          return;  // keep it a male adult head
+                        }
+                        std::string model = rec.GetString(FourCc('M', 'O', 'D', 'L'));
+                        if (model.empty()) return;
+                        std::string path = asset::NormalizePath(model);
+                        if (!path.starts_with("meshes/")) path = "meshes/" + path;
+                        out.push_back(path);
+                      });
+  return out;
+}
+
+bool Engine::CreateSkyrimActor() {
+  const std::string skel_path = "meshes/actors/character/character assets/skeleton.nif";
+  auto skel_bytes = vfs_.Read(asset::NormalizePath(skel_path));
+  if (!skel_bytes) {
+    REC_ERROR("skeleton.nif not found in the mounted archives");
+    return false;
+  }
+  asset::Skeleton skeleton;
+  if (!bethesda::ConvertNifSkeleton(ByteSpan(skel_bytes->data(), skel_bytes->size()),
+                                    asset::MakeAssetId(skel_path), &skeleton)) {
+    REC_ERROR("failed to parse skeleton.nif");
+    return false;
+  }
+  REC_INFO("loaded skyrim skeleton: {} bones", skeleton.bones.size());
+
+  Actor actor;
+  actor.entity = world_.Create();
+  world_.Add(actor.entity, world::Transform{.position = {0, 0, 0}});
+  actor.skeleton = std::move(skeleton);
+  actor.pose.ResetToBind(actor.skeleton);
+  actor.animate = true;
+  actor.speed = 1.4f;  // walk in place to show the gait on the real skeleton
+  actor.foot_ik = false;
+  // Bethesda game space (Z-up, ~70 units/m) -> engine space (Y-up, metres).
+  constexpr f32 s = 0.01428f;
+  Mat4 basis{};
+  basis.m[0] = s;
+  basis.m[6] = -s;
+  basis.m[9] = s;
+  basis.m[15] = 1.0f;
+  actor.skeleton_to_local = basis;
+  actor.ik_up = {0, 0, 1};      // Bethesda up
+  actor.ik_forward = {0, 1, 0};  // Bethesda forward
+  // Bind pose up front so rigid parts (head, hair) can capture their bone's
+  // bind transform.
+  anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+
+  const std::string skinned_parts[] = {
+      "meshes/actors/character/character assets/malebody_1.nif",
+      "meshes/actors/character/character assets/malehands_1.nif",
+      "meshes/actors/character/character assets/malefeet_1.nif",
+  };
+  bool any = false;
+  for (const std::string& p : skinned_parts) any = LoadActorPart(p, actor) || any;
+  if (!any) {
+    REC_ERROR("no skyrim body parts loaded");
+    return false;
+  }
+  // Head + hair ride the head bone (static meshes, no FaceGen morphs).
+  i32 head_bone = actor.skeleton.Find("NPC Head [Head]");
+  LoadActorPart("meshes/actors/character/character assets/malehead.nif", actor, head_bone);
+  for (const std::string& hair : FindHeadPartModels(/*hair=*/3, 24)) {
+    if (LoadActorPart(hair, actor, head_bone)) {
+      REC_INFO("hair: {}", hair);
+      break;
+    }
+  }
+
+  // Character capsule so walk mode (T) drives the Skyrim actor too. Capsule
+  // half-height+radius = 0.85, so the entity origin (feet) sits on the ground.
+  actor.capsule_offset = 0.85f;
+  actor.character = physics_.CreateCharacter({0.0f, 0.85f, 0.0f}, 0.3f, 0.55f);
+
+  // A ground slab to stand on (top at y = 0, where the skeleton's feet sit).
+  asset::Mesh slab = asset::MakeCube(10.0f, asset::MakeAssetId("builtin/actor_ground"));
+  renderer_.UploadMesh(slab);
+  ecs::Entity ground = world_.Create();
+  world_.Add(ground, world::Transform{.position = {0, -10.0f, 0}});
+  world_.Add(ground, world::Renderable{slab.id});
+  if (physics_.initialized()) physics_.AddStaticBox({0, -10.0f, 0}, {10, 10, 10});
+
+  size_t part_count = actor.parts.size();
+  player_actor_ = static_cast<i32>(actors_.size());
+  actors_.push_back(std::move(actor));
+
+  // The skeleton faces -Z in engine space, so frame it from the front.
+  camera_.set_position({0.0f, 1.0f, -3.4f});
+  camera_.set_yaw_pitch(3.14159f, -0.05f);
+  REC_INFO("skyrim actor ready ({} body parts); press T to walk it", part_count);
+  if (std::getenv("REC_AUTOWALK")) {
+    auto_walk_ = true;
+    walk_mode_ = true;
+  }
+  return true;
+}
+
+void Engine::UpdateActors(f32 dt) {
+  for (Actor& actor : actors_) {
+    if (!actor.animate) {
+      actor.pose.ResetToBind(actor.skeleton);
+      anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+      continue;
+    }
+    actor.locomotion.phase = anim::AdvancePhase(actor.locomotion.phase, actor.speed, dt);
+    actor.locomotion.Apply(actor.skeleton, actor.speed, &actor.pose);
+
+    if (actor.foot_ik && physics_.initialized()) {
+      const world::Transform* t = world_.Get<world::Transform>(actor.entity);
+      Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
+      Mat4 inv_model = Inverse(model);
+      // Foot IK works in model space; bridge to the engine-space physics world.
+      auto ground = [&](const Vec3& origin, Vec3* hit, Vec3* normal) -> bool {
+        physics::PhysicsWorld::RayHit rh;
+        if (!physics_.Raycast(TransformPoint(model, origin), {0, -1, 0}, 3.0f, &rh)) return false;
+        *hit = TransformPoint(inv_model, rh.position);
+        *normal = Normalize(TransformDir(inv_model, rh.normal));
+        return true;
+      };
+      // Stance weights: at speed the planted foot gets IK while the swing foot
+      // is left to lift; when nearly idle both feet plant.
+      f32 theta = actor.locomotion.phase * 6.2831853f;
+      f32 leg = std::sin(theta);
+      f32 idle = std::clamp(1.0f - actor.speed, 0.0f, 1.0f);
+      f32 foot_weight[2] = {std::max(idle, std::clamp(0.5f + leg * 2.0f, 0.0f, 1.0f)),
+                            std::max(idle, std::clamp(0.5f - leg * 2.0f, 0.0f, 1.0f))};
+      anim::SolveFootIk(actor.skeleton, ground, actor.ik_up, actor.ik_forward, actor.ankle_height,
+                        foot_weight, &actor.pose, &actor.bone_model);
+    } else {
+      anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+    }
+  }
+}
+
+void Engine::EmitActorDraws(render::FrameView& view) {
+  for (Actor& actor : actors_) {
+    const world::Transform* t = world_.Get<world::Transform>(actor.entity);
+    Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
+    for (ActorPart& part : actor.parts) {
+      render::DrawItem item;
+      item.mesh = part.mesh.hash;
+      if (part.attach_bone >= 0 && part.attach_bone < static_cast<i32>(actor.bone_model.size())) {
+        // Rigid part: ride the bone's animated delta from its bind transform.
+        item.transform = model * actor.bone_model[part.attach_bone] * part.attach_inverse_bind;
+        item.prev_transform = item.transform;
+        item.skin_offset = -1;
+      } else {
+        item.transform = model;
+        item.prev_transform = actor.prev_model;
+        item.skin_offset = static_cast<i32>(view.bone_matrices.size());
+        base::Vector<Mat4> palette;
+        anim::BuildSkinPalette(actor.bone_model, part.skin, part.remap, &palette);
+        for (const Mat4& m : palette) view.bone_matrices.push_back(m);
+      }
+      view.draws.push_back(item);
+    }
+    actor.prev_model = model;
+  }
 }
 
 bool Engine::LoadGameData() {
@@ -297,6 +592,9 @@ bool Engine::LoadGameData() {
   auto order = bethesda::LoadOrder::FromPluginsTxt(config_.plugins_txt, profile);
   if (!records_.LoadAll(config_.data_dir, order, profile)) return false;
   REC_INFO("{} plugins, {} records", order.plugins().size(), records_.record_count());
+
+  // Actor bringup scene: load a Skyrim character and animate it, no streaming.
+  if (config_.demo_scene == "actor") return CreateSkyrimActor();
 
   streamer_ = std::make_unique<world::CellStreamer>(records_, *assets_);
   if (physics_.initialized()) {
@@ -414,15 +712,89 @@ void Engine::UpdateCamera(f32 frame_delta) {
 
   // The pause menu freezes the camera and frees the cursor so it can click.
   bool menu = game_ui_.menu_open();
-  bool allow_mouse = !menu && (!debug_ui_.wants_mouse() || camera_.looking());
-  bool allow_keyboard = !menu && !debug_ui_.wants_keyboard();
-  camera_.Update(input, allow_mouse, allow_keyboard, frame_delta);
-  window_->SetRelativeMouseMode(!menu && camera_.looking());
+  bool kb = debug_ui_.wants_keyboard();
 
-  if (input.key_pressed(Key::kF1) && !debug_ui_.wants_keyboard()) debug_ui_.ToggleVisible();
-  if (input.key_pressed(Key::kF) && !menu && !debug_ui_.wants_keyboard()) ThrowPhysicsCube();
-  if (input.key_pressed(Key::kEscape) && !debug_ui_.wants_keyboard()) game_ui_.ToggleMenu();
+  if (input.key_pressed(Key::kT) && !menu && !kb && player_actor_ >= 0) {
+    walk_mode_ = !walk_mode_;
+    REC_INFO("walk mode {}", walk_mode_ ? "on (WASD move, Shift run, Space jump, C view)" : "off");
+  }
+  if (input.key_pressed(Key::kC) && !menu && !kb) third_person_ = !third_person_;
+
+  if (walk_mode_ && player_actor_ >= 0) {
+    WalkUpdate(frame_delta, !menu && !kb);
+  } else {
+    bool allow_mouse = !menu && (!debug_ui_.wants_mouse() || camera_.looking());
+    bool allow_keyboard = !menu && !kb;
+    camera_.Update(input, allow_mouse, allow_keyboard, frame_delta);
+    window_->SetRelativeMouseMode(!menu && camera_.looking());
+  }
+
+  if (input.key_pressed(Key::kF1) && !kb) debug_ui_.ToggleVisible();
+  if (input.key_pressed(Key::kF) && !menu && !kb && !walk_mode_) ThrowPhysicsCube();
+  if (input.key_pressed(Key::kEscape) && !kb) game_ui_.ToggleMenu();
   if (game_ui_.quit_requested()) RequestQuit();
+}
+
+void Engine::WalkUpdate(f32 dt, bool allow) {
+  Actor& actor = actors_[player_actor_];
+  const InputState& input = window_->input();
+  window_->SetRelativeMouseMode(true);  // FPS-style mouse look in walk mode
+
+  if (allow) {
+    cam_yaw_ += input.mouse_dx * camera_.sensitivity;
+    cam_pitch_ = std::clamp(cam_pitch_ - input.mouse_dy * camera_.sensitivity, -1.4f, 1.4f);
+  }
+
+  // Move relative to where the camera faces (flattened to the ground plane).
+  Vec3 fwd{std::sin(cam_yaw_), 0, -std::cos(cam_yaw_)};
+  Vec3 right{std::cos(cam_yaw_), 0, std::sin(cam_yaw_)};
+  Vec3 move{};
+  if (allow) {
+    if (input.key(Key::kW)) move = move + fwd;
+    if (input.key(Key::kS)) move = move - fwd;
+    if (input.key(Key::kD)) move = move + right;
+    if (input.key(Key::kA)) move = move - right;
+  }
+  f32 speed = (allow && input.key(Key::kLeftShift)) ? 4.8f : 1.8f;
+  if (auto_walk_) move = fwd;  // test hook: walk forward automatically
+  f32 move_len = Length(move);
+  Vec3 velocity{};
+  if (move_len > 0.01f) {
+    move = move * (1.0f / move_len);
+    velocity = move * speed;
+    actor.yaw = std::atan2(move.x, move.z);  // the biped's +Z faces movement
+  }
+  bool jump = allow && input.key_pressed(Key::kSpace);
+
+  Vec3 char_pos{};
+  bool grounded = false;
+  physics_.MoveCharacter(actor.character, velocity, jump, dt, &char_pos, &grounded);
+  actor.speed = move_len > 0.01f ? speed : 0.0f;
+  (void)grounded;
+
+  // Drive the entity from the capsule; the biped's body sits below the centre.
+  if (world::Transform* t = world_.Get<world::Transform>(actor.entity)) {
+    t->position[0] = char_pos.x;
+    t->position[1] = char_pos.y - actor.capsule_offset;
+    t->position[2] = char_pos.z;
+    f32 h = actor.yaw * 0.5f;
+    t->rotation[0] = 0;
+    t->rotation[1] = std::sin(h);
+    t->rotation[2] = 0;
+    t->rotation[3] = std::cos(h);
+  }
+
+  Vec3 body{char_pos.x, char_pos.y - actor.capsule_offset, char_pos.z};
+  Vec3 cam_fwd{std::cos(cam_pitch_) * std::sin(cam_yaw_), std::sin(cam_pitch_),
+               -std::cos(cam_pitch_) * std::cos(cam_yaw_)};
+  if (third_person_) {
+    Vec3 pivot = body + Vec3{0, 1.5f, 0};
+    walk_eye_ = pivot - cam_fwd * 3.2f;
+    walk_target_ = pivot;
+  } else {
+    walk_eye_ = body + Vec3{0, 1.7f, 0};
+    walk_target_ = walk_eye_ + cam_fwd;
+  }
 }
 
 void Engine::ThrowPhysicsCube() {
@@ -455,11 +827,17 @@ int Engine::Run() {
       f32 frame_delta = static_cast<f32>(timer_.frame_delta());
       debug_ui_.BeginFrame();
       UpdateCamera(frame_delta);
+      UpdateActors(frame_delta);
       scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
 
       render::FrameView view;
-      view.camera.eye = camera_.position();
-      view.camera.target = camera_.target();
+      if (walk_mode_ && player_actor_ >= 0) {
+        view.camera.eye = walk_eye_;
+        view.camera.target = walk_target_;
+      } else {
+        view.camera.eye = camera_.position();
+        view.camera.target = camera_.target();
+      }
       view.frame_delta_seconds = frame_delta;
       // Rebuilt every frame so destroyed entities drop out on their own.
       base::UnorderedMap<u64, Mat4> transforms;
@@ -472,6 +850,7 @@ int Engine::Run() {
             transforms.insert(key, current);
           });
       prev_transforms_ = std::move(transforms);
+      EmitActorDraws(view);
       debug_ui_.Build(renderer_, camera_, frame_delta, &view);
       game_ui_.Build(*window_, renderer_, camera_, frame_delta, &view);
       renderer_.RenderFrame(view);

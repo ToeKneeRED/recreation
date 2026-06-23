@@ -12,6 +12,7 @@ target_link_libraries(recreation PRIVATE
   recreation::asset
   recreation::render
   recreation::physics
+  recreation::anim
   recreation::bethesda
   recreation::world
   recreation::net
@@ -55,6 +56,7 @@ target_link_libraries(recreation-server PRIVATE
   recreation::asset
   recreation::render
   recreation::physics
+  recreation::anim
   recreation::bethesda
   recreation::world
   recreation::net
