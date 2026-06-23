@@ -17,7 +17,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "core/log.h"
 #include "core/window.h"
@@ -60,127 +63,7 @@ constexpr float kToastSeconds = 4.0f;
 constexpr int kMenuUniverses = 3;  // Skyrim, Fallout 4, Starfield
 constexpr int kMenuNavItems = 6;   // PLAY MULTIPLAYER MODS SETTINGS PROFILE QUIT
 constexpr int kMenuModRows = 16;   // pooled rows on the Mods sub-screen
-
-// The quest tracker (top-right objective list), the "quest updated" banner, and
-// the centered activation prompt. Their text and visibility are driven each
-// frame from engine state; declared empty so they start hidden.
-std::string BuildQuestSection() {
-  std::string s = R"(
-  panel questtracker {
-    position: absolute; right: 30; top: 86; layout: column; align: end; gap: 5; width: 380;
-    text quest_title { text: ""; font-size: 17; color: #ffcc55; text-align: right;
-      letter-spacing: 1; text-shadow-color: #000000d0; text-shadow-x: 1; text-shadow-y: 1; }
-)";
-  for (int i = 0; i < kQuestObjectiveRows; ++i) {
-    s += "    text quest_obj" + std::to_string(i) +
-         " { text: \"\"; font-size: 13; color: #d8def0; text-align: right;"
-         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
-  }
-  s += R"(  }
-
-  panel quest_marker_box {
-    position: absolute; top: 52; left: 0; width: 100vw; layout: column; align: center;
-    text quest_marker_text { text: ""; font-size: 13; color: #ffe6a0; letter-spacing: 1;
-      text-shadow-color: #000000d0; text-shadow-x: 1; text-shadow-y: 1; }
-  }
-
-  panel quest_toast_box {
-    position: absolute; top: 120; left: 0; width: 100vw; layout: column; align: center;
-    text quest_toast { text: ""; font-size: 21; color: #ffcc55; letter-spacing: 3;
-      text-transform: uppercase; text-shadow-color: #000000e0; text-shadow-x: 1; text-shadow-y: 2; }
-  }
-
-  panel activate_box {
-    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
-    layout: column; justify: center; align: center;
-    text activate_prompt { text: ""; font-size: 18; color: #f0f2fb; margin: 110 0 0 0;
-      text-shadow-color: #000000e0; text-shadow-x: 1; text-shadow-y: 1; }
-  }
-)";
-  return s;
-}
-
-// The quest journal overlay: a dimmed full-screen panel with a card listing the
-// player's active quests and, for the selected one, its objectives. Rows are a
-// fixed pool filled and toggled each frame; starts hidden.
-std::string BuildJournalSection() {
-  std::string s = R"(
-  panel journal_box {
-    position: absolute; left: 0; top: 0; width: 100vw; height: 100vh;
-    layout: column; justify: center; align: center; background: #05070cdd;
-    panel journal_card {
-      layout: column; align: start; padding: 30 44; width: 580;
-      background: #0d1018f7; corner-radius: 14; border-color: #ffffff1c; border-width: 1;
-      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 18;
-      text journal_head { text: "Journal"; font-size: 24; color: #ffcc55; letter-spacing: 6;
-        text-transform: uppercase; margin: 0 0 14 0; }
-)";
-  for (int i = 0; i < kJournalRows; ++i) {
-    s += "      text journal_q" + std::to_string(i) +
-         " { text: \"\"; font-size: 16; color: #d8def0; margin: 0 0 3 0;"
-         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
-  }
-  s += "      panel journal_rule { width: 492; height: 1; background: #ffffff1f; margin: 12 0 12 "
-       "0; }\n";
-  for (int i = 0; i < kJournalObjRows; ++i) {
-    s += "      text journal_obj" + std::to_string(i) +
-         " { text: \"\"; font-size: 13; color: #c7e0ff; margin: 0 0 2 0;"
-         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
-  }
-  s += R"(      text journal_hint { text: "press a number to track, J to close"; font-size: 12;
-        color: #8a93a8; margin: 14 0 0 0; }
-    }
-  }
-)";
-  return s;
-}
-
-// The dialogue panel (bottom-centre): the speaker, their last line, and a fixed
-// pool of numbered topic rows filled/toggled each frame.
-std::string BuildDialogueSection() {
-  std::string s = R"(
-  panel dialogue_box {
-    position: absolute; left: 0; bottom: 70; width: 100vw; layout: column; align: center; gap: 4;
-    text dialogue_speaker { text: ""; font-size: 18; color: #ffcc55;
-      text-shadow-color: #000000e0; text-shadow-x: 1; text-shadow-y: 1; }
-    text dialogue_npc { text: ""; font-size: 15; color: #d8def0; margin: 0 0 8 0;
-      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
-)";
-  for (int i = 0; i < kDialogueOptionRows; ++i) {
-    s += "    text dialogue_opt" + std::to_string(i) +
-         " { text: \"\"; font-size: 15; color: #c7e0ff;"
-         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
-  }
-  s += "  }\n";
-  return s;
-}
-
-// The container loot panel: a dimmed full-screen overlay with a card naming the
-// container and listing its contents in a fixed pool of rows. Starts hidden.
-std::string BuildContainerSection() {
-  std::string s = R"(
-  panel container_box {
-    position: absolute; left: 0; top: 0; width: 100vw; height: 100vh;
-    layout: column; justify: center; align: center; background: #05070cdd;
-    panel container_card {
-      layout: column; align: start; padding: 28 40; width: 460;
-      background: #0d1018f7; corner-radius: 14; border-color: #ffffff1c; border-width: 1;
-      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 18;
-      text container_head { text: ""; font-size: 22; color: #ffcc55; letter-spacing: 4;
-        text-transform: uppercase; margin: 0 0 12 0; }
-)";
-  for (int i = 0; i < kContainerRows; ++i) {
-    s += "      text container_item" + std::to_string(i) +
-         " { text: \"\"; font-size: 15; color: #d8def0; margin: 0 0 2 0;"
-         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n";
-  }
-  s += R"(      text container_hint { text: "press Esc to close"; font-size: 12;
-        color: #8a93a8; margin: 14 0 0 0; }
-    }
-  }
-)";
-  return s;
-}
+constexpr int kMenuNewsRows = 3;   // pooled rows on the NEWS rail
 
 // Editor icon glyphs, composed from panels: the UI font (Noto Sans) has no
 // symbol set, so toolbar / tree / inspector icons are drawn as little stacks of
@@ -595,473 +478,49 @@ std::string BuildEditorSection() {
   return s;
 }
 
-// Menu emblems, composed from primitives inside a relative box of `sz` px (the
-// UI font has no symbol set, so the NEXUS marks are built from filled and
-// outlined rects, like the editor glyphs but scalable). `c` is the mark colour.
-std::string MenuGlyph(const std::string& k, const char* c, float sz) {
-  std::string body;
-  char b[256];
-  const float u = sz / 18.0f;  // authored on an 18-unit grid, scaled to sz
-  // Sub-pixel panels confuse the layout (a near-zero height blows up to fill the
-  // parent), so every mark is clamped to at least 1px on each side.
-  auto R = [&](float x, float y, float w, float h, const char* cc, float r = 0) {
-    std::snprintf(b, sizeof(b),
-                  "panel { position: absolute; left: %g; top: %g; width: %g; height: %g;"
-                  " background: %s; corner-radius: %g; }\n",
-                  x * u, y * u, std::max(w * u, 1.0f), std::max(h * u, 1.0f), cc, r * u);
-    body += b;
-  };
-  auto O = [&](float x, float y, float w, float h, const char* cc, float bw, float r) {
-    std::snprintf(b, sizeof(b),
-                  "panel { position: absolute; left: %g; top: %g; width: %g; height: %g;"
-                  " border-color: %s; border-width: %g; corner-radius: %g; }\n",
-                  x * u, y * u, std::max(w * u, 1.0f), std::max(h * u, 1.0f), cc, bw, r * u);
-    body += b;
-  };
-  // A filled triangle (pyramid of rows) pointing up, base at y+h.
-  auto Tri = [&](float cx, float y, float baseHalf, float h, const char* cc) {
-    const int rows = 7;
-    for (int i = 0; i < rows; ++i) {
-      float t = static_cast<float>(i) / (rows - 1);
-      float w = baseHalf * 2.0f * t;
-      if (w < 1.0f) w = 1.0f;
-      R(cx - w / 2.0f, y + h * t, w, h / rows + 0.7f, cc);
-    }
-  };
-  // A vertical diamond/lozenge centred at (cx,cy); halfH tall, halfW wide.
-  auto Loz = [&](float cx, float cy, float halfW, float halfH, const char* cc) {
-    const int rows = 9;
-    for (int i = 0; i < rows; ++i) {
-      float t = static_cast<float>(i) / (rows - 1);
-      float taper = 1.0f - std::fabs(t - 0.5f) * 2.0f;
-      float w = halfW * 2.0f * taper;
-      if (w < 0.8f) w = 0.8f;
-      R(cx - w / 2.0f, cy - halfH + 2.0f * halfH * t, w, 2.0f * halfH / rows + 0.6f, cc);
-    }
-  };
+// --- UI markup fragments (runtime/ui/*.ugui) --------------------------------
+// The static screens live in editable .ugui files so they can be tweaked and
+// hot-reloaded without a rebuild. The procedural screens (the scrolling compass
+// topbar, the map editor, the NEXUS main menu) are generated in code and
+// concatenated in as siblings of root. See RECREATION_UI_DIR (override the
+// fragment directory) and RECREATION_UI_HOT_RELOAD (reload on file change).
 
-  if (k == "mountain") {  // top-left logo: twin snow peaks
-    Tri(7, 4, 5.5f, 11, c);
-    Tri(12, 7, 4, 8, c);
-  } else if (k == "skyrim") {  // a tall vertical diamond, dragon-mark shorthand
-    Loz(9, 9, 3.0f, 8.0f, c);
-    R(8, 7, 2, 6, "#00000055");
-  } else if (k == "vault") {  // Fallout: cog ring with ticks
-    O(2, 2, 14, 14, c, 1.8f, 7);
-    R(8, 0, 2, 3, c);
-    R(8, 15, 2, 3, c);
-    R(0, 8, 3, 2, c);
-    R(15, 8, 3, 2, c);
-    R(7, 7, 4, 4, c, 2);
-  } else if (k == "constellation") {  // Starfield: ringed dot with orbit ticks
-    O(3, 3, 12, 12, c, 1.6f, 6);
-    R(7, 7, 4, 4, c, 2);
-    R(14, 2, 2, 2, c, 1);
-    R(2, 13, 2, 2, c, 1);
-  } else if (k == "knot") {  // profile: concentric celtic rings
-    O(1, 1, 16, 16, c, 1.5f, 8);
-    O(4, 4, 10, 10, c, 1.3f, 5);
-    R(8, 1, 2, 16, c);
-    R(1, 8, 16, 2, c);
-    R(7, 7, 4, 4, c, 2);
-  } else if (k == "people") {  // players-online
-    R(2, 8, 6, 7, c, 3);
-    R(3, 4, 4, 4, c, 2);
-    R(10, 8, 6, 7, c, 3);
-    R(11, 4, 4, 4, c, 2);
-  } else if (k == "globe") {
-    O(2, 2, 14, 14, c, 1.4f, 7);
-    R(8, 2, 1.4f, 14, c);
-    R(2, 8, 14, 1.4f, c);
-    O(5, 2, 8, 14, c, 1.1f, 6);
-  } else if (k == "discord") {
-    R(3, 5, 12, 8, c, 4);
-    R(4, 12, 3, 3, c, 1);
-    R(11, 12, 3, 3, c, 1);
-    R(6, 8, 2, 2, "#00000088", 1);
-    R(10, 8, 2, 2, "#00000088", 1);
-  } else if (k == "news") {
-    O(2, 3, 14, 12, c, 1.3f, 2);
-    R(4, 6, 7, 1.6f, c);
-    R(4, 9, 10, 1.4f, c);
-    R(4, 11, 10, 1.4f, c);
-  } else if (k == "gear") {
-    O(4, 4, 10, 10, c, 1.8f, 5);
-    R(8, 1, 2, 3, c);
-    R(8, 14, 2, 3, c);
-    R(1, 8, 3, 2, c);
-    R(14, 8, 3, 2, c);
-    R(2, 3, 2, 2, c, 1);
-    R(14, 3, 2, 2, c, 1);
-  } else if (k == "caret") {  // PLAY's active ► (points right)
-    R(5, 4, 2, 10, c);
-    R(7, 6, 2, 6, c);
-    R(9, 8, 2, 2, c);
-  } else if (k == "triup") {  // bottom-centre up-caret
-    Tri(9, 6, 6, 7, c);
-  } else if (k == "diamond") {
-    Loz(9, 9, 4, 4, c);
-  } else if (k == "sparkle") {  // the NEXUS centre mark: a 4-point star
-    Loz(9, 9, 1.4f, 9, c);
-    Loz(9, 9, 9, 1.4f, c);
-    R(7, 7, 4, 4, c, 2);
-  }
-  std::snprintf(b, sizeof(b), "panel { position: relative; width: %g; height: %g; ", sz, sz);
-  return std::string(b) + body + " }\n";
+// The .ugui fragments composed into root, in draw order. Also the hot-reload
+// watch list.
+const char* const kUiFragments[] = {
+    "hud.ugui",       "vitals.ugui",    "readout.ugui",     "quest.ugui",
+    "hud_gauge.ugui", "journal.ugui",   "dialogue.ugui",    "container.ugui",
+    "csharp_demo.ugui", "pause_menu.ugui", "main_menu.ugui",
+};
+
+// Directory holding the .ugui fragments: RECREATION_UI_DIR, else the compiled-in
+// source path, else a cwd-relative fallback.
+fs::path UiDir() {
+  if (const char* env = std::getenv("RECREATION_UI_DIR"); env && *env) return env;
+#ifdef RECREATION_UI_DIR_DEFAULT
+  return fs::path(RECREATION_UI_DIR_DEFAULT);
+#else
+  return fs::path("runtime/ui");
+#endif
 }
 
-// Managed-gameplay gauges (oxygen, radiation, adrenaline, ...): a pooled stack of
-// labeled bars above the vitals, pushed from C# via the Hud.Gauge native. Each
-// row starts collapsed and is filled/toggled each frame from SetHudGauges.
-std::string BuildHudGaugeSection() {
-  std::string s =
-      "  panel hud_gauges { position: absolute; left: 30; bottom: 100; layout: column;"
-      " align: start; gap: 9;\n";
-  for (int i = 0; i < kHudGaugeRows; ++i) {
-    const std::string id = std::to_string(i);
-    s += "    panel hud_gauge" + id +
-         " { layout: column; align: start; gap: 3; visibility: collapsed;\n"
-         "      text hud_gauge" + id +
-         "_lbl { text: \"\"; font-size: 11; color: #cfd6e6; letter-spacing: 1;"
-         " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n"
-         "      panel hud_gauge" + id +
-         "_track { width: 210; height: 9; overflow: hidden; background: #0c0e16cc;"
-         " corner-radius: 5; border-color: #00000077; border-width: 1;"
-         " shadow-color: #00000066; shadow-blur: 10; shadow-y: 2;\n"
-         "        panel hud_gauge" + id +
-         "_fill { width: 100%; height: 100%; corner-radius: 5; background: #5d92e8; }\n"
-         "      }\n    }\n";
+// Read one .ugui fragment. Returns its text, or "" (with a warning) if missing.
+std::string LoadUiFragment(const char* name) {
+  const fs::path p = UiDir() / name;
+  std::ifstream f(p, std::ios::binary);
+  if (!f) {
+    REC_WARN("ui: fragment not found: {}", p.string());
+    return {};
   }
-  s += "  }\n";
-  return s;
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
 }
 
-// The main menu sub-screens (multiplayer / mods / settings / profile): one
-// dimmed overlay with a centred card whose title and body swap by which nav
-// item opened it. Collapsed until a nav item is picked; ApplyMainMenu shows the
-// matching body. Built as a helper so BuildMainMenuSection stays readable.
-std::string BuildMainMenuScreens() {
-  char buf[512];
+// The scrolling compass topbar. Procedural: the cardinal strip is generated per
+// index (colour/size by direction), so it stays in code rather than a fragment.
+std::string BuildTopbarSection() {
   std::string s = R"(
-    panel mm_screen { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh;
-      layout: column; justify: center; align: center; background: #04060bee; visibility: collapsed;
-      panel mm_card { layout: column; align: start; padding: 34 44; width: 640;
-        background: #0b0e16fa; corner-radius: 16; border-color: #ffffff1c; border-width: 1;
-        shadow-color: #000000aa; shadow-blur: 52; shadow-y: 20;
-        panel { layout: row; align: center; justify: space-between; width: 100%; margin: 0 0 16 0;
-          text mm_screen_title { text: "MULTIPLAYER"; font-size: 25; color: #f2f4fb;
-            letter-spacing: 8; text-transform: uppercase; }
-          panel mm_back { cursor: pointer; padding: 7 14; corner-radius: 8; background: #ffffff12;
-            border-color: #ffffff1c; border-width: 1;
-            :hover { background: #ffffff22; transition: 0.14s ease-out; }
-            text { text: "Back"; font-size: 14; color: #cfd6e6; } }
-        }
-        panel { width: 100%; height: 1; background: #ffffff18; margin: 0 0 18 0; }
-)";
-
-  // --- Multiplayer ---
-  s += R"(        panel mm_body_mp { layout: column; gap: 12; width: 100%;
-          text { text: "SELECTED UNIVERSE"; font-size: 11; color: #8a93a8; letter-spacing: 3; }
-          text mm_mp_universe { text: "Skyrim"; font-size: 19; color: #ffcc55; letter-spacing: 1; }
-          panel { layout: row; gap: 12; width: 100%; margin: 6 0 0 0;
-            panel mm_mp_host { flex-grow: 1; cursor: pointer; layout: column; gap: 4; padding: 15 16;
-              corner-radius: 10; background: #ffcc5522; border-color: #ffcc5544; border-width: 1;
-              :hover { background: #ffcc5538; border-color: #ffcc5577; transition: 0.14s ease-out; }
-              text { text: "HOST SERVER"; font-size: 15; color: #ffe6a0; letter-spacing: 2; }
-              text { text: "Start a session others can join"; font-size: 12; color: #c9b894; }
-            }
-            panel mm_mp_join { flex-grow: 1; cursor: pointer; layout: column; gap: 4; padding: 15 16;
-              corner-radius: 10; background: #ffffff0c; border-color: #ffffff1c; border-width: 1;
-              :hover { background: #ffffff18; border-color: #ffffff33; transition: 0.14s ease-out; }
-              text { text: "JOIN SERVER"; font-size: 15; color: #e8ecf6; letter-spacing: 2; }
-              text mm_mp_addr { text: "127.0.0.1:29700"; font-size: 12; color: #9aa3b6; }
-            }
-          }
-          text mm_mp_status { text: "Offline"; font-size: 12; color: #8a93a8; margin: 6 0 0 0; }
-          text { text: "The session opens as you enter the world."; font-size: 11; color: #6b7488; }
-        }
-)";
-
-  // --- Mods ---
-  s += R"(        panel mm_body_mods { layout: column; gap: 9; width: 100%;
-          text mm_mods_head { text: "C# GAMEPLAY MODULES"; font-size: 11; color: #8a93a8; letter-spacing: 3; }
-          panel mm_mods_list { layout: column; gap: 5; width: 100%;
-)";
-  for (int i = 0; i < kMenuModRows; ++i) {
-    const std::string id = std::to_string(i);
-    s += "            panel mm_mod" + id +
-         " { layout: row; align: center; gap: 11; width: 100%; padding: 6 9; corner-radius: 7;"
-         " background: #ffffff06;\n"
-         "              panel { width: 7; height: 7; corner-radius: 4; background: #46c463; }\n"
-         "              text mm_modt" + id +
-         " { text: \"\"; font-size: 13; color: #d6dbe7; flex-grow: 1; }\n            }\n";
-  }
-  s += R"(          }
-          text mm_mods_empty { text: "Enter a universe to load its gameplay modules."; font-size: 12; color: #6b7488; }
-        }
-)";
-
-  // --- Settings (controls reference) ---
-  s += R"(        panel mm_body_settings { layout: column; gap: 5; width: 100%;
-          text { text: "CONTROLS"; font-size: 11; color: #8a93a8; letter-spacing: 3; margin: 0 0 4 0; }
-)";
-  const char* keybinds[][2] = {
-      {"WASD", "Move"},        {"Mouse", "Look"},          {"Shift", "Sprint"},
-      {"E", "Activate / talk"}, {"T", "Toggle walk / fly"}, {"J", "Journal"},
-      {"F3", "Quest debugger"}, {"F4", "Map editor"},       {"Esc", "Pause menu"},
-  };
-  for (const auto& kb : keybinds) {
-    s += "          panel { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;\n"
-         "            text { text: \"" + std::string(kb[1]) +
-         "\"; font-size: 14; color: #d8def0; }\n"
-         "            text { text: \"" + std::string(kb[0]) +
-         "\"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }\n          }\n";
-  }
-  s += "        }\n";
-
-  // --- Profile: the real local account / system identity, plus the loaded
-  // character's vitals only when a universe is actually being played. ---
-  s += "        panel mm_body_profile { layout: column; gap: 16; width: 100%;\n"
-       "          panel { layout: row; align: center; gap: 16; width: 100%;\n            " +
-       MenuGlyph("knot", "#cdb98f", 44) +
-       R"(            panel { layout: column; gap: 3;
-              text mm_pf_name { text: "local"; font-size: 22; color: #eef1f8; letter-spacing: 1; }
-              text mm_pf_sub { text: ""; font-size: 12; color: #9aa3b6; letter-spacing: 1; }
-            }
-          }
-)";
-
-  // Real account / system chips, two per row (always shown).
-  const char* acct[4][2] = {
-      {"ACCOUNT", "mm_pf_account"}, {"MACHINE", "mm_pf_machine"},
-      {"SESSION", "mm_pf_session"}, {"BUILD", "mm_pf_build"},
-  };
-  for (int r = 0; r < 2; ++r) {
-    s += "          panel { layout: row; gap: 10; width: 100%;\n";
-    for (int c = 0; c < 2; ++c) {
-      const char* const* chip = acct[r * 2 + c];
-      s += "            panel { flex-grow: 1; layout: column; gap: 3; padding: 11 13; corner-radius: 9;"
-           " background: #ffffff0a; border-color: #ffffff14; border-width: 1;\n"
-           "              text { text: \"" + std::string(chip[0]) +
-           "\"; font-size: 10; color: #8a93a8; letter-spacing: 2; }\n"
-           "              text " + std::string(chip[1]) +
-           " { text: \"-\"; font-size: 15; color: #eef1f8; }\n            }\n";
-    }
-    s += "          }\n";
-  }
-
-  // Character vitals + holdings: collapsed until a universe is loaded.
-  s += R"(          panel mm_pf_char { layout: column; gap: 12; width: 100%; visibility: collapsed;
-            panel { width: 100%; height: 1; background: #ffffff14; }
-            panel { layout: column; gap: 9; width: 100%;
-)";
-  struct Bar {
-    const char* label;
-    const char* track;
-    const char* fill;
-    const char* a;
-    const char* b;
-  };
-  const Bar bars[3] = {
-      {"Health", "mm_pf_htrack", "mm_pf_health", "#b23a3a", "#e8645d"},
-      {"Magicka", "mm_pf_mtrack", "mm_pf_magicka", "#3a63b2", "#5d92e8"},
-      {"Stamina", "mm_pf_strack", "mm_pf_stamina", "#3aa05a", "#5de88a"},
-  };
-  for (const Bar& bar : bars) {
-    std::snprintf(buf, sizeof(buf),
-                  "              panel { layout: row; align: center; gap: 12; width: 100%%;\n"
-                  "                text { text: \"%s\"; font-size: 12; color: #9aa3b6; width: 66; }\n"
-                  "                panel %s { flex-grow: 1; height: 12; overflow: hidden; background: #0c0e16cc;"
-                  " corner-radius: 6; border-color: #00000066; border-width: 1;\n"
-                  "                  panel %s { width: 100%%; height: 100%%; corner-radius: 6;"
-                  " background: %s; background-end: %s; }\n                }\n              }\n",
-                  bar.label, bar.track, bar.fill, bar.a, bar.b);
-    s += buf;
-  }
-  s += R"(            }
-            panel { layout: row; gap: 10; width: 100%;
-)";
-  const char* chips[3][2] = {{"GOLD", "mm_pf_gold"}, {"QUESTS", "mm_pf_quests"}, {"LOCATION", "mm_pf_loc"}};
-  for (auto& chip : chips) {
-    s += "              panel { flex-grow: 1; layout: column; gap: 3; padding: 10 12; corner-radius: 9;"
-         " background: #ffffff0a; border-color: #ffffff14; border-width: 1;\n"
-         "                text { text: \"" + std::string(chip[0]) +
-         "\"; font-size: 10; color: #8a93a8; letter-spacing: 2; }\n"
-         "                text " + std::string(chip[1]) +
-         " { text: \"-\"; font-size: 15; color: #eef1f8; }\n              }\n";
-  }
-  s += R"(            }
-          }
-          text mm_pf_hint { text: "Enter a universe to load a character."; font-size: 11; color: #6b7488; }
-        }
-      }
-    }
-)";
-  return s;
-}
-
-// The NEXUS main menu: the startup "choose your universe" screen. Three column
-// backdrops (each a live/captured game scene over a themed gradient), the brand
-// wordmark, the left navigation, a news block, the player banner and the social
-// row, plus the sub-screens for multiplayer / mods / settings / profile. Every
-// stateful element is driven each frame from ApplyMainMenu; starts collapsed.
-std::string BuildMainMenuSection() {
-  std::string s;
-
-  // Per-universe theme: backdrop gradient stops + accent + label + emblem.
-  struct Col {
-    const char* stops;
-    const char* accent;
-    const char* label;
-    const char* emblem;
-  };
-  const Col cols[kMenuUniverses] = {
-      {"#28323f 0%, #38485c 38%, #141b26 78%, #0a0e16 100%", "#9fb4d6", "SKYRIM", "skyrim"},
-      {"#2c2516 0%, #5a4a2c 34%, #2a2014 72%, #0f0b07 100%", "#d8b173", "FALLOUT 4", "vault"},
-      {"#0c1530 0%, #241f48 36%, #11132c 74%, #05060f 100%", "#8ea2e8", "STARFIELD", "constellation"},
-  };
-
-  s += R"(
-  panel mainmenu {
-    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: #04060b;
-    panel mm_cols { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; layout: row;
-)";
-  for (int i = 0; i < kMenuUniverses; ++i) {
-    const Col& c = cols[i];
-    const std::string id = std::to_string(i);
-    // Column: themed gradient base, the live backdrop image over it, a soft top
-    // and a strong bottom vignette for legibility, a top selection accent, and
-    // the universe label + emblem near the foot. Built by concatenation (not a
-    // fixed snprintf buffer) so the multi-line emblem glyph never truncates.
-    s += "      panel mm_col" + id +
-         " { flex-grow: 1; height: 100%; position: relative; overflow: hidden; cursor: pointer;\n"
-         "        panel mm_grad" + id +
-         " { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background: #000000;"
-         " gradient-stops: " + c.stops + "; gradient-angle: 180; }\n"
-         "        image mm_bg" + id +
-         " { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }\n"
-         "        panel mm_vtop" + id +
-         " { position: absolute; left: 0; top: 0; width: 100%; height: 200;"
-         " background: #05070ecc; background-end: #05070e00; gradient-angle: 180; }\n"
-         "        panel mm_vbot" + id +
-         " { position: absolute; left: 0; bottom: 0; width: 100%; height: 360;"
-         " background: #04060b00; background-end: #04060bf2; gradient-angle: 180; }\n"
-         "        panel mm_sel" + id +
-         " { position: absolute; left: 0; top: 0; width: 100%; height: 3; background: " + c.accent +
-         "; visibility: collapsed; }\n"
-         "        panel mm_lab" + id +
-         " { position: absolute; left: 0; bottom: 150; width: 100%; layout: column; align: center;"
-         " gap: 14;\n          text mm_labt" + id + " { text: \"" + c.label +
-         "\"; font-size: 17; color: #dfe4ef; letter-spacing: 8; text-transform: uppercase;"
-         " text-shadow-color: #000000aa; text-shadow-x: 0; text-shadow-y: 1; }\n          " +
-         MenuGlyph(c.emblem, "#cfd6e6", 26) + "        }\n"
-         // Top-most transparent overlay spanning the column: gives the whole
-         // third a single, eased hover wash (the label/emblem show through it).
-         // Clicks pass to the column via the router's ancestor climb.
-         "        panel mm_colhi" + id +
-         " { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: #ffffff00;"
-         " background-end: #ffffff00; gradient-angle: 180; cursor: pointer;\n"
-         "          :hover { background: #ffffff24; background-end: #ffffff05;"
-         " gradient-angle: 180; transition: 0.22s ease-out; }\n"
-         "        }\n      }\n";
-  }
-  s += "    }\n";  // close mm_cols
-
-  // Cinematic edge scrims: darken the left flank behind the nav and the right
-  // behind the news so the chrome reads cleanly over any backdrop (lets the per-
-  // glyph text shadows stay light instead of muddy). Drawn over the columns but
-  // under all the UI text below.
-  s += "    panel mm_scriml { position: absolute; left: 0; top: 0; width: 40vw; height: 100vh;"
-       " background: #04060bf4; background-end: #04060b00; gradient-angle: 90; }\n";
-  s += "    panel mm_scrimr { position: absolute; right: 0; top: 0; width: 27vw; height: 100vh;"
-       " background: #04060b00; background-end: #04060bcc; gradient-angle: 90; }\n";
-
-  // Hairline seams between the thirds: a soft light edge reads more premium than
-  // a hard black line.
-  s += "    panel mm_seaml { position: absolute; left: 33.333%; top: 0; width: 1; height: 100vh;"
-       " background: #ffffff12; }\n";
-  s += "    panel mm_seamr { position: absolute; left: 66.666%; top: 0; width: 1; height: 100vh;"
-       " background: #ffffff12; }\n";
-
-  // Top-left brand lockup.
-  s += "    panel mm_logo { position: absolute; left: 40; top: 34; layout: row; align: center; gap: 12;\n      " +
-       MenuGlyph("mountain", "#dfe4ef", 22) +
-       "      text { text: \"RECREATION\"; font-size: 15; color: #e8ecf6; letter-spacing: 5; }\n    }\n";
-
-  // Centre wordmark: emblem mark over the RECREATION wordmark, finished with a
-  // short hairline rule. No marketing strapline — just the title lockup.
-  s += "    panel mm_word { position: absolute; left: 0; top: 64; width: 100vw;"
-       " layout: column; align: center; gap: 16;\n      " +
-       MenuGlyph("sparkle", "#eaf0ff", 32) +
-       R"(      text { text: "RECREATION"; font-size: 58; color: #f6f8fc; letter-spacing: 14;
-        text-shadow-color: #000000cc; text-shadow-x: 0; text-shadow-y: 2; }
-      panel { width: 116; height: 1; background: #ffffff2b; }
-    }
-)";
-
-  // Left navigation.
-  const char* nav[kMenuNavItems][2] = {
-      {"PLAY", "Choose your universe"},     {"MULTIPLAYER", "Join or host a server"},
-      {"MODS", "Browse and manage mods"},   {"SETTINGS", "Configure your experience"},
-      {"PROFILE", "View stats and progress"}, {"QUIT", "Exit to desktop"},
-  };
-  s += "    panel mm_nav { position: absolute; left: 36; top: 184; width: 364; layout: column; gap: 4;\n";
-  for (int i = 0; i < kMenuNavItems; ++i) {
-    const std::string id = std::to_string(i);
-    // Each row is a hover/selected pill: transparent at rest, a soft wash on
-    // hover and a gold-tinted wash + left caret when selected. Both states ease
-    // via a registered transition, so navigating no longer snaps. Selection is
-    // driven from C++ (SetSelected) so keyboard and mouse share one highlight.
-    s += "      panel mm_nav" + id +
-         " { layout: row; align: center; gap: 13; padding: 9 14 9 12; corner-radius: 11;"
-         " background: #ffffff00; cursor: pointer;\n"
-         "        :hover { background: #ffffff12; transition: 0.16s ease-out; }\n"
-         "        :selected { background: #ffcc551c; transition: 0.18s ease-out; }\n"
-         "        panel mm_caret" + id + " { width: 12; height: 16; visibility: collapsed; " +
-         MenuGlyph("caret", "#ffcc55", 16) +
-         "        }\n"
-         "        panel { layout: column; gap: 2;\n"
-         "          text mm_navt" + id + " { text: \"" + nav[i][0] +
-         "\"; font-size: 22; color: #9aa3b6; letter-spacing: 4;"
-         " text-shadow-color: #00000066; text-shadow-x: 0; text-shadow-y: 1; }\n"
-         "          text mm_navs" + id + " { text: \"" + nav[i][1] +
-         "\"; font-size: 12; color: #717a8e; letter-spacing: 1; }\n"
-         "        }\n      }\n";
-  }
-  s += "    }\n";
-
-  // Bottom-left profile banner: the local account/handle and machine, plus the
-  // live peer count when a session is up. Real identity, driven from C++.
-  s += "    panel mm_profilebar { position: absolute; left: 40; bottom: 36; layout: row; align: center; gap: 14;\n";
-  s += "      " + MenuGlyph("knot", "#cdb98f", 44);
-  s += R"(      panel { layout: column; gap: 2;
-        text mm_pname { text: "local"; font-size: 18; color: #eef1f8; letter-spacing: 1; }
-        text mm_psys { text: ""; font-size: 12; color: #8a93a8; letter-spacing: 1; }
-      }
-      panel mm_pnet { layout: row; align: center; gap: 10; visibility: collapsed;
-        panel { width: 1; height: 32; background: #ffffff24; }
-)";
-  s += "        " + MenuGlyph("people", "#9aa3b6", 20) +
-       "        text mm_pcount { text: \"0\"; font-size: 15; color: #cfd6e6; }\n      }\n    }\n";
-
-  // Bottom-right build/version stamp (the conventional spot for it).
-  s += R"(    panel mm_ver { position: absolute; right: 40; bottom: 34; layout: row; align: center; gap: 8;
-      text { text: "RECREATION"; font-size: 11; color: #5b6478; letter-spacing: 3; }
-      text mm_build { text: ""; font-size: 11; color: #818aa0; letter-spacing: 1; }
-    }
-)";
-
-  s += BuildMainMenuScreens();
-  s += "  }\n";  // close mainmenu
-  return s;
-}
-
-std::string BuildUi() {
-  std::string s;
-  s += R"(
-panel root {
-  width: 100vw; height: 100vh; position: relative;
-
   panel topbar {
     position: absolute; top: 0; left: 0; width: 100vw; height: 64;
     layout: row; justify: center; align: start; padding: 16 0 0 0;
@@ -1071,9 +530,7 @@ panel root {
         position: absolute; top: 0; left: 0; height: 30; width: 1680;
         layout: row; align: center;
 )";
-
-  // Generated cardinal labels.
-  int count = 8 * kCompassTurns;
+  const int count = 8 * kCompassTurns;
   for (int i = 0; i < count; ++i) {
     const char* card = kCardinals[i % 8];
     bool major = (i % 2) == 0;  // N E S W
@@ -1085,7 +542,6 @@ panel root {
          "; color: " + color +
          "; text-shadow-color: #000000d0; text-shadow-x: 1; text-shadow-y: 1; }\n";
   }
-
   s += R"(
       }
       panel compass_marker {
@@ -1098,151 +554,29 @@ panel root {
       }
     }
   }
-
-  panel crosshair {
-    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
-    layout: column; justify: center; align: center;
-    panel cross {
-      width: 24; height: 24; position: relative;
-      panel ch_t { position: absolute; left: 11; top: 0;  width: 2; height: 8; background: #ffffffcc; }
-      panel ch_b { position: absolute; left: 11; top: 16; width: 2; height: 8; background: #ffffffcc; }
-      panel ch_l { position: absolute; left: 0;  top: 11; width: 8; height: 2; background: #ffffffcc; }
-      panel ch_r { position: absolute; left: 16; top: 11; width: 8; height: 2; background: #ffffffcc; }
-      panel ch_dot { position: absolute; left: 11; top: 11; width: 2; height: 2; background: #ffcc55; }
-    }
-  }
-
-  panel vitals {
-    position: absolute; left: 30; bottom: 30; layout: column; gap: 9;
-    panel bar_health_track {
-      width: 280; height: 13; overflow: hidden;
-      background: #0c0e16cc; corner-radius: 7;
-      border-color: #00000077; border-width: 1;
-      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
-      panel bar_health_fill {
-        width: 100%; height: 100%; corner-radius: 7;
-        background: #b23a3a; background-end: #e8645d;
-      }
-    }
-    panel bar_magicka_track {
-      width: 280; height: 13; overflow: hidden;
-      background: #0c0e16cc; corner-radius: 7;
-      border-color: #00000077; border-width: 1;
-      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
-      panel bar_magicka_fill {
-        width: 100%; height: 100%; corner-radius: 7;
-        background: #3a63b2; background-end: #5d92e8;
-      }
-    }
-    panel bar_stamina_track {
-      width: 280; height: 13; overflow: hidden;
-      background: #0c0e16cc; corner-radius: 7;
-      border-color: #00000077; border-width: 1;
-      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
-      panel bar_stamina_fill {
-        width: 100%; height: 100%; corner-radius: 7;
-        background: #3aa05a; background-end: #5de88a;
-      }
-    }
-  }
-
-  panel readout {
-    position: absolute; right: 30; bottom: 30; layout: column; align: end; gap: 3;
-    text hud_fps { text: "-- fps"; font-size: 15; color: #cfd6e6;
-      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
-    text hud_coords { text: "x -- y -- z --"; font-size: 12; color: #aab2c6;
-      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
-    text hud_heading { text: "--"; font-size: 12; color: #aab2c6;
-      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
-  }
 )";
+  return s;
+}
 
-  s += BuildQuestSection();
-  s += BuildHudGaugeSection();
-  s += BuildJournalSection();
-  s += BuildDialogueSection();
-  s += BuildContainerSection();
-  s += BuildEditorSection();  // before the menu so the pause overlay draws on top
-
-  s += R"(
-  panel menu {
-    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
-    layout: column; justify: center; align: center;
-    background: #05070cf2;
-    panel menu_card {
-      layout: column; align: center; padding: 44 60;
-      background: #0d1018f7; background-end: #0a0c14f7; corner-radius: 16;
-      border-color: #ffffff1c; border-width: 1;
-      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 20;
-      text menu_title {
-        text: "Paused"; font-size: 40; color: #f2f4fb;
-        letter-spacing: 10; text-transform: uppercase;
-      }
-      text menu_sub {
-        text: "recreation"; font-size: 13; color: #ffcc55;
-        letter-spacing: 4; text-transform: uppercase;
-      }
-      panel menu_rule { width: 340; height: 1; background: #ffffff1f; margin: 24 0 22 0; }
-      panel menu_buttons {
-        layout: column; gap: 8; width: 340;
-        button btn_resume {
-          text: "Resume"; font-size: 19; color: #e8ecf6; text-align: center;
-          background: #ffcc5522; corner-radius: 9; padding: 14 0; cursor: pointer;
-          border-color: #ffcc5544; border-width: 1;
-          :hover { background: #ffcc5538; color: #ffffff; }
-          :pressed { background: #ffcc5555; }
-        }
-        button btn_settings {
-          text: "Settings"; font-size: 19; color: #9aa2b6; text-align: center;
-          background: #ffffff08; corner-radius: 9; padding: 14 0; cursor: pointer;
-          :hover { background: #ffffff14; color: #d8def0; }
-          :pressed { background: #ffffff20; }
-        }
-        button btn_quit {
-          text: "Quit to Desktop"; font-size: 19; color: #d88a8a; text-align: center;
-          background: #ffffff08; corner-radius: 9; padding: 14 0; cursor: pointer;
-          :hover { background: #b23a3a33; color: #ffd0d0; }
-          :pressed { background: #b23a3a55; }
-        }
-      }
-      panel menu_settings {
-        layout: column; gap: 6; width: 340;
-        text settings_head { text: "Controls"; font-size: 14; color: #ffcc55;
-          letter-spacing: 3; text-transform: uppercase; margin: 0 0 6 0; }
-)";
-  // Keybinds list, one row per control.
-  const char* keybinds[][2] = {
-      {"F1", "Renderer overlay"}, {"F2", "Papyrus natives"}, {"F3", "Quest debugger"},
-      {"T", "Toggle walk / fly"}, {"E", "Activate / talk"},  {"J", "Journal"},
-      {"Esc", "Pause menu"},
-  };
-  for (const auto& kb : keybinds) {
-    s += "        panel kb_" + std::string(kb[0]) +
-         " { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;\n"
-         "          text { text: \"" +
-         kb[1] +
-         "\"; font-size: 14; color: #d8def0; }\n"
-         "          text { text: \"" +
-         kb[0] +
-         "\"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }\n"
-         "        }\n";
-  }
-  s +=
-      R"(        panel settings_rule { width: 340; height: 1; background: #ffffff1f; margin: 16 0 6 0; }
-        button btn_settings_back {
-          text: "Back"; font-size: 19; color: #e8ecf6; text-align: center;
-          background: #ffcc5522; corner-radius: 9; padding: 14 0; cursor: pointer;
-          border-color: #ffcc5544; border-width: 1;
-          :hover { background: #ffcc5538; color: #ffffff; }
-          :pressed { background: #ffcc5555; }
-        }
-      }
-    }
-  }
-)";
-  // The NEXUS startup menu draws last, on top of everything (it is the front
-  // screen). It is a sibling of the pause menu inside root.
-  s += BuildMainMenuSection();
+// Assemble the whole UI tree: the root, the procedural sections generated in
+// code (topbar, editor, main menu), and the static screens loaded from the
+// .ugui fragments, all siblings of root in draw order. The pause/front menus are
+// concatenated last so they overlay everything.
+std::string BuildUi() {
+  std::string s = "\npanel root {\n  width: 100vw; height: 100vh; position: relative;\n";
+  s += BuildTopbarSection();              // procedural: scrolling compass
+  s += LoadUiFragment("hud.ugui");        // crosshair
+  s += LoadUiFragment("vitals.ugui");
+  s += LoadUiFragment("readout.ugui");
+  s += LoadUiFragment("quest.ugui");
+  s += LoadUiFragment("hud_gauge.ugui");
+  s += LoadUiFragment("journal.ugui");
+  s += LoadUiFragment("dialogue.ugui");
+  s += LoadUiFragment("container.ugui");
+  s += BuildEditorSection();              // procedural: Glyph icons; before the menu
+  s += LoadUiFragment("csharp_demo.ugui");
+  s += LoadUiFragment("pause_menu.ugui");
+  s += LoadUiFragment("main_menu.ugui");
   s += "}\n";
   return s;
 }
@@ -1291,6 +625,48 @@ const char* FindFont() {
   return nullptr;
 }
 
+// The monospace face for technical/data text (load-order indices, ids, paths).
+// fontconfig first, then the usual DejaVu Sans Mono locations. Null if none.
+const char* FindMonoFont() {
+  static std::string resolved;
+  if (const char* env = std::getenv("RECREATION_UI_FONT_MONO"); env && fs::exists(env)) {
+    resolved = env;
+    return resolved.c_str();
+  }
+#if !defined(_WIN32)
+  if (FILE* p = popen("fc-match -f '%{file}' 'monospace:style=Regular' 2>/dev/null", "r")) {
+    char buf[1024];
+    size_t n = std::fread(buf, 1, sizeof(buf) - 1, p);
+    pclose(p);
+    if (n > 0) {
+      buf[n] = '\0';
+      std::string path(buf);
+      while (!path.empty() && (path.back() == '\n' || path.back() == '\r')) path.pop_back();
+      if (!path.empty() && fs::exists(path)) {
+        resolved = path;
+        return resolved.c_str();
+      }
+    }
+  }
+#endif
+  static const char* candidates[] = {
+#if defined(_WIN32)
+      "C:/Windows/Fonts/consola.ttf",
+#else
+      "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+      "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+      "/run/current-system/sw/share/X11/fonts/DejaVuSansMono.ttf",
+#endif
+  };
+  for (const char* c : candidates) {
+    if (fs::exists(c)) {
+      resolved = c;
+      return resolved.c_str();
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 struct GameUi::Impl {
@@ -1307,6 +683,12 @@ struct GameUi::Impl {
   bool prev_mouse[3] = {};
   float stamina = 1.0f;
   int last_fps = 0;  // last computed fps, shown in the editor status bar
+
+  // Hot reload of the .ugui fragments (RECREATION_UI_HOT_RELOAD). Watches each
+  // fragment's mtime and rebuilds the tree when one changes.
+  bool hot_reload = false;
+  float reload_timer = 0.0f;  // throttle the mtime poll
+  std::vector<fs::file_time_type> fragment_mtimes;
 
   // Quest HUD state, set by the engine and applied each frame.
   HudQuest quest;
@@ -1342,7 +724,9 @@ struct GameUi::Impl {
   std::vector<std::string> mm_universe_names{"Skyrim", "Fallout 4", "Starfield"};
   std::vector<bool> mm_available{true, true, true};
   std::vector<std::string> mm_mods;
+  std::vector<MenuNewsItem> mm_news;
   u64 mm_backdrop[kMenuUniverses] = {0, 0, 0};
+  std::vector<std::pair<std::string, u64>> mm_glyphs;  // emblem widget -> texture
   bool mm_prev_open = false;  // edge-detect to hide the gameplay HUD while open
 
   // Drives every main-menu widget from the state above each frame; collapses the
@@ -1412,6 +796,45 @@ struct GameUi::Impl {
     SetVisible("menu_buttons", !settings_open);
     SetVisible("menu_settings", settings_open);
     ugui::SetText(ui.FindWidget("menu_title"), settings_open ? "Settings" : "Paused");
+  }
+
+  // --- .ugui hot reload -----------------------------------------------------
+  // Snapshot each fragment's last-write time so FragmentsChanged() can detect an
+  // edit. A missing file records a default time and simply won't trigger.
+  void CaptureFragmentMtimes() {
+    fragment_mtimes.clear();
+    for (const char* name : kUiFragments) {
+      std::error_code ec;
+      fragment_mtimes.push_back(fs::last_write_time(UiDir() / name, ec));
+    }
+  }
+  bool FragmentsChanged() const {
+    const size_t n = sizeof(kUiFragments) / sizeof(*kUiFragments);
+    for (size_t i = 0; i < n && i < fragment_mtimes.size(); ++i) {
+      std::error_code ec;
+      const auto t = fs::last_write_time(UiDir() / kUiFragments[i], ec);
+      if (!ec && t != fragment_mtimes[i]) return true;
+    }
+    return false;
+  }
+  // Reassemble the tree from the (edited) fragments and reapply the live
+  // visibility state the rebuild reset to markup defaults. Per-frame value
+  // updates (HUD text, editor view, main-menu data) refresh the rest next frame.
+  void ReloadUi() {
+    const std::string doc = BuildUi();
+    ui.LoadUiString(doc.c_str(), "hud");
+    CaptureFragmentMtimes();
+    const bool hud = !editor.active;
+    SetVisible("topbar", hud);
+    SetVisible("crosshair", hud);
+    SetVisible("vitals", hud);
+    SetVisible("readout", hud);
+    SetVisible("editor_root", editor.active);
+    editor_prev_active = editor.active;
+    if (std::getenv("RECREATION_UI_CSHARP_DEMO")) SetVisible("csdemo_root", true);
+    ApplyMenuVisibility();
+    ApplyMainMenu();
+    REC_INFO("ui: hot-reloaded {} .ugui fragment(s)", sizeof(kUiFragments) / sizeof(*kUiFragments));
   }
 };
 
@@ -1717,6 +1140,10 @@ void GameUi::Impl::ApplyMainMenu() {
     ugui::SetText(ui.FindWidget(n.c_str()), t.c_str());
   };
 
+  // Emblems: rebind each frame so they survive a hot-reload tree rebuild.
+  for (const auto& [name, tex] : mm_glyphs)
+    if (tex) ugui::SetImageTexture(ui.FindWidget(name.c_str()), tex, 1.0f, 1.0f);
+
   // Columns: live backdrop image (only when a texture is set), selection accent,
   // label text + availability dimming.
   for (int i = 0; i < kMenuUniverses; ++i) {
@@ -1743,8 +1170,8 @@ void GameUi::Impl::ApplyMainMenu() {
     SetVisible(("mm_caret" + id).c_str(), on);
     const bool quit = i == kMenuNavItems - 1;
     SetTextColor(("mm_navt" + id).c_str(), on ? (quit ? Rgba(0xff9a8affu) : Rgba(0xffcc55ffu))
-                                              : Rgba(0x9aa3b6ffu));
-    SetTextColor(("mm_navs" + id).c_str(), on ? Rgba(0xaeb6c8ffu) : Rgba(0x6b7488ffu));
+                                              : Rgba(0xc2c9d8ffu));
+    SetTextColor(("mm_navs" + id).c_str(), on ? Rgba(0xb6bdccffu) : Rgba(0x808a9effu));
   }
 
   // Profile banner: real handle + system line; peer count only when in session.
@@ -1759,6 +1186,17 @@ void GameUi::Impl::ApplyMainMenu() {
 
   // Build/version stamp.
   setText("mm_build", mm_stats.build.empty() ? "" : ("v" + mm_stats.build));
+
+  // NEWS rail: pooled rows filled from CHANGELOG.md (most-recent first).
+  for (int i = 0; i < kMenuNewsRows; ++i) {
+    const std::string id = std::to_string(i);
+    const bool on = i < static_cast<int>(mm_news.size());
+    SetVisible(("news" + id).c_str(), on);
+    if (on) {
+      setText("news" + id + "_title", mm_news[i].title);
+      setText("news" + id + "_sub", mm_news[i].detail);
+    }
+  }
 
   // Sub-screen overlay: title + which body is shown. Body visibility is set
   // unconditionally (not only when the screen is open) so a body never lingers
@@ -1853,6 +1291,10 @@ bool GameUi::Impl::RouteMainMenuClick(ugui::wid target) {
       };
       using K = MainMenuRequest::Kind;
       if (name == "mm_back") { mm_screen = 0; return true; }
+      if (name == "act_gear") { mm_screen = 3; return true; }          // settings
+      if (name == "act_globe") { mm_request.kind = K::kOpenUrl; mm_request.url = "https://github.com/"; return true; }
+      if (name == "act_discord") { mm_request.kind = K::kOpenUrl; mm_request.url = "https://discord.com/"; return true; }
+      if (name == "act_changelog" || name == "act_news") { mm_request.kind = K::kOpenUrl; mm_request.url = "https://github.com/"; return true; }
       if (name == "mm_mp_host") {
         mm_mp_mode = 0;
         mm_request.kind = K::kHostServer;
@@ -1905,6 +1347,15 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
   } else {
     REC_WARN("no ui font found (set RECREATION_UI_FONT), hud text will be blank");
   }
+  // A monospace face for the technical layer (load-order indices, ids, paths),
+  // selectable in markup as `font: mono`. Optional; absent leaves those on sans.
+  if (const char* mono_path = FindMonoFont()) {
+    ugui::FontHandle mono = impl_->ui.LoadFont(mono_path);
+    if (mono != ugui::kInvalidFont) {
+      impl_->ui.builder().RegisterFont("mono", mono);
+      REC_INFO("ultragui mono font: {}", mono_path);
+    }
+  }
 
   ui::GuiRenderBackend::InitInfo bi;
   bi.instance = device->instance();
@@ -1923,6 +1374,11 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
 
   std::string doc = BuildUi();
   impl_->ui.LoadUiString(doc.c_str(), "hud");
+  // Hot reload: when enabled, the .ugui fragments are polled for edits and the
+  // tree is rebuilt in place (see GameUi::Build). Off by default.
+  impl_->hot_reload = std::getenv("RECREATION_UI_HOT_RELOAD") != nullptr;
+  impl_->CaptureFragmentMtimes();
+  if (impl_->hot_reload) REC_INFO("ui: hot reload on, watching {}", UiDir().string());
 
   Impl* impl = impl_.get();
   impl_->ui.input().set_on_click([impl](ugui::wid w, ugui::MouseButton btn) {
@@ -1931,6 +1387,13 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
     if (impl->RouteEditorClick(w)) return;    // editor overlay owns this click
     ugui::WidgetNode* n = impl->ui.world().Get<ugui::WidgetNode>(w);
     if (!n) return;
+    // C# UI bridge demo: send the button click through the (now C#) scripting
+    // runtime instead of handling it here, so the handler runs in managed code.
+    // Checkbox/slider changes already auto-dispatch via WireChangeHandlers.
+    if (n->name.rfind("csdemo_", 0) == 0) {
+      impl->ui.script().CallHandler(("on_" + n->name).c_str(), w);
+      return;
+    }
     if (n->name == "btn_resume") {
       impl->menu_open = false;
       impl->settings_open = false;
@@ -1949,6 +1412,8 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
   // Editor overlay starts collapsed; the engine reveals it on F4.
   impl_->SetVisible("editor_root", false);
 
+  // Demo: RECREATION_UI_CSHARP_DEMO shows the C# UI bridge panel at startup.
+  if (std::getenv("RECREATION_UI_CSHARP_DEMO")) impl_->SetVisible("csdemo_root", true);
   // Debug aid: RECREATION_UI_MENU opens the pause menu at startup.
   if (std::getenv("RECREATION_UI_MENU")) impl_->menu_open = true;
   impl_->ApplyMenuVisibility();  // menu starts hidden unless forced open
@@ -2028,12 +1493,26 @@ void GameUi::SetMainMenuBackdrop(int universe, u64 texture) {
   impl_->mm_backdrop[universe] = texture;
 }
 
+void GameUi::SetMainMenuGlyph(const std::string& widget, u64 texture) {
+  if (!impl_->initialized) return;
+  for (auto& [name, tex] : impl_->mm_glyphs)
+    if (name == widget) {
+      tex = texture;
+      return;
+    }
+  impl_->mm_glyphs.emplace_back(widget, texture);
+}
+
 void GameUi::SetMainMenuStats(const MainMenuStats& stats) {
   if (impl_->initialized) impl_->mm_stats = stats;
 }
 
 void GameUi::SetMainMenuMods(const std::vector<std::string>& mods) {
   if (impl_->initialized) impl_->mm_mods = mods;
+}
+
+void GameUi::SetMainMenuNews(const std::vector<MenuNewsItem>& news) {
+  if (impl_->initialized) impl_->mm_news = news;
 }
 
 int GameUi::selected_universe() const { return impl_->initialized ? impl_->mm_universe : 0; }
@@ -2109,18 +1588,37 @@ u64 GameUi::CreateUiTexture(int width, int height, const u8* rgba) {
                                       ugui::RHIFormat::kRgba8Unorm, rgba, ugui::RHIFilter::kLinear);
 }
 
-void GameUi::Build(Window& window, render::Renderer&, FlyCamera& camera, f32 frame_delta,
+void GameUi::Build(Window& window, render::Renderer& renderer, FlyCamera& camera, f32 frame_delta,
                    render::FrameView* view) {
   if (!impl_->initialized) return;
   Impl* impl = impl_.get();
 
-  impl->host.window_width = static_cast<float>(window.width());
-  impl->host.window_height = static_cast<float>(window.height());
+  // Hot reload: poll the .ugui fragments a few times a second and rebuild the
+  // tree in place when one is edited. Gated on RECREATION_UI_HOT_RELOAD.
+  if (impl->hot_reload) {
+    impl->reload_timer += frame_delta;
+    if (impl->reload_timer >= 0.25f) {
+      impl->reload_timer = 0.0f;
+      if (impl->FragmentsChanged()) impl->ReloadUi();
+    }
+  }
 
-  // Feed the per-frame input snapshot into ultragui's queue.
+  // Size the UI canvas to the actual backbuffer (swapchain) extent, not the
+  // window size — they differ on HiDPI / when the swapchain is clamped, which
+  // otherwise lays the menu out over only part of the screen (a black bar).
+  const float fb_w = static_cast<float>(renderer.output_width());
+  const float fb_h = static_cast<float>(renderer.output_height());
+  impl->host.window_width = fb_w > 0.f ? fb_w : static_cast<float>(window.width());
+  impl->host.window_height = fb_h > 0.f ? fb_h : static_cast<float>(window.height());
+
+  // Feed the per-frame input snapshot into ultragui's queue, scaling the cursor
+  // from window space into the (possibly larger) backbuffer canvas so clicks
+  // line up with the widgets.
   const InputState& in = window.input();
   ugui::InputQueue& q = impl->ui.platform()->input_queue();
-  q.PushMove({in.mouse_x, in.mouse_y});
+  const float msx = window.width() > 0 ? fb_w / static_cast<float>(window.width()) : 1.f;
+  const float msy = window.height() > 0 ? fb_h / static_cast<float>(window.height()) : 1.f;
+  q.PushMove({in.mouse_x * msx, in.mouse_y * msy});
   const ugui::MouseButton buttons[3] = {ugui::MouseButton::kLeft, ugui::MouseButton::kRight,
                                         ugui::MouseButton::kMiddle};
   const MouseButton rec_buttons[3] = {MouseButton::kLeft, MouseButton::kRight,
@@ -2359,6 +1857,8 @@ void GameUi::SetMainMenuUniverses(const std::vector<std::string>&, const std::ve
 void GameUi::SetMainMenuBackdrop(int, u64) {}
 void GameUi::SetMainMenuStats(const MainMenuStats&) {}
 void GameUi::SetMainMenuMods(const std::vector<std::string>&) {}
+void GameUi::SetMainMenuNews(const std::vector<MenuNewsItem>&) {}
+void GameUi::SetMainMenuGlyph(const std::string&, u64) {}
 int GameUi::selected_universe() const { return 0; }
 MainMenuRequest GameUi::PollMainMenuRequest() { return {}; }
 

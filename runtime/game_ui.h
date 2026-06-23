@@ -175,15 +175,23 @@ struct MainMenuStats {
   int universes_available = 0; // detected, playable universes
 };
 
+// One entry on the menu's NEWS rail, parsed from CHANGELOG.md: a short headline
+// and a detail line (version + date).
+struct MenuNewsItem {
+  std::string title;
+  std::string detail;
+};
+
 // A request the main menu raises for the engine to act on. The engine polls it
 // once per frame (PollMainMenuRequest) and clears it by consuming. Loading a
 // universe makes that game the primary content domain, which boots its C#
 // gameplay module (SkyrimMod / Fallout / StarfieldMod gate on the primary).
 struct MainMenuRequest {
-  enum class Kind { kNone, kEnterUniverse, kHostServer, kJoinServer, kQuit };
+  enum class Kind { kNone, kEnterUniverse, kHostServer, kJoinServer, kQuit, kOpenUrl };
   Kind kind = Kind::kNone;
   int universe = 0;         // 0 Skyrim, 1 Fallout 4, 2 Starfield
   std::string address;      // join target ("ip[:port]"), for kJoinServer
+  std::string url;          // external link to open, for kOpenUrl
   bool multiplayer = false; // kEnterUniverse also opened a session
 };
 
@@ -297,8 +305,14 @@ class GameUi {
   void SetMainMenuUniverses(const std::vector<std::string>& names,
                             const std::vector<bool>& available);
   void SetMainMenuBackdrop(int universe, u64 texture);
+  // Bind a procedurally-painted emblem texture to a named image widget in the
+  // menu (e.g. "gl_nexus", "gl_skyrim"). Rebound each frame so it survives a
+  // hot-reload rebuild of the widget tree.
+  void SetMainMenuGlyph(const std::string& widget, u64 texture);
   void SetMainMenuStats(const MainMenuStats& stats);
   void SetMainMenuMods(const std::vector<std::string>& mods);
+  // The NEWS rail entries (most-recent first), parsed from CHANGELOG.md.
+  void SetMainMenuNews(const std::vector<MenuNewsItem>& news);
   // The universe column currently selected (0 Skyrim, 1 Fallout 4, 2 Starfield).
   int selected_universe() const;
   // Consume the pending request (kNone if none). Called by the engine each frame.

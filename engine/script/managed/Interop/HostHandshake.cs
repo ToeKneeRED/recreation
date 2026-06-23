@@ -38,6 +38,10 @@ internal unsafe struct HostCallbacks
     public delegate* unmanaged<float, void> Tick;
     public delegate* unmanaged<ManagedEvent*, void> PublishEvent;
     public delegate* unmanaged<void> Shutdown;
+    // Routes a ultragui handler (button click, on_change) into the managed UI
+    // layer. (funcName UTF-8, packed widget) -> 1 if a handler claimed it.
+    // Append-only: keep after the originals.
+    public delegate* unmanaged<byte*, ulong, int> DispatchUi;
 }
 
 // One loaded game's content domain. Mirror of host/bridge.h DomainBridge.
@@ -59,4 +63,7 @@ internal unsafe struct HostHandshake
     public HostCallbacks Callbacks;
     public int DomainCount;
     public DomainBridge* Domains;
+    // The ultragui widget-operation table (WidgetOps*), so UI handlers can read
+    // and mutate live widgets. Null when there is no UI backend. Append-only.
+    public WidgetOps* UiWidgetOps;
 }

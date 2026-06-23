@@ -1,0 +1,36 @@
+// Bottom-left vitals bars (health / magicka / stamina). The *_fill widths are
+// driven each frame from engine state.
+
+  panel vitals {
+    position: absolute; left: 30; bottom: 30; layout: column; gap: 9;
+    panel bar_health_track {
+      width: 280; height: 13; overflow: hidden;
+      background: #0c0e16cc; corner-radius: 7;
+      border-color: #00000077; border-width: 1;
+      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
+      panel bar_health_fill {
+        width: 100%; height: 100%; corner-radius: 7;
+        background: #b23a3a; background-end: #e8645d;
+      }
+    }
+    panel bar_magicka_track {
+      width: 280; height: 13; overflow: hidden;
+      background: #0c0e16cc; corner-radius: 7;
+      border-color: #00000077; border-width: 1;
+      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
+      panel bar_magicka_fill {
+        width: 100%; height: 100%; corner-radius: 7;
+        background: #3a63b2; background-end: #5d92e8;
+      }
+    }
+    panel bar_stamina_track {
+      width: 280; height: 13; overflow: hidden;
+      background: #0c0e16cc; corner-radius: 7;
+      border-color: #00000077; border-width: 1;
+      shadow-color: #00000066; shadow-blur: 12; shadow-y: 3;
+      panel bar_stamina_fill {
+        width: 100%; height: 100%; corner-radius: 7;
+        background: #3aa05a; background-end: #5de88a;
+      }
+    }
+  }

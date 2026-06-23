@@ -153,10 +153,11 @@ class Engine {
   // player / network / mods data.
   void UpdateMainMenu(f32 dt);
   void RefreshMenuData();
-  // Loads any cached game-scene frames (thumbs/menu_<slug>.png, captured by a
-  // previous playthrough) as the menu's column backdrops, so the columns show
-  // real worlds instead of the themed gradients once a game has been played.
-  void LoadMenuBackdrops();
+  // Paints the three universe panes (Skyrim / Fallout 4 / Starfield) as original,
+  // per-pixel procedural concept art — atmospheric sky, silhouettes, grain — and
+  // uploads them as the menu's pane backdrop textures. No external image assets:
+  // the front screen is self-contained and non-infringing.
+  void GenerateMenuBackdrops();
   // Per-frame: a few seconds after entering a universe, grabs one clean frame of
   // its world (HUD/overlays hidden) into the backdrop cache for next time.
   void TickMenuCapture();

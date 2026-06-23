@@ -1,0 +1,89 @@
+// The in-game pause menu: a full-screen dimmer with a centred card. The button
+// column (menu_buttons) and the controls panel (menu_settings) swap via
+// ApplyMenuVisibility; menu_title follows. Button clicks are handled in C++ by
+// GameUi's input().set_on_click router (btn_resume / btn_settings / btn_quit /
+// btn_settings_back). Starts hidden (the whole "menu" panel toggled visible).
+
+  panel menu {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center;
+    background: #05070cf2;
+    panel menu_card {
+      layout: column; align: center; padding: 44 60;
+      background: #0d1018f7; background-end: #0a0c14f7; corner-radius: 16;
+      border-color: #ffffff1c; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 20;
+      text menu_title {
+        text: "Paused"; font-size: 40; color: #f2f4fb;
+        letter-spacing: 10; text-transform: uppercase;
+      }
+      text menu_sub {
+        text: "recreation"; font-size: 13; color: #ffcc55;
+        letter-spacing: 4; text-transform: uppercase;
+      }
+      panel menu_rule { width: 340; height: 1; background: #ffffff1f; margin: 24 0 22 0; }
+      panel menu_buttons {
+        layout: column; gap: 8; width: 340;
+        button btn_resume {
+          text: "Resume"; font-size: 19; color: #e8ecf6; text-align: center;
+          background: #ffcc5522; corner-radius: 9; padding: 14 0; cursor: pointer;
+          border-color: #ffcc5544; border-width: 1;
+          :hover { background: #ffcc5538; color: #ffffff; }
+          :pressed { background: #ffcc5555; }
+        }
+        button btn_settings {
+          text: "Settings"; font-size: 19; color: #9aa2b6; text-align: center;
+          background: #ffffff08; corner-radius: 9; padding: 14 0; cursor: pointer;
+          :hover { background: #ffffff14; color: #d8def0; }
+          :pressed { background: #ffffff20; }
+        }
+        button btn_quit {
+          text: "Quit to Desktop"; font-size: 19; color: #d88a8a; text-align: center;
+          background: #ffffff08; corner-radius: 9; padding: 14 0; cursor: pointer;
+          :hover { background: #b23a3a33; color: #ffd0d0; }
+          :pressed { background: #b23a3a55; }
+        }
+      }
+      panel menu_settings {
+        layout: column; gap: 6; width: 340;
+        text settings_head { text: "Controls"; font-size: 14; color: #ffcc55;
+          letter-spacing: 3; text-transform: uppercase; margin: 0 0 6 0; }
+        panel kb_F1 { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Renderer overlay"; font-size: 14; color: #d8def0; }
+          text { text: "F1"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel kb_F2 { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Papyrus natives"; font-size: 14; color: #d8def0; }
+          text { text: "F2"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel kb_F3 { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Quest debugger"; font-size: 14; color: #d8def0; }
+          text { text: "F3"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel kb_T { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Toggle walk / fly"; font-size: 14; color: #d8def0; }
+          text { text: "T"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel kb_E { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Activate / talk"; font-size: 14; color: #d8def0; }
+          text { text: "E"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel kb_J { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Journal"; font-size: 14; color: #d8def0; }
+          text { text: "J"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel kb_Esc { layout: row; justify: space-between; align: center; width: 100%; padding: 5 0;
+          text { text: "Pause menu"; font-size: 14; color: #d8def0; }
+          text { text: "Esc"; font-size: 14; color: #9aa2b6; letter-spacing: 1; }
+        }
+        panel settings_rule { width: 340; height: 1; background: #ffffff1f; margin: 16 0 6 0; }
+        button btn_settings_back {
+          text: "Back"; font-size: 19; color: #e8ecf6; text-align: center;
+          background: #ffcc5522; corner-radius: 9; padding: 14 0; cursor: pointer;
+          border-color: #ffcc5544; border-width: 1;
+          :hover { background: #ffcc5538; color: #ffffff; }
+          :pressed { background: #ffcc5555; }
+        }
+      }
+    }
+  }

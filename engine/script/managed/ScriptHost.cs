@@ -20,6 +20,10 @@ public static unsafe class ScriptHost
         var handshake = (HostHandshake*)handshakePtr;
         Native.Bind(handshake->Bridge);
         RegisterDomains(handshake);
+        // Wire the ultragui UI layer if a windowed client gave us its widget ops,
+        // so [UiHandler] methods drive ultragui in place of Lua. Absent (null) on
+        // the dedicated server; Ui then stays an inert no-op.
+        if (handshake->UiWidgetOps != null) Ui.Bind(handshake->UiWidgetOps);
         Console.WriteLine($"[managed] Recreation scripting host online, {Domains.Count} game(s)");
         if (Environment.GetEnvironmentVariable("REC_DOMAINS_REPORT") != null) ReportDomains();
         ModHost.Boot();
@@ -31,6 +35,7 @@ public static unsafe class ScriptHost
         handshake->Callbacks.Tick = &OnTick;
         handshake->Callbacks.PublishEvent = &OnPublishEvent;
         handshake->Callbacks.Shutdown = &OnShutdown;
+        handshake->Callbacks.DispatchUi = &OnDispatchUi;
         return 0;
     }
 
@@ -74,7 +79,20 @@ public static unsafe class ScriptHost
     }
 
     [UnmanagedCallersOnly]
-    private static void OnTick(float deltaTime) => ModHost.Tick(deltaTime);
+    private static void OnTick(float deltaTime)
+    {
+        ModHost.Tick(deltaTime);
+        Ui.Tick(deltaTime);  // advance UI timers (Ui.After)
+    }
+
+    // A ultragui handler fired; route it to the managed UI layer. Returns 1 if a
+    // [UiHandler] claimed it.
+    [UnmanagedCallersOnly]
+    private static int OnDispatchUi(byte* funcName, ulong widget)
+    {
+        string name = Marshal.PtrToStringUTF8((IntPtr)funcName) ?? string.Empty;
+        return Ui.Dispatch(name, widget);
+    }
 
     [UnmanagedCallersOnly]
     private static void OnPublishEvent(ManagedEvent* e) => EngineEvents.Dispatch(*e);

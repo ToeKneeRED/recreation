@@ -1,0 +1,14 @@
+// Dialogue panel (bottom-centre): the speaker, their last line, and a fixed pool
+// of numbered topic rows (kDialogueOptionRows) filled/toggled in GameUi::Build.
+
+  panel dialogue_box {
+    position: absolute; left: 0; bottom: 70; width: 100vw; layout: column; align: center; gap: 4;
+    text dialogue_speaker { text: ""; font-size: 18; color: #ffcc55;
+      text-shadow-color: #000000e0; text-shadow-x: 1; text-shadow-y: 1; }
+    text dialogue_npc { text: ""; font-size: 15; color: #d8def0; margin: 0 0 8 0;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text dialogue_opt0 { text: ""; font-size: 15; color: #c7e0ff; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text dialogue_opt1 { text: ""; font-size: 15; color: #c7e0ff; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text dialogue_opt2 { text: ""; font-size: 15; color: #c7e0ff; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text dialogue_opt3 { text: ""; font-size: 15; color: #c7e0ff; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+  }

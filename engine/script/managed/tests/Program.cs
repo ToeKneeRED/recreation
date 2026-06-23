@@ -123,6 +123,7 @@ internal static class Program
         SmithingTests.Run(check);
         EnchantingPowerTests.Run(check);
         SoulGemTests.Run(check);
+        UiTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;

@@ -201,6 +201,22 @@ bool Engine::RunFrame() {
       }
       game_ui_.Build(*window_, renderer_, camera_, frame_delta, &view);
       renderer_.RenderFrame(view);
+      // Test/CI hook: REC_UI_SHOT=<path> grabs the frame after REC_UI_SHOT_FRAMES
+      // (default 30) and quits. Lets a headless GPU run capture the UI without
+      // loading a universe (the NEXUS menu renders at boot).
+      if (const char* shot = std::getenv("REC_UI_SHOT")) {
+        static int ui_shot_frames = 0;
+        static const int ui_shot_target = [] {
+          const char* f = std::getenv("REC_UI_SHOT_FRAMES");
+          return f && std::atoi(f) > 0 ? std::atoi(f) : 30;
+        }();
+        ++ui_shot_frames;
+        // CaptureScreenshot is deferred: it is written by the NEXT RenderFrame.
+        // Request at the target frame, then quit one frame later so the write
+        // actually lands.
+        if (ui_shot_frames == ui_shot_target) renderer_.CaptureScreenshot(shot);
+        else if (ui_shot_frames > ui_shot_target) quit_.store(true, std::memory_order_relaxed);
+      }
     } else {
       // No vsync to pace the loop; yield between fixed steps instead of
       // spinning a core.

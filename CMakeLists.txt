@@ -200,6 +200,11 @@ if(SDL3_FOUND AND EXISTS "${RECREATION_LIBULTRAGUI_DIR}/CMakeLists.txt")
     CACHE FILEPATH "" FORCE)
   set(ULTRAGUI_RHI_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ugui_rhi.cc"
     CACHE FILEPATH "" FORCE)
+  # Swap ultragui's scripting runtime for recreation's: ugui handlers run in the
+  # hosted .NET (C#) world instead of Lua. The backend stays library-agnostic and
+  # reaches the managed host through runtime/ugui_csharp_host.h (see that file).
+  set(ULTRAGUI_SCRIPT_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ugui_script_csharp.cc"
+    CACHE FILEPATH "" FORCE)
   add_subdirectory(${RECREATION_LIBULTRAGUI_DIR} libultragui EXCLUDE_FROM_ALL)
   set(RECREATION_HAS_UGUI ON)
   message(STATUS "libultragui found, hud enabled")

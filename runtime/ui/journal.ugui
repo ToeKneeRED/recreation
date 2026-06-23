@@ -1,0 +1,31 @@
+// Quest journal overlay: a dimmed full-screen panel with a card listing the
+// player's active quests and, for the selected one, its objectives. journal_q*
+// (kJournalRows) and journal_obj* (kJournalObjRows) are fixed pools filled and
+// toggled in GameUi::Build. Starts hidden (toggled by SetJournal).
+
+  panel journal_box {
+    position: absolute; left: 0; top: 0; width: 100vw; height: 100vh;
+    layout: column; justify: center; align: center; background: #05070cdd;
+    panel journal_card {
+      layout: column; align: start; padding: 30 44; width: 580;
+      background: #0d1018f7; corner-radius: 14; border-color: #ffffff1c; border-width: 1;
+      shadow-color: #000000aa; shadow-blur: 48; shadow-y: 18;
+      text journal_head { text: "Journal"; font-size: 24; color: #ffcc55; letter-spacing: 6;
+        text-transform: uppercase; margin: 0 0 14 0; }
+      text journal_q0 { text: ""; font-size: 16; color: #d8def0; margin: 0 0 3 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_q1 { text: ""; font-size: 16; color: #d8def0; margin: 0 0 3 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_q2 { text: ""; font-size: 16; color: #d8def0; margin: 0 0 3 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_q3 { text: ""; font-size: 16; color: #d8def0; margin: 0 0 3 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_q4 { text: ""; font-size: 16; color: #d8def0; margin: 0 0 3 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_q5 { text: ""; font-size: 16; color: #d8def0; margin: 0 0 3 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      panel journal_rule { width: 492; height: 1; background: #ffffff1f; margin: 12 0 12 0; }
+      text journal_obj0 { text: ""; font-size: 13; color: #c7e0ff; margin: 0 0 2 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_obj1 { text: ""; font-size: 13; color: #c7e0ff; margin: 0 0 2 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_obj2 { text: ""; font-size: 13; color: #c7e0ff; margin: 0 0 2 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_obj3 { text: ""; font-size: 13; color: #c7e0ff; margin: 0 0 2 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_obj4 { text: ""; font-size: 13; color: #c7e0ff; margin: 0 0 2 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_obj5 { text: ""; font-size: 13; color: #c7e0ff; margin: 0 0 2 0; text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+      text journal_hint { text: "press a number to track, J to close"; font-size: 12;
+        color: #8a93a8; margin: 14 0 0 0; }
+    }
+  }

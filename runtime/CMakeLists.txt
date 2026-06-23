@@ -87,6 +87,11 @@ if(RECREATION_HAS_UGUI)
   target_sources(recreation PRIVATE gui_backend.cc)
   target_link_libraries(recreation PRIVATE ultragui recreation::stb)
   target_compile_definitions(recreation PRIVATE RECREATION_HAS_UGUI=1)
+  # Default location of the editable .ugui screen fragments (runtime/ui). The
+  # client reads them at startup and hot-reloads them; override with the env var
+  # RECREATION_UI_DIR. Absolute so the dev build finds the source files.
+  target_compile_definitions(recreation PRIVATE
+    RECREATION_UI_DIR_DEFAULT="${CMAKE_CURRENT_SOURCE_DIR}/ui")
   recreation_embed_shaders(recreation
     shaders/ugui_quad.vs.hlsl
     shaders/ugui_quad.ps.hlsl

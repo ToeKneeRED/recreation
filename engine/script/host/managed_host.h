@@ -50,6 +50,17 @@ class ManagedHost {
   bool Boot(const std::string& dotnet_root, const std::string& runtime_config,
             const std::string& assembly);
 
+  // Hands the managed world the ultragui widget-operation table (a
+  // rec::ugui_cs::WidgetOps*, opaque here) so its UI handlers can read and mutate
+  // live widgets. Call before Boot; passed through the handshake. Null disables
+  // managed widget access (handlers still fire, but cannot touch widgets).
+  void SetUiWidgetOps(const void* ops) { ui_widget_ops_ = ops; }
+
+  // Routes a ultragui handler into the managed UI layer (the runtime installs
+  // this as the backend's dispatch callback). Returns 1 if a handler claimed it,
+  // 0 when unavailable or the managed side declined UI scripting.
+  std::int32_t DispatchUi(const char* func_name, std::uint64_t widget);
+
   bool available() const { return available_; }
 
   // Advances the managed world one frame. No-op when unavailable.
@@ -81,6 +92,7 @@ class ManagedHost {
   std::vector<std::unique_ptr<Domain>> domains_;
   std::vector<DomainBridge> domain_table_;  // handshake view: borrows name/bridge
   HostHandshake handshake_{};
+  const void* ui_widget_ops_ = nullptr;  // rec::ugui_cs::WidgetOps*, set before Boot
   bool available_ = false;
 
   std::mutex event_mutex_;

@@ -119,6 +119,11 @@ struct HostCallbacks {
   void (*tick)(float dt);
   void (*publish_event)(const ManagedEvent* e);
   void (*shutdown)();
+  // Routes a ultragui handler (a button click, an on_change) into the managed UI
+  // layer. func_name is the handler (e.g. "on_btn_inventory"); widget is the
+  // packed ugui WidgetId. Returns 1 if a managed handler claimed it. Null if the
+  // managed side declines UI scripting. Append-only: keep after the originals.
+  std::int32_t (*dispatch_ui)(const char* func_name, std::uint64_t widget);
 };
 
 // One loaded game's content domain, exposed to managed code so a mod can reach
@@ -142,6 +147,11 @@ struct HostHandshake {
   HostCallbacks callbacks;
   std::int32_t domain_count;
   const DomainBridge* domains;
+  // The ultragui widget-operation table (rec::ugui_cs::WidgetOps*), so managed UI
+  // handlers can read and mutate live widgets. Null when the UI backend is absent
+  // (dedicated server, or no ultragui). Opaque here -- the runtime, not this
+  // header, knows the concrete type. Append-only.
+  const void* ui_widget_ops;
 };
 
 // Signature of the managed entrypoint, exported [UnmanagedCallersOnly]. The host

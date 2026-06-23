@@ -21,7 +21,12 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
   jobs_ = std::make_unique<JobSystem>();
 
   if (!config_.headless) {
-    window_ = window ? std::move(window) : Window::Create({});
+    // REC_WIN_W/REC_WIN_H shrink the window for fast headless capture (e.g. the
+    // software-rendered swrun path); default 1920x1080.
+    WindowDesc desc;
+    if (const char* w = std::getenv("REC_WIN_W")) { if (int v = std::atoi(w); v > 0) desc.width = static_cast<u32>(v); }
+    if (const char* h = std::getenv("REC_WIN_H")) { if (int v = std::atoi(h); v > 0) desc.height = static_cast<u32>(v); }
+    window_ = window ? std::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
   }

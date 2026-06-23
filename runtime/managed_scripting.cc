@@ -5,12 +5,23 @@
 
 #include "core/log.h"
 #include "script/papyrus/value.h"
+#if defined(RECREATION_HAS_UGUI)
+#include "ugui_csharp_host.h"  // the C# ultragui scripting backend seam
+#endif
 
 // Boots the managed (C#) scripting world over the Papyrus guest(s): registers
 // the primary game plus every secondary content domain as managed domains, then
 // routes engine gameplay events (death, item added, form load/unload, location
 // change) into the managed event bus. Optional and gracefully absent.
 namespace rec {
+
+#if defined(RECREATION_HAS_UGUI)
+// Bridges ultragui's handler dispatch to the managed world. Installed as the C#
+// backend's dispatch callback; ctx is the ManagedHost.
+static std::int32_t DispatchUiToManaged(void* ctx, const char* func_name, std::uint64_t widget) {
+  return static_cast<rec::script::host::ManagedHost*>(ctx)->DispatchUi(func_name, widget);
+}
+#endif
 
 void BootManagedScripting(Engine& engine) {
   Engine* const self = &engine;
@@ -47,10 +58,20 @@ void BootManagedScripting(Engine& engine) {
       return !d->scripts()->EnsureScriptLoaded(name).empty();
     });
   }
+#if defined(RECREATION_HAS_UGUI)
+  // Let managed UI handlers read and mutate live ugui widgets. Must precede Boot:
+  // the table is handed to the managed entrypoint through the handshake.
+  self->managed_->SetUiWidgetOps(rec::ugui_cs::GetWidgetOps());
+#endif
   if (!self->managed_->Boot(/*dotnet_root=*/"", runtime_config, assembly)) {
     self->managed_.reset();  // unavailable: run without it
     return;
   }
+#if defined(RECREATION_HAS_UGUI)
+  // Route every ultragui handler (button clicks, on_change) into the managed
+  // world now that it is up. Inert until this point, so early UI input is safe.
+  rec::ugui_cs::InstallHostDispatch(&DispatchUiToManaged, self->managed_.get());
+#endif
   // Route gameplay events (death, item added, quest stage) from the bindings to
   // the managed event bus. The sink runs on the guest thread, so set it there to
   // avoid racing the guest, and have it only enqueue: the main loop drains the

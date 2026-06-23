@@ -1,0 +1,12 @@
+// Bottom-right readout: fps / coords / heading. Text is driven each frame from
+// engine state in GameUi::Build.
+
+  panel readout {
+    position: absolute; right: 30; bottom: 30; layout: column; align: end; gap: 3;
+    text hud_fps { text: "-- fps"; font-size: 15; color: #cfd6e6;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text hud_coords { text: "x -- y -- z --"; font-size: 12; color: #aab2c6;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+    text hud_heading { text: "--"; font-size: 12; color: #aab2c6;
+      text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }
+  }
