@@ -94,6 +94,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
                                         bindless_ ? bindless_->set_layout() : VK_NULL_HANDLE);
   post_ = PostPass::Create(*device_, swapchain_->format());
   if (!mesh_pipeline_ || !post_ || !taa_.Initialize(*device_)) return false;
+  ui_blur_ = UiBlurPass::Create(*device_);  // optional: frosted-glass UI blur
   if (rt_available_ && !rtao_.Initialize(*device_)) return false;
   if (!ssao_.Initialize(*device_)) return false;  // raster ao fallback, no rt needed
   if (!ssr_.Initialize(*device_)) return false;   // raster reflection fallback
@@ -1760,12 +1761,22 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       });
 
   if (view.ui_draw || view.hud_draw) {
+    // Backdrop blur: when a frosted widget is present (and the surface lets us
+    // sample the backbuffer), capture + Gaussian-blur the post-tonemap frame
+    // into ui_frost; the UI backend samples it for frosted panels.
+    ResourceHandle ui_frost = kInvalidResource;
+    if (view.hud_draw && view.needs_blur && ui_blur_ && swapchain_->can_sample()) {
+      ui_frost = ui_blur_->AddToGraph(graph_, backbuffer, output_width_, output_height_);
+    }
+
     graph_.AddPass(
         "ui",
         [&](RenderGraph::PassBuilder& builder) {
+          if (ui_frost != kInvalidResource)
+            builder.Read(ui_frost, ResourceUsage::kSampledFragment);
           builder.Write(backbuffer, ResourceUsage::kColorAttachment);
         },
-        [this, backbuffer, &view](PassContext& ctx) {
+        [this, backbuffer, ui_frost, &view](PassContext& ctx) {
           VkRenderingAttachmentInfo color{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
           color.imageView = ctx.graph->image(backbuffer).view;
           color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1777,6 +1788,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           rendering.layerCount = 1;
           rendering.colorAttachmentCount = 1;
           rendering.pColorAttachments = &color;
+          // Hand the blurred backdrop to the UI before it records (the closure
+          // reads view.blur_source); null when blur is not in play this frame.
+          view.blur_source =
+              ui_frost != kInvalidResource ? ctx.graph->image(ui_frost).view : VK_NULL_HANDLE;
+          view.blur_sampler = ui_frost != kInvalidResource ? ui_blur_->sampler() : VK_NULL_HANDLE;
           vkCmdBeginRendering(ctx.cmd, &rendering);
           if (view.hud_draw) view.hud_draw(ctx.cmd);
           if (view.ui_draw) view.ui_draw(ctx.cmd);

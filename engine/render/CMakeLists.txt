@@ -26,6 +26,7 @@ recreation_add_module(render
   ddgi.cc
   exposure.cc
   post.cc
+  ui_blur.cc
   shader_util.cc
   taa.cc
   raytracing.cc
@@ -118,6 +119,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/hdr_capture.cs.hlsl
   shaders/pathtrace.cs.hlsl
   shaders/fog.cs.hlsl
+  shaders/ui_blur.ps.hlsl
 )
 
 # rtao.cs.hlsl and the nrd_* shaders pull in NRD.hlsli. The include dir is added

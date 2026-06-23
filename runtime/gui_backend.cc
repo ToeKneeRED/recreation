@@ -6,6 +6,8 @@
 #include <ugui/render/vertex.h>
 
 #include "render/shader_util.h"
+#include "shaders/ugui_frost_ps_hlsl.h"
+#include "shaders/ugui_frost_vs_hlsl.h"
 #include "shaders/ugui_quad_ps_hlsl.h"
 #include "shaders/ugui_quad_vs_hlsl.h"
 #include "shaders/ugui_text_ps_hlsl.h"
@@ -370,10 +372,25 @@ bool GuiRenderBackend::Init(const InitInfo& info) {
                                   k_ugui_quad_ps_hlsl, sizeof(k_ugui_quad_ps_hlsl), 9);
   text_pipeline_ = CreatePipeline(k_ugui_text_vs_hlsl, sizeof(k_ugui_text_vs_hlsl),
                                   k_ugui_text_ps_hlsl, sizeof(k_ugui_text_ps_hlsl), 3);
-  if (!quad_pipeline_ || !text_pipeline_) return false;
+  // The frosted-glass pipeline shares the quad vertex layout and pipeline layout
+  // (one combined image sampler = the blurred backdrop; vertex push constant).
+  frost_pipeline_ = CreatePipeline(k_ugui_frost_vs_hlsl, sizeof(k_ugui_frost_vs_hlsl),
+                                   k_ugui_frost_ps_hlsl, sizeof(k_ugui_frost_ps_hlsl), 9);
+  if (!quad_pipeline_ || !text_pipeline_ || !frost_pipeline_) return false;
 
   uint32_t white = 0xFFFFFFFFu;
   white_ = MakeTexture(1, 1, VK_FORMAT_R8G8B8A8_UNORM, 4, &white, linear_sampler_);
+
+  // A frost descriptor set per frame in flight, rebound to the backdrop each
+  // frame in Render (so updating one never races a submission still reading it).
+  frost_sets_.resize(info_.frames_in_flight, VK_NULL_HANDLE);
+  for (auto& set : frost_sets_) {
+    VkDescriptorSetAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    ai.descriptorPool = descriptor_pool_;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts = &set_layout_;
+    vkAllocateDescriptorSets(info_.device, &ai, &set);
+  }
 
   frames_.resize(info_.frames_in_flight);
   return true;
@@ -395,6 +412,7 @@ void GuiRenderBackend::Shutdown() {
   FreeTexture(white_);
   if (quad_pipeline_) vkDestroyPipeline(info_.device, quad_pipeline_, nullptr);
   if (text_pipeline_) vkDestroyPipeline(info_.device, text_pipeline_, nullptr);
+  if (frost_pipeline_) vkDestroyPipeline(info_.device, frost_pipeline_, nullptr);
   if (pipeline_layout_) vkDestroyPipelineLayout(info_.device, pipeline_layout_, nullptr);
   if (set_layout_) vkDestroyDescriptorSetLayout(info_.device, set_layout_, nullptr);
   if (descriptor_pool_) vkDestroyDescriptorPool(info_.device, descriptor_pool_, nullptr);
@@ -405,6 +423,11 @@ void GuiRenderBackend::Shutdown() {
 
 void GuiRenderBackend::NewFrame() {
   frame_index_ = (frame_index_ + 1) % info_.frames_in_flight;
+}
+
+void GuiRenderBackend::SetBackdrop(VkImageView view, VkSampler sampler) {
+  backdrop_view_ = view;
+  backdrop_sampler_ = sampler;
 }
 
 bool GuiRenderBackend::UpdateFontAtlas(const uint8_t* pixels, uint32_t width, uint32_t height) {
@@ -443,19 +466,38 @@ void GuiRenderBackend::Render(const ugui::DrawData& dd, VkCommandBuffer cmd) {
   float push[4] = {2.0f / dd.display_size.x, 2.0f / dd.display_size.y, -1.0f, -1.0f};
   vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), push);
 
+  // Backdrop blur: bind this frame's frost set to the renderer-supplied blurred
+  // copy of what is behind the UI. Absent (or no blur command) -> plain quads.
+  const bool have_backdrop = backdrop_view_ != VK_NULL_HANDLE && !frost_sets_.empty() &&
+                             frost_sets_[frame_index_] != VK_NULL_HANDLE;
+  if (have_backdrop) {
+    VkDescriptorImageInfo ii{backdrop_sampler_, backdrop_view_,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet w{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w.dstSet = frost_sets_[frame_index_];
+    w.dstBinding = 0;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w.pImageInfo = &ii;
+    vkUpdateDescriptorSets(info_.device, 1, &w, 0, nullptr);
+  }
+
   VkPipeline bound = VK_NULL_HANDLE;
   for (uint32_t i = 0; i < dd.command_count; ++i) {
     const ugui::DrawCmd& c = dd.commands[i];
     if (c.elem_count == 0) continue;
 
-    VkPipeline want = c.is_text ? text_pipeline_ : quad_pipeline_;
+    const bool frost = c.blur > 0.0f && have_backdrop && !c.is_text;
+    VkPipeline want = c.is_text ? text_pipeline_ : (frost ? frost_pipeline_ : quad_pipeline_);
     if (want != bound) {
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
       bound = want;
     }
 
     VkDescriptorSet set;
-    if (c.is_text || c.texture_id == ugui::kFontTextureId) {
+    if (frost) {
+      set = frost_sets_[frame_index_];
+    } else if (c.is_text || c.texture_id == ugui::kFontTextureId) {
       set = font_.set;
     } else if (c.texture_id == ugui::kNullTextureId) {
       set = white_.set;

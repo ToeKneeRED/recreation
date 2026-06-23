@@ -87,6 +87,12 @@ bool Swapchain::Init(u32 width, u32 height, bool vsync) {
   info.imageArrayLayers = 1;
   info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  // Sampling the backbuffer (UI backdrop blur) needs SAMPLED; add it only when
+  // the surface supports it so swapchain creation never fails for the feature.
+  if (caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
+    info.imageUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    sampleable_ = true;
+  }
   info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   info.preTransform = transform;
   info.compositeAlpha = composite;

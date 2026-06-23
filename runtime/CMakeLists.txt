@@ -97,6 +97,8 @@ if(RECREATION_HAS_UGUI)
     shaders/ugui_quad.ps.hlsl
     shaders/ugui_text.vs.hlsl
     shaders/ugui_text.ps.hlsl
+    shaders/ugui_frost.vs.hlsl
+    shaders/ugui_frost.ps.hlsl
     shaders/thumb.vs.hlsl
     shaders/thumb.ps.hlsl
   )

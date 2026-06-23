@@ -30,6 +30,7 @@
 #include "render/overdraw.h"
 #include "render/particles.h"
 #include "render/post.h"
+#include "render/ui_blur.h"
 #include "render/raytracing.h"
 #include "render/render_graph.h"
 #include "render/rhi/device.h"
@@ -103,6 +104,15 @@ struct FrameView {
   // ui_draw (the debug ImGui overlay) on top.
   std::function<void(VkCommandBuffer)> hud_draw;
   std::function<void(VkCommandBuffer)> ui_draw;
+
+  // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI sets
+  // needs_blur so the renderer captures + blurs the backbuffer before the ui
+  // pass and writes the result here for hud_draw to bind. blur_source/sampler
+  // are filled by the renderer inside the ui pass, just before hud_draw runs.
+  bool needs_blur = false;
+  // Filled by the renderer during the (const) frame record, hence mutable.
+  mutable VkImageView blur_source = VK_NULL_HANDLE;
+  mutable VkSampler blur_sampler = VK_NULL_HANDLE;
 };
 
 class Renderer {
@@ -224,6 +234,7 @@ class Renderer {
   std::unique_ptr<WaterPass> water_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;
+  std::unique_ptr<UiBlurPass> ui_blur_;  // frosted-glass backdrop blur for the UI
   base::UnorderedMap<u64, GpuMesh> meshes_;
   FrameResources frames_[kFramesInFlight];
   // One per swapchain image: a present may still wait on the semaphore

@@ -1805,6 +1805,16 @@ void GameUi::Build(Window& window, render::Renderer& renderer, FlyCamera& camera
   const ugui::DrawData& dd = impl->ui.RenderDrawData();
   impl->draw_data = &dd;
 
+  // Tell the renderer whether any widget wants backdrop blur this frame, so it
+  // only captures + blurs the backbuffer when a frosted panel is actually shown.
+  view->needs_blur = false;
+  for (u32 i = 0; i < dd.command_count; ++i) {
+    if (dd.commands[i].blur > 0.0f) {
+      view->needs_blur = true;
+      break;
+    }
+  }
+
   // Upload the glyph atlas if it grew this frame.
   if (impl->ui.text_engine().atlas_revision() != impl->font_revision) {
     ugui::Vec2 as = impl->ui.text_engine().atlas_size();
@@ -1814,7 +1824,10 @@ void GameUi::Build(Window& window, render::Renderer& renderer, FlyCamera& camera
   }
 
   impl->backend.NewFrame();
-  view->hud_draw = [impl](VkCommandBuffer cmd) {
+  view->hud_draw = [impl, view](VkCommandBuffer cmd) {
+    // The renderer fills view->blur_source just before this runs (inside the ui
+    // pass) with the blurred backdrop for frosted panels; null disables frost.
+    impl->backend.SetBackdrop(view->blur_source, view->blur_sampler);
     if (impl->draw_data) impl->backend.Render(*impl->draw_data, cmd);
   };
 }

@@ -51,6 +51,12 @@ class GuiRenderBackend final : public ugui::TextureBackend {
   // color attachment of InitInfo::color_format.
   void Render(const ugui::DrawData& draw_data, VkCommandBuffer cmd);
 
+  // Provide the pre-blurred backdrop (a Gaussian-blurred copy of what is behind
+  // the UI) that frosted-glass quads (DrawCmd::blur > 0) sample. Pass a null
+  // view to disable; then blur commands fall back to the plain quad pipeline.
+  // Set once per frame before Render, with a view valid for that submission.
+  void SetBackdrop(VkImageView view, VkSampler sampler);
+
   // ugui::TextureBackend.
   ugui::TextureId CreateTexture(uint32_t width, uint32_t height, ugui::RHIFormat format,
                                 const void* pixels, ugui::RHIFilter filter) override;
@@ -98,6 +104,7 @@ class GuiRenderBackend final : public ugui::TextureBackend {
   VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
   VkPipeline quad_pipeline_ = VK_NULL_HANDLE;
   VkPipeline text_pipeline_ = VK_NULL_HANDLE;
+  VkPipeline frost_pipeline_ = VK_NULL_HANDLE;  // backdrop-blur (frosted glass)
   VkSampler linear_sampler_ = VK_NULL_HANDLE;
   VkSampler nearest_sampler_ = VK_NULL_HANDLE;
   VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
@@ -107,6 +114,12 @@ class GuiRenderBackend final : public ugui::TextureBackend {
   ugui::TextureId next_user_id_ = 1;
   std::vector<FrameBuffers> frames_;
   uint32_t frame_index_ = 0;
+
+  // Backdrop-blur (frosted glass): the renderer hands a blurred copy of what is
+  // behind the UI each frame; frost commands sample it via a per-frame set.
+  VkImageView backdrop_view_ = VK_NULL_HANDLE;
+  VkSampler backdrop_sampler_ = VK_NULL_HANDLE;
+  std::vector<VkDescriptorSet> frost_sets_;
 };
 
 }  // namespace rec::ui

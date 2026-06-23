@@ -27,6 +27,9 @@ class Swapchain {
   u32 image_count() const { return static_cast<u32>(images_.size()); }
   VkImage image(u32 index) const { return images_[index]; }
   VkImageView view(u32 index) const { return views_[index]; }
+  // True when the surface allowed VK_IMAGE_USAGE_SAMPLED_BIT on the swapchain
+  // images, so the backbuffer can be sampled (e.g. for UI backdrop blur).
+  bool can_sample() const { return sampleable_; }
 
  private:
   explicit Swapchain(Device& device) : device_(device) {}
@@ -39,6 +42,7 @@ class Swapchain {
   VkExtent2D extent_{};
   base::Vector<VkImage> images_;
   base::Vector<VkImageView> views_;
+  bool sampleable_ = false;
 };
 
 }  // namespace rec::render

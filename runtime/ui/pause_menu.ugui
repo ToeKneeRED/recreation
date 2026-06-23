@@ -7,7 +7,10 @@
   panel menu {
     position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
     layout: column; justify: center; align: center;
-    background: #05070cf2;
+    // Frosted glass over the live world: a Gaussian-blurred backdrop with a
+    // dark tint, instead of a flat opaque dim. Falls back to the tint alone on
+    // surfaces that can't sample the backbuffer.
+    background: #070a10a8; backdrop-blur: 28;
     panel menu_card {
       layout: column; align: center; padding: 44 60;
       background: #0d1018f7; background-end: #0a0c14f7; corner-radius: 16;
