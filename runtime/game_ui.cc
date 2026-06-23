@@ -752,7 +752,8 @@ std::string BuildMainMenuScreens() {
           text mm_screen_title { text: "MULTIPLAYER"; font-size: 25; color: #f2f4fb;
             letter-spacing: 8; text-transform: uppercase; }
           panel mm_back { cursor: pointer; padding: 7 14; corner-radius: 8; background: #ffffff12;
-            border-color: #ffffff1c; border-width: 1; :hover { background: #ffffff22; }
+            border-color: #ffffff1c; border-width: 1;
+            :hover { background: #ffffff22; transition: 0.14s ease-out; }
             text { text: "Back"; font-size: 14; color: #cfd6e6; } }
         }
         panel { width: 100%; height: 1; background: #ffffff18; margin: 0 0 18 0; }
@@ -765,13 +766,13 @@ std::string BuildMainMenuScreens() {
           panel { layout: row; gap: 12; width: 100%; margin: 6 0 0 0;
             panel mm_mp_host { flex-grow: 1; cursor: pointer; layout: column; gap: 4; padding: 15 16;
               corner-radius: 10; background: #ffcc5522; border-color: #ffcc5544; border-width: 1;
-              :hover { background: #ffcc5538; }
+              :hover { background: #ffcc5538; border-color: #ffcc5577; transition: 0.14s ease-out; }
               text { text: "HOST SERVER"; font-size: 15; color: #ffe6a0; letter-spacing: 2; }
               text { text: "Start a session others can join"; font-size: 12; color: #c9b894; }
             }
             panel mm_mp_join { flex-grow: 1; cursor: pointer; layout: column; gap: 4; padding: 15 16;
               corner-radius: 10; background: #ffffff0c; border-color: #ffffff1c; border-width: 1;
-              :hover { background: #ffffff18; }
+              :hover { background: #ffffff18; border-color: #ffffff33; transition: 0.14s ease-out; }
               text { text: "JOIN SERVER"; font-size: 15; color: #e8ecf6; letter-spacing: 2; }
               text mm_mp_addr { text: "127.0.0.1:29700"; font-size: 12; color: #9aa3b6; }
             }
@@ -927,7 +928,16 @@ std::string BuildMainMenuSection() {
          " gap: 14;\n          text mm_labt" + id + " { text: \"" + c.label +
          "\"; font-size: 17; color: #dfe4ef; letter-spacing: 7; text-transform: uppercase;"
          " text-shadow-color: #000000c0; text-shadow-x: 1; text-shadow-y: 1; }\n          " +
-         MenuGlyph(c.emblem, "#cfd6e6", 26) + "        }\n      }\n";
+         MenuGlyph(c.emblem, "#cfd6e6", 26) + "        }\n"
+         // Top-most transparent overlay spanning the column: gives the whole
+         // third a single, eased hover wash (the label/emblem show through it).
+         // Clicks pass to the column via the router's ancestor climb.
+         "        panel mm_colhi" + id +
+         " { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: #ffffff00;"
+         " background-end: #ffffff00; gradient-angle: 180; cursor: pointer;\n"
+         "          :hover { background: #ffffff24; background-end: #ffffff05;"
+         " gradient-angle: 180; transition: 0.22s ease-out; }\n"
+         "        }\n      }\n";
   }
   s += "    }\n";  // close mm_cols
 
@@ -964,11 +974,18 @@ std::string BuildMainMenuSection() {
       {"MODS", "Browse and manage mods"},   {"SETTINGS", "Configure your experience"},
       {"PROFILE", "View stats and progress"}, {"QUIT", "Exit to desktop"},
   };
-  s += "    panel mm_nav { position: absolute; left: 44; top: 188; width: 360; layout: column; gap: 24;\n";
+  s += "    panel mm_nav { position: absolute; left: 36; top: 184; width: 364; layout: column; gap: 4;\n";
   for (int i = 0; i < kMenuNavItems; ++i) {
     const std::string id = std::to_string(i);
+    // Each row is a hover/selected pill: transparent at rest, a soft wash on
+    // hover and a gold-tinted wash + left caret when selected. Both states ease
+    // via a registered transition, so navigating no longer snaps. Selection is
+    // driven from C++ (SetSelected) so keyboard and mouse share one highlight.
     s += "      panel mm_nav" + id +
-         " { layout: row; align: center; gap: 14; padding: 4 8 4 0; cursor: pointer;\n"
+         " { layout: row; align: center; gap: 13; padding: 9 14 9 12; corner-radius: 11;"
+         " background: #ffffff00; cursor: pointer;\n"
+         "        :hover { background: #ffffff12; transition: 0.16s ease-out; }\n"
+         "        :selected { background: #ffcc551c; transition: 0.18s ease-out; }\n"
          "        panel mm_caret" + id + " { width: 12; height: 16; visibility: collapsed; " +
          MenuGlyph("caret", "#ffcc55", 16) +
          "        }\n"
@@ -994,7 +1011,9 @@ std::string BuildMainMenuSection() {
           text { text: "Together."; font-size: 13; color: #aeb6c8; }
         }
       }
-      panel mm_news_view { layout: column; gap: 4; cursor: pointer; margin: 6 0 0 0;
+      panel mm_news_view { layout: column; align: start; gap: 4; cursor: pointer; margin: 8 0 0 0;
+        padding: 6 10 6 0; corner-radius: 7; background: #ffffff00;
+        :hover { background: #ffffff10; transition: 0.16s ease-out; }
         text { text: "VIEW"; font-size: 11; color: #cfd6e6; letter-spacing: 3; }
         panel { width: 26; height: 1; background: #cfd6e6; }
       }
@@ -1021,11 +1040,13 @@ std::string BuildMainMenuSection() {
        " letter-spacing: 5; }\n    }\n";
 
   // Bottom-right social row.
-  s += "    panel mm_icons { position: absolute; right: 40; bottom: 38; layout: row; align: center; gap: 22;\n";
+  s += "    panel mm_icons { position: absolute; right: 34; bottom: 32; layout: row; align: center; gap: 6;\n";
   const char* icons[4] = {"globe", "discord", "news", "gear"};
   for (int i = 0; i < 4; ++i)
     s += "      panel mm_icon" + std::to_string(i) +
-         " { cursor: pointer; " + MenuGlyph(icons[i], "#9aa3b6", 22) + "      }\n";
+         " { cursor: pointer; padding: 8; corner-radius: 9; background: #ffffff00;\n"
+         "        :hover { background: #ffffff14; transition: 0.16s ease-out; }\n        " +
+         MenuGlyph(icons[i], "#9aa3b6", 22) + "      }\n";
   s += "    }\n";
 
   s += BuildMainMenuScreens();
@@ -1710,10 +1731,13 @@ void GameUi::Impl::ApplyMainMenu() {
                                                               : Rgba(0x596071ffu));
   }
 
-  // Left nav: caret + highlight on the selected row (QUIT reads red).
+  // Left nav: caret + highlight on the selected row (QUIT reads red). The row's
+  // :selected state carries the eased pill background; the caret and text colour
+  // track the same index so keyboard and mouse share one highlight.
   for (int i = 0; i < kMenuNavItems; ++i) {
     const std::string id = std::to_string(i);
     const bool on = i == mm_nav;
+    ugui::SetSelected(ui.world(), ui.FindWidget(("mm_nav" + id).c_str()), on);
     SetVisible(("mm_caret" + id).c_str(), on);
     const bool quit = i == kMenuNavItems - 1;
     SetTextColor(("mm_navt" + id).c_str(), on ? (quit ? Rgba(0xff9a8affu) : Rgba(0xffcc55ffu))
