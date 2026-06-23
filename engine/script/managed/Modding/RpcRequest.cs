@@ -42,11 +42,17 @@ public static partial class Rpc
 {
     internal const string RequestChannel = "@req";
     internal const string ReplyChannel = "@rep";
+    // The "peer" recorded for a request sent to the host; a real client peer id is
+    // never this, so a leaving client never drops a host-bound request by accident.
+    private const uint ServerPeer = uint.MaxValue;
 
     private static ulong _nextRequestId = 1;
-    private static readonly Dictionary<ulong, Action<Value[]>> Pending = new();
+    private static readonly Dictionary<ulong, (uint Peer, Action<Value[]> Reply)> Pending = new();
     private static readonly Dictionary<string, Action<RpcRequest>> RequestHandlers = new();
     private static bool _requestsWired;
+
+    // For tests: how many replies are still outstanding.
+    internal static int PendingRequestCount => Pending.Count;
 
     // Client to host request expecting a reply. onReply runs when the answer
     // arrives (a dropped reply simply never fires; no timeout is imposed).
@@ -71,7 +77,7 @@ public static partial class Rpc
     {
         WireRequests();
         ulong id = _nextRequestId++;
-        Pending[id] = onReply;
+        Pending[id] = (target == RpcTarget.ToServer ? ServerPeer : peer, onReply);
         var payload = new Value[args.Length + 2];
         payload[0] = Value.Object(id);
         payload[1] = Value.String(name);
@@ -105,11 +111,25 @@ public static partial class Rpc
     {
         if (e.Args.Length < 1) return;
         ulong id = e.Args[0].AsHandle();
-        if (!Pending.TryGetValue(id, out Action<Value[]>? onReply)) return;
+        if (!Pending.TryGetValue(id, out (uint Peer, Action<Value[]> Reply) entry)) return;
         Pending.Remove(id);
         var args = new Value[e.Args.Length - 1];
         Array.Copy(e.Args, 1, args, 0, args.Length);
-        onReply(args);
+        entry.Reply(args);
+    }
+
+    // Drops requests still waiting on a peer that has left: the reply will never
+    // come, so the callback would otherwise linger until the session ends. Wired
+    // to ClientLeft by EngineEvents.
+    internal static void DropPeerRequests(uint peer)
+    {
+        if (Pending.Count == 0) return;
+        var stale = new List<ulong>();
+        foreach (var entry in Pending)
+        {
+            if (entry.Value.Peer == peer) stale.Add(entry.Key);
+        }
+        foreach (ulong id in stale) Pending.Remove(id);
     }
 
     static partial void ClearRequests()

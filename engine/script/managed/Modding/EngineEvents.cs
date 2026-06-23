@@ -47,6 +47,7 @@ public static class EngineEvents
                 break;
             case ManagedEventId.ClientLeft:
                 EventBus.Publish(new ClientLeft((uint)e.A));
+                Rpc.DropPeerRequests((uint)e.A);  // a departed peer never replies
                 break;
         }
     }

@@ -142,5 +142,18 @@ public static class RpcTests
         bool afterClear = false;
         Rpc.Request("rt_buy", Array.Empty<Value>(), _ => afterClear = true);
         check.That("cleared request handler does not answer", !afterClear);
+
+        // A request to a peer that leaves is dropped, so its callback cannot linger.
+        // The recording backend never replies, so the requests stay pending.
+        Rpc.Clear();
+        Rpc.Bind(new RecordingBackend());
+        Rpc.RequestClient(5, "rt_q", Array.Empty<Value>(), _ => { });
+        Rpc.RequestClient(6, "rt_q", Array.Empty<Value>(), _ => { });
+        check.Equal("two requests pending", 2, Rpc.PendingRequestCount);
+        Rpc.DropPeerRequests(5);
+        check.Equal("the leaving peer's request is dropped", 1, Rpc.PendingRequestCount);
+        Rpc.DropPeerRequests(6);
+        check.Equal("the other peer's request is dropped", 0, Rpc.PendingRequestCount);
+        Rpc.Clear();
     }
 }
