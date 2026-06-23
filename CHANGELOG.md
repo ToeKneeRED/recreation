@@ -10,6 +10,8 @@ shows the most recent entries (the first bullet of each release is its headline)
   they are missing into a content-addressed cache, then mount it into the asset Vfs
 - Scripting RPC channel woven into multiplayer: C# mods emit and receive calls
   (Rpc.Emit / Rpc.ToClient / Rpc.Broadcast / Rpc.On) over the session
+- A ClientAssetsReady event fires server-side once a player finished downloading,
+  so mods can gate spawn or greet the player when their UGC has arrived
 
 ## [0.3.0] - 2026-06-23
 ### Added

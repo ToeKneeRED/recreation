@@ -78,4 +78,11 @@ recreation --connect <host> --asset-cache ./cache
 Server-side mod scripts drive multiplayer through a typed RPC channel. A C# mod
 calls `Rpc.Emit(name, args)` (client to host), `Rpc.ToClient(peer, name, args)`
 or `Rpc.Broadcast(name, args)` (host to clients), and subscribes with
-`Rpc.On(name, e => ...)`. Calls ride the session's reliable channel.
+`Rpc.On(name, e => ...)`. Calls ride the session's reliable channel. The host
+also raises a `ClientAssetsReady` event once a player has finished streaming the
+server's mods, so a mod can hold the player until their UGC has arrived:
+
+```csharp
+EventBus.Subscribe<ClientAssetsReady>(e =>
+    Rpc.ToClient(e.Peer, "welcome", Value.String("Mods loaded, have fun!")));
+```
