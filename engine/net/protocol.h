@@ -17,7 +17,8 @@ namespace rec::net {
 // v2 adds the per-quest domain tag (multi-game quest replication).
 // v3 adds asset streaming (manifest/request) and the scripting RPC channel.
 // v4 adds the client asset-ready notification.
-inline constexpr u32 kProtocolVersion = 4;
+// v5 adds the manifest generation (live mod reload pushed to connected clients).
+inline constexpr u32 kProtocolVersion = 5;
 
 // Application packet ids. Zetanet owns everything below PacketType::Message
 // (100), recreation ids start at 101. Every payload is a nanobuf message

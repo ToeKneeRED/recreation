@@ -61,7 +61,8 @@ void AssetStreamServer::SendManifest(u32 peer) {
     const u32 offset = i * modstream::kManifestChunkPayload;
     const u32 len = std::min<u32>(modstream::kManifestChunkPayload, total - offset);
     server_.Push(MakePacket(peer, MessageType::kAssetManifest,
-                            modstream::EncodeManifestChunk(total, chunks, i, bytes.data() + offset, len),
+                            modstream::EncodeManifestChunk(manifest_generation_, total, chunks, i,
+                                                           bytes.data() + offset, len),
                             /*reliable=*/true, tx::network::PacketPriority::High));
   }
   REC_INFO("net: sent manifest ({} files, {} bytes) to peer {}",
@@ -137,13 +138,22 @@ u64 AssetStreamClient::bytes_remaining() const {
 }
 
 void AssetStreamClient::OnManifestChunk(const u8* data, size_t size) {
-  if (downloading_ || ready_ || failed_) return;  // manifest already resolved
-
   // The codec validates the chunk in isolation (header, counts, index, payload
   // length), so reassembly below cannot write out of range.
   std::optional<modstream::ManifestChunkView> chunk =
       modstream::DecodeManifestChunk(data, size);
   if (!chunk) return;
+
+  // Process a chunk only for a newer generation (a fresh manifest, from join or a
+  // live reload) or for the generation currently being assembled. A chunk for an
+  // already-finished generation is a stale retransmit and is ignored.
+  const bool newer = chunk->generation > manifest_generation_;
+  const bool same_assembly = manifest_started_ && chunk->generation == manifest_generation_;
+  if (!newer && !same_assembly) return;
+  if (newer) {
+    ResetForNewManifest();
+    manifest_generation_ = chunk->generation;
+  }
 
   if (!manifest_started_) {
     manifest_total_size_ = chunk->total_size;
@@ -160,6 +170,20 @@ void AssetStreamClient::OnManifestChunk(const u8* data, size_t size) {
             manifest_buffer_.begin() + offset);
   manifest_chunks_[chunk->chunk_index] = true;
   if (manifest_chunks_.size() == manifest_total_chunks_) OnManifestComplete();
+}
+
+void AssetStreamClient::ResetForNewManifest() {
+  manifest_buffer_.clear();
+  manifest_chunks_.clear();
+  manifest_total_size_ = 0;
+  manifest_total_chunks_ = 0;
+  manifest_started_ = false;
+  remaining_.clear();
+  transfers_.clear();
+  planned_files_ = 0;
+  downloading_ = false;
+  ready_ = false;
+  failed_ = false;
 }
 
 void AssetStreamClient::OnManifestComplete() {

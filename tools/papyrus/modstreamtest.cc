@@ -241,27 +241,27 @@ int main() {
     const u32 chunks = ManifestChunkCount(total);
     Check("chunk count splits correctly", chunks == 2);
     std::vector<u8> blob(total, 0x5a);
-    const std::vector<u8> c0 = EncodeManifestChunk(total, chunks, 0, blob.data(), kManifestChunkPayload);
-    const std::vector<u8> c1 = EncodeManifestChunk(total, chunks, 1, blob.data() + kManifestChunkPayload, 100);
+    const std::vector<u8> c0 = EncodeManifestChunk(7, total, chunks, 0, blob.data(), kManifestChunkPayload);
+    const std::vector<u8> c1 = EncodeManifestChunk(7, total, chunks, 1, blob.data() + kManifestChunkPayload, 100);
     const auto v0 = DecodeManifestChunk(c0.data(), c0.size());
     const auto v1 = DecodeManifestChunk(c1.data(), c1.size());
     Check("first chunk decodes full payload",
-          v0 && v0->chunk_index == 0 && v0->payload_len == kManifestChunkPayload);
+          v0 && v0->generation == 7 && v0->chunk_index == 0 && v0->payload_len == kManifestChunkPayload);
     Check("last chunk decodes the remainder",
           v1 && v1->chunk_index == 1 && v1->payload_len == 100);
-    Check("chunk rejects a header-only buffer", !DecodeManifestChunk(c0.data(), 11));
+    Check("chunk rejects a header-only buffer", !DecodeManifestChunk(c0.data(), 15));
     Check("chunk rejects a wrong payload length",
           !DecodeManifestChunk(c0.data(), c0.size() - 1));
     Check("chunk rejects an out-of-range index", [&] {
-      std::vector<u8> bad = EncodeManifestChunk(total, chunks, 5, blob.data(), kManifestChunkPayload);
+      std::vector<u8> bad = EncodeManifestChunk(7, total, chunks, 5, blob.data(), kManifestChunkPayload);
       return !DecodeManifestChunk(bad.data(), bad.size());
     }());
     Check("chunk rejects an inconsistent count", [&] {
-      std::vector<u8> bad = EncodeManifestChunk(total, 99, 0, blob.data(), kManifestChunkPayload);
+      std::vector<u8> bad = EncodeManifestChunk(7, total, 99, 0, blob.data(), kManifestChunkPayload);
       return !DecodeManifestChunk(bad.data(), bad.size());
     }());
     Check("chunk rejects a zero total", [&] {
-      std::vector<u8> bad = EncodeManifestChunk(0, 1, 0, blob.data(), 0);
+      std::vector<u8> bad = EncodeManifestChunk(7, 0, 1, 0, blob.data(), 0);
       return !DecodeManifestChunk(bad.data(), bad.size());
     }());
   }

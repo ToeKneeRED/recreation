@@ -164,6 +164,9 @@ bool StartNetworking(Engine& engine) {
     if (self->content_store_ && self->client_session_->asset_stream()) {
       self->client_session_->asset_stream()->set_on_ready(
           [self](const modstream::ModManifest& manifest) {
+            // Replace any previous mount (a live reload re-fires this), on the main
+            // thread where nothing is reading the Vfs.
+            self->vfs_.UnmountByPrefix("modstream:");
             modstream::MountManifest(self->vfs_, manifest, *self->content_store_);
             REC_INFO("net: mounted {} streamed mod files into the asset vfs",
                      manifest.TotalFiles());

@@ -215,7 +215,11 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer,
 }
 
 void ServerSession::ReloadCatalog(const modstream::ModCatalog& catalog) {
-  if (asset_stream_) asset_stream_->SetCatalog(catalog);
+  if (!asset_stream_) return;
+  asset_stream_->SetCatalog(catalog);
+  // Push the new manifest to everyone already connected; each re-diffs against its
+  // cache and streams only what changed, then re-mounts.
+  for (auto entry : clients_) asset_stream_->SendManifest(entry.key);
 }
 
 void ServerSession::DropClient(ecs::World& world, u32 peer) {

@@ -81,6 +81,9 @@ int main() {
     return 1;
   }
   modstream::ContentStore store(cache_dir);
+  // Declared before the server so it outlives the catalog the server points at
+  // after a live reload below.
+  std::optional<modstream::ModCatalog> reload_catalog;
 
   // --- bring up a loopback server and client ---
   net::SessionConfig server_cfg;
@@ -135,13 +138,14 @@ int main() {
     left_peer = peer;
   });
 
-  bool mounted_ok = false;
+  // Mount each ready manifest into a persistent Vfs (re-fired on a live reload),
+  // exactly as the engine does, so the test can read streamed content back.
+  asset::Vfs client_vfs;
+  int mount_count = 0;
   client.asset_stream()->set_on_ready([&](const modstream::ModManifest& manifest) {
-    asset::Vfs vfs;
-    modstream::MountManifest(vfs, manifest, store);
-    auto mesh = vfs.Read("meshes/sword.nif");
-    auto script = vfs.Read("main.lua");
-    mounted_ok = mesh && mesh->size() == 3004 && script && script->size() == 11;
+    client_vfs.UnmountByPrefix("modstream:");
+    modstream::MountManifest(client_vfs, manifest, store);
+    ++mount_count;
   });
 
   ecs::World sworld;
@@ -160,7 +164,13 @@ int main() {
   Check("join hook carries the peer id", join_peer == 0);
   Check("asset stream did not fail", !client.asset_stream()->failed());
   Check("all mod content streamed and cached", ready);
-  Check("streamed mods mount and read back through the Vfs", mounted_ok);
+  Check("streamed mods mounted once", mount_count == 1);
+  Check("streamed mesh reads back through the Vfs", [&] {
+    auto mesh = client_vfs.Read("meshes/sword.nif");
+    return mesh && mesh->size() == 3004;
+  }());
+  Check("streamed script reads back through the Vfs",
+        client_vfs.Read("main.lua").has_value());
 
   // Every catalogued file now lives in the cache, keyed by content hash.
   bool all_cached = true;
@@ -183,6 +193,23 @@ int main() {
   Check("server received the client's RPC", server_saw_rpc);
   Check("client received the server's reply", client_saw_reply);
   Check("RPC argument round-tripped", echoed_value == 42);
+
+  // --- live mod reload pushed to the connected client ---
+  WriteFile(mods_dir / "scripts" / "extra.lua", "print('live update')");
+  reload_catalog = modstream::ModCatalog::Build(mods_dir);
+  Check("server re-catalogs after a mod edit", reload_catalog.has_value());
+  if (reload_catalog) {
+    const int mounts_before = mount_count;
+    server.ReloadCatalog(*reload_catalog);  // bumps the generation + re-sends
+    for (int i = 0; i < 1500 && mount_count == mounts_before; ++i)
+      Pump(server, sworld, client, cworld);
+    Check("connected client re-mounted after the live reload",
+          mount_count == mounts_before + 1);
+    Check("the live-added file resolves on the client",
+          client_vfs.Read("extra.lua").has_value());
+    Check("unchanged content still resolves after the reload",
+          client_vfs.Read("meshes/sword.nif").has_value());
+  }
 
   // Stop ticking the client and run the server alone until it times the peer out,
   // exercising the leave hook.

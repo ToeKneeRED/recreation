@@ -53,10 +53,14 @@ class AssetStreamServer {
   // so a client can never make the server read a path outside the mods dir.
   void HandleRequest(u32 peer, const u8* data, size_t size);
 
-  // Swaps the catalog offered to clients (live mod reload). Call on the session
-  // thread, where HandleRequest and SendManifest run, so the read does not race.
-  // The new catalog must outlive this server.
-  void SetCatalog(const modstream::ModCatalog& catalog) { catalog_ = &catalog; }
+  // Swaps the catalog offered to clients (live mod reload) and bumps the manifest
+  // generation, so a connected client re-sent the manifest can tell it is fresh.
+  // Call on the session thread, where HandleRequest and SendManifest run, so the
+  // read does not race. The new catalog must outlive this server.
+  void SetCatalog(const modstream::ModCatalog& catalog) {
+    catalog_ = &catalog;
+    ++manifest_generation_;
+  }
 
  private:
   struct SendJob {
@@ -68,6 +72,7 @@ class AssetStreamServer {
 
   tx::network::ZServer& server_;
   const modstream::ModCatalog* catalog_;
+  u32 manifest_generation_ = 1;  // rises on each reload, so re-sends look fresh
   tx::network::ZFileTransporter transporter_;
 
   std::mutex mutex_;
@@ -119,6 +124,10 @@ class AssetStreamClient {
   };
 
   void OnManifestComplete();
+  // Clears manifest-reassembly and download state to start receiving a fresh
+  // manifest (a live reload). The content cache is kept, so only changed files
+  // re-download. The current mount stays live until the new one is ready.
+  void ResetForNewManifest();
   void HandleChunk(const tx::network::ZFileTransporter::TransferChunk& chunk);
   void OnFileFinished(const std::filesystem::path& path);
 
@@ -138,6 +147,7 @@ class AssetStreamClient {
 
   std::vector<u8> manifest_buffer_;
   std::unordered_map<u32, bool> manifest_chunks_;  // received chunk indices
+  u32 manifest_generation_ = 0;  // generation being assembled or last completed
   u32 manifest_total_size_ = 0;
   u32 manifest_total_chunks_ = 0;
   bool manifest_started_ = false;
