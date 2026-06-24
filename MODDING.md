@@ -36,6 +36,15 @@ balance.cfg      # an exact file
 *.bak            # an extension
 ```
 
+### Checking what ships
+
+Before deploying, run `modtool inspect` over the mods directory to see exactly what
+each client will receive and confirm the `.streamignore` kept the right files back:
+
+```sh
+modtool inspect ./server_mods
+```
+
 ## 2. A server mod
 
 A C# mod (built into `Recreation.Scripting`, or dropped in via

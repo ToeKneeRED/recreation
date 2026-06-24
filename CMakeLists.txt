@@ -240,5 +240,6 @@ add_subdirectory(runtime)
 if(RECREATION_BUILD_TOOLS)
   enable_testing()  # papyrus vm regression suite, run with `ctest`
   add_subdirectory(tools/esminfo)
+  add_subdirectory(tools/modtool)
   add_subdirectory(tools/papyrus)
 endif()
