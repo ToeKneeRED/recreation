@@ -182,12 +182,25 @@ constexpr size_t kBgsmV2TextureOffset = 63;
 constexpr size_t kBgsmV2TextureSlots = 10;
 constexpr size_t kBgsmV2SmoothnessGap = 28;
 
-// Parses a BGSM/BGEM v2 material. *roughness is set from BGSM smoothness
-// (roughness = 1 - smoothness); it is left negative (unknown) for BGEM or on a
-// short read, so the caller keeps its own default.
-bool ParseBgsmTextures(ByteSpan data, std::string* diffuse, std::string* normal,
-                       f32* roughness) {
-  *roughness = -1.0f;
+base::UniquePointer<asset::Material> ConvertBgsm(ByteSpan data, asset::AssetId id,
+                                                 std::string_view) {
+  auto material = base::MakeUnique<asset::Material>();
+  material->id = id;
+  BgsmMaterial parsed;
+  if (ParseBgsm(data, &parsed)) {
+    if (!parsed.diffuse.empty()) material->base_color = asset::MakeAssetId(parsed.diffuse);
+    if (!parsed.normal.empty()) material->normal = asset::MakeAssetId(parsed.normal);
+    if (parsed.roughness >= 0.0f) material->roughness_factor = parsed.roughness;
+  }
+  return material;
+}
+
+}  // namespace
+
+// roughness stays negative (unknown) for BGEM or a short read, so the caller
+// keeps its own default; for BGSM it is 1 - smoothness.
+bool ParseBgsm(ByteSpan data, BgsmMaterial* out) {
+  *out = BgsmMaterial{};
   if (data.size() < kBgsmV2TextureOffset + 8) return false;
   const bool bgsm = std::memcmp(data.data(), "BGSM", 4) == 0;
   const bool bgem = std::memcmp(data.data(), "BGEM", 4) == 0;
@@ -199,8 +212,8 @@ bool ParseBgsmTextures(ByteSpan data, std::string* diffuse, std::string* normal,
   size_t cursor = kBgsmV2TextureOffset;
   std::string base = ReadBgsmString(data, &cursor);
   std::string second = ReadBgsmString(data, &cursor);
-  *diffuse = NormalizeTexturePathLocal(base);
-  *normal = bgsm ? NormalizeTexturePathLocal(second) : std::string();
+  out->diffuse = NormalizeTexturePathLocal(base);
+  out->normal = bgsm ? NormalizeTexturePathLocal(second) : std::string();
 
   if (bgsm) {
     for (size_t i = 2; i < kBgsmV2TextureSlots; ++i) ReadBgsmString(data, &cursor);
@@ -208,27 +221,11 @@ bool ParseBgsmTextures(ByteSpan data, std::string* diffuse, std::string* normal,
     if (cursor + 4 <= data.size()) {
       f32 smoothness;
       std::memcpy(&smoothness, data.data() + cursor, 4);
-      *roughness = 1.0f - std::clamp(smoothness, 0.0f, 1.0f);
+      out->roughness = 1.0f - std::clamp(smoothness, 0.0f, 1.0f);
     }
   }
-  return !diffuse->empty();
+  return !out->diffuse.empty();
 }
-
-base::UniquePointer<asset::Material> ConvertBgsm(ByteSpan data, asset::AssetId id,
-                                                 std::string_view) {
-  auto material = base::MakeUnique<asset::Material>();
-  material->id = id;
-  std::string diffuse, normal;
-  f32 roughness = -1.0f;
-  if (ParseBgsmTextures(data, &diffuse, &normal, &roughness)) {
-    if (!diffuse.empty()) material->base_color = asset::MakeAssetId(diffuse);
-    if (!normal.empty()) material->normal = asset::MakeAssetId(normal);
-    if (roughness >= 0.0f) material->roughness_factor = roughness;
-  }
-  return material;
-}
-
-}  // namespace
 
 void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profile) {
   // The NIF converter synthesizes materials from the shader property blocks
@@ -251,21 +248,17 @@ void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profi
           if (material_file.empty() || material.base_color) continue;
           auto bytes = database.vfs().Read(material_file);
           if (!bytes) continue;
-          std::string diffuse, normal;
-          f32 roughness = -1.0f;
-          if (!ParseBgsmTextures(ByteSpan(bytes->data(), bytes->size()), &diffuse, &normal,
-                                 &roughness)) {
-            continue;
+          BgsmMaterial parsed;
+          if (!ParseBgsm(ByteSpan(bytes->data(), bytes->size()), &parsed)) continue;
+          if (!parsed.diffuse.empty()) {
+            material.base_color = asset::MakeAssetId(parsed.diffuse);
+            database.LoadTexture(parsed.diffuse);
           }
-          if (!diffuse.empty()) {
-            material.base_color = asset::MakeAssetId(diffuse);
-            database.LoadTexture(diffuse);
+          if (!parsed.normal.empty()) {
+            material.normal = asset::MakeAssetId(parsed.normal);
+            database.LoadTexture(parsed.normal);
           }
-          if (!normal.empty()) {
-            material.normal = asset::MakeAssetId(normal);
-            database.LoadTexture(normal);
-          }
-          if (roughness >= 0.0f) material.roughness_factor = roughness;
+          if (parsed.roughness >= 0.0f) material.roughness_factor = parsed.roughness;
         }
         for (const asset::Material& material : conversion.materials) {
           database.AddMaterial(material);
