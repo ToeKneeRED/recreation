@@ -6,6 +6,7 @@
 #include <base/filesystem/path.h>
 
 #include "core/log.h"
+#include "modstream/asset_request.h"
 #include "modstream/manifest_codec.h"
 #include "modstream/transfer_plan.h"
 #include "net/protocol.h"
@@ -34,19 +35,9 @@ void PutU32(std::vector<u8>& out, u32 v) {
   for (int i = 0; i < 4; ++i) out.push_back(static_cast<u8>(v >> (8 * i)));
 }
 
-void PutU64(std::vector<u8>& out, u64 v) {
-  for (int i = 0; i < 8; ++i) out.push_back(static_cast<u8>(v >> (8 * i)));
-}
-
 u32 LoadU32(const u8* p) {
   return static_cast<u32>(p[0]) | static_cast<u32>(p[1]) << 8 |
          static_cast<u32>(p[2]) << 16 | static_cast<u32>(p[3]) << 24;
-}
-
-u64 LoadU64(const u8* p) {
-  u64 v = 0;
-  for (int i = 0; i < 8; ++i) v |= static_cast<u64>(p[i]) << (8 * i);
-  return v;
 }
 
 u32 ManifestChunkCount(u32 total_size) {
@@ -102,16 +93,14 @@ void AssetStreamServer::SendManifest(u32 peer) {
 }
 
 void AssetStreamServer::HandleRequest(u32 peer, const u8* data, size_t size) {
-  if (size < 4) return;
-  const u32 count = LoadU32(data);
-  if (count > kRequestHashesPerPacket) return;  // oversized, drop
-  if (size != static_cast<size_t>(4) + static_cast<size_t>(count) * 8) return;
+  std::optional<std::vector<modstream::ContentHash>> hashes =
+      modstream::DecodeHashRequest(data, size, kRequestHashesPerPacket);
+  if (!hashes) return;  // malformed or oversized request, drop
 
   size_t queued = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (u32 i = 0; i < count; ++i) {
-      const modstream::ContentHash hash = LoadU64(data + 4 + static_cast<size_t>(i) * 8);
+    for (modstream::ContentHash hash : *hashes) {
       std::optional<fs::path> path = catalog_.PathForHash(hash);
       if (!path) continue;  // not catalogued: never read outside the mods dir
       jobs_.push_back({peer, std::move(*path)});
@@ -232,12 +221,12 @@ void AssetStreamClient::OnManifestComplete() {
   // ceiling. Each packet is independent; the server queues every valid hash.
   for (size_t base = 0; base < plan.size(); base += kRequestHashesPerPacket) {
     const size_t end = std::min(base + kRequestHashesPerPacket, plan.size());
-    std::vector<u8> payload;
-    payload.reserve(4 + (end - base) * 8);
-    PutU32(payload, static_cast<u32>(end - base));
-    for (size_t i = base; i < end; ++i) PutU64(payload, plan[i].hash);
+    std::vector<modstream::ContentHash> batch;
+    batch.reserve(end - base);
+    for (size_t i = base; i < end; ++i) batch.push_back(plan[i].hash);
     client_.Push(MakePacket(tx::network::ZPeerId::to_server, MessageType::kAssetRequest,
-                            payload, /*reliable=*/true, tx::network::PacketPriority::High));
+                            modstream::EncodeHashRequest(batch), /*reliable=*/true,
+                            tx::network::PacketPriority::High));
   }
 }
 

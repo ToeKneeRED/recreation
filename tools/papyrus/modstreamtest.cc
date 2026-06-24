@@ -16,6 +16,7 @@
 #include "modstream/content_provider.h"
 #include "modstream/content_store.h"
 #include "modstream/manifest_codec.h"
+#include "modstream/asset_request.h"
 #include "modstream/mod_catalog.h"
 #include "modstream/stream_filter.h"
 #include "modstream/transfer_plan.h"
@@ -205,6 +206,25 @@ int main() {
   Check("plan lists three unique blobs", plan.size() == 3);
   Check("plan bytes exclude the duplicate texture",
         PlannedBytes(plan) == mesh.size() + shared_tex.size() + sound.size());
+
+  // --- asset-request codec ---
+  {
+    const std::vector<ContentHash> hashes{tex_hash, 0x1122334455667788ull, 0};
+    const std::vector<u8> req = EncodeHashRequest(hashes);
+    const auto decoded_req = DecodeHashRequest(req.data(), req.size(), 8);
+    Check("hash request round-trips", decoded_req && *decoded_req == hashes);
+    Check("hash request rejects an over-count cap",
+          !DecodeHashRequest(req.data(), req.size(), 2));
+    Check("hash request rejects a truncated body",
+          !DecodeHashRequest(req.data(), req.size() - 1, 8));
+    Check("hash request rejects trailing bytes", [&] {
+      std::vector<u8> extra = req;
+      extra.push_back(0);
+      return !DecodeHashRequest(extra.data(), extra.size(), 8);
+    }());
+    Check("empty hash request round-trips",
+          DecodeHashRequest(EncodeHashRequest({}).data(), 4, 8)->empty());
+  }
 
   // --- fetch each planned blob (the net layer would stream it; here we copy it
   // out of the server catalog into the store, exactly as a finished transfer) ---

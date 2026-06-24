@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/types.h"
+#include "modstream/asset_request.h"
 #include "modstream/manifest_codec.h"
 #include "modstream/mod_resource.h"
 #include "rpc/rpc_message.h"
@@ -95,6 +96,7 @@ int main() {
       for (u8& b : noise) b = rng.Byte();
       (void)modstream::DecodeManifest(noise.data(), noise.size());
       (void)rpc::DecodeCall(noise.data(), noise.size());
+      (void)modstream::DecodeHashRequest(noise.data(), noise.size(), 6000);
     }
 
     // 2. A valid encoding, round-tripped, then bit-mutated: still must not crash,
@@ -122,6 +124,17 @@ int main() {
       // Truncations of a valid buffer are a common attack; none may crash.
       for (size_t cut = 0; cut < bytes.size(); cut += 3)
         (void)rpc::DecodeCall(bytes.data(), cut);
+    }
+    {
+      std::vector<modstream::ContentHash> hashes(rng.Below(20));
+      for (modstream::ContentHash& h : hashes) h = rng.Next();
+      std::vector<u8> bytes = modstream::EncodeHashRequest(hashes);
+      auto decoded = modstream::DecodeHashRequest(bytes.data(), bytes.size(), 6000);
+      if (!decoded || !(*decoded == hashes)) manifest_roundtrips = false;
+      const u32 flips = rng.Below(6);
+      for (u32 i = 0; i < flips && !bytes.empty(); ++i)
+        bytes[rng.Below(static_cast<u32>(bytes.size()))] ^= (1u << rng.Below(8));
+      (void)modstream::DecodeHashRequest(bytes.data(), bytes.size(), 6000);
     }
   }
 
