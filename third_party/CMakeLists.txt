@@ -37,6 +37,11 @@ if(RECREATION_FSR3)
   include(fsr3.cmake)
 endif()
 
+# NVIDIA DLSS (NGX) upscaler, downloaded via tools/get_dlss.sh.
+if(RECREATION_DLSS)
+  include(dlss.cmake)
+endif()
+
 # Jolt physics, downloaded via tools/get_jolt.sh. Builds its own static lib;
 # samples/tests/viewer stay off.
 if(RECREATION_JOLT)

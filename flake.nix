@@ -84,8 +84,14 @@
           vkrun = pkgs.writeShellScriptBin "vkrun" ''
             driver_libs="''${XDG_RUNTIME_DIR:-/tmp}/recreation-driver-libs"
             mkdir -p "$driver_libs"
+            # /run/opengl-driver/lib is the NixOS driver dir; the Debian-style
+            # paths cover other hosts. The nvidia libs land in the symlink dir so
+            # the loader can resolve them by soname without the whole dir on the
+            # path. libnvidia-ngx (the NGX core behind DLSS) is dlopened this way.
             for f in /usr/lib/*-linux-gnu/libnvidia*.so* /usr/lib/*-linux-gnu/libGLX_nvidia.so* \
-                     /usr/lib/*-linux-gnu/libEGL_nvidia.so*; do
+                     /usr/lib/*-linux-gnu/libEGL_nvidia.so* \
+                     /run/opengl-driver/lib/libnvidia*.so* /run/opengl-driver/lib/libGLX_nvidia.so* \
+                     /run/opengl-driver/lib/libEGL_nvidia.so*; do
               [ -e "$f" ] && ln -sf "$f" "$driver_libs/"
             done
             if [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]; then

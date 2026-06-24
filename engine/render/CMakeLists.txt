@@ -32,6 +32,12 @@ if(RECREATION_FSR3)
   target_link_libraries(recreation_render PRIVATE recreation::ffx_fsr3)
 endif()
 
+if(RECREATION_DLSS)
+  target_sources(recreation_render PRIVATE upscaler_dlss.cc)
+  target_compile_definitions(recreation_render PRIVATE RECREATION_HAS_DLSS)
+  target_link_libraries(recreation_render PRIVATE recreation::dlss)
+endif()
+
 if(NOT MSVC)
   set_source_files_properties(vulkan/vma_impl.cc stb_impl.cc PROPERTIES COMPILE_OPTIONS -w)
 endif()

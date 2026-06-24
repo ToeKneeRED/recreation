@@ -16,7 +16,7 @@
 namespace rec {
 namespace {
 
-const char* kAaModes[] = {"None", "TAA", "FSR3 Upscaler"};
+const char* kAaModes[] = {"None", "TAA", "FSR3 Upscaler", "DLSS Upscaler"};
 const char* kQualities[] = {"Native AA (1.0x)", "Quality (1.5x)", "Balanced (1.7x)",
                             "Performance (2.0x)"};
 const char* kTonemaps[] = {"ACES", "Reinhard", "None"};
@@ -119,9 +119,10 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
 
       if (ImGui::CollapsingHeader("Anti-aliasing & upscaling",
                                   ImGuiTreeNodeFlags_DefaultOpen)) {
-        int aa = settings.aa_mode == render::AntiAliasingMode::kNone ? 0
-                 : settings.aa_mode == render::AntiAliasingMode::kTaa ? 1
-                                                                      : 2;
+        int aa = settings.aa_mode == render::AntiAliasingMode::kNone   ? 0
+                 : settings.aa_mode == render::AntiAliasingMode::kTaa   ? 1
+                 : settings.upscaler == render::UpscalerKind::kDlss     ? 3
+                                                                        : 2;
         if (ImGui::Combo("Mode", &aa, kAaModes, IM_ARRAYSIZE(kAaModes))) {
           switch (aa) {
             case 0:
@@ -134,6 +135,10 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
               break;
             case 2:
               settings.upscaler = render::UpscalerKind::kFsr3;
+              settings.aa_mode = render::AntiAliasingMode::kUpscaler;
+              break;
+            case 3:
+              settings.upscaler = render::UpscalerKind::kDlss;
               settings.aa_mode = render::AntiAliasingMode::kUpscaler;
               break;
           }

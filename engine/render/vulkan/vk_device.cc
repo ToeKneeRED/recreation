@@ -6,6 +6,11 @@
 #include "core/log.h"
 #include "render/rhi/device.h"
 
+#if defined(RECREATION_HAS_DLSS)
+#include <nvsdk_ngx.h>
+#include <nvsdk_ngx_vk.h>
+#endif
+
 namespace rec::render {
 namespace {
 
@@ -120,6 +125,32 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
     REC_WARN("validation requested but layer not installed");
   }
 
+#if defined(RECREATION_HAS_DLSS)
+  // DLSS/NGX must have its instance and device extensions enabled at creation
+  // time. The list is static (no init needed); the device half is stashed for
+  // the device extension pass below.
+  unsigned ngx_device_ext_count = 0;
+  const char** ngx_device_exts = nullptr;
+  {
+    unsigned ngx_instance_ext_count = 0;
+    const char** ngx_instance_exts = nullptr;
+    if (NVSDK_NGX_VULKAN_RequiredExtensions(&ngx_instance_ext_count, &ngx_instance_exts,
+                                            &ngx_device_ext_count, &ngx_device_exts) ==
+        NVSDK_NGX_Result_Success) {
+      for (unsigned i = 0; i < ngx_instance_ext_count; ++i) {
+        const char* name = ngx_instance_exts[i];
+        if (std::ranges::none_of(instance_extensions, [name](const char* e) {
+              return std::strcmp(e, name) == 0;
+            })) {
+          instance_extensions.push_back(name);
+        }
+      }
+    } else {
+      REC_WARN("dlss: required extension query failed, dlss will be unavailable");
+    }
+  }
+#endif
+
   VkApplicationInfo app_info{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app_info.pApplicationName = "recreation";
   app_info.apiVersion = VK_API_VERSION_1_3;
@@ -226,6 +257,20 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
     chain(&shading_rate);
     device_extensions.push_back(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
   }
+
+#if defined(RECREATION_HAS_DLSS)
+  // Add NGX's device extensions that the gpu advertises (it is nvidia here, so
+  // they should all be present). Missing ones just leave dlss unavailable.
+  for (unsigned i = 0; i < ngx_device_ext_count; ++i) {
+    const char* name = ngx_device_exts[i];
+    if (!HasExtension(available, name)) continue;
+    if (std::ranges::any_of(device_extensions,
+                            [name](const char* e) { return std::strcmp(e, name) == 0; })) {
+      continue;
+    }
+    device_extensions.push_back(name);
+  }
+#endif
 
   vkGetPhysicalDeviceFeatures2(device->physical_device_, &features);
 
