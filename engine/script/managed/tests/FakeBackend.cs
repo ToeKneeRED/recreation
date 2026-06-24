@@ -31,9 +31,20 @@ public sealed class FakeBackend : IEngineBackend
         else _inCombat.Remove(actor);
     }
 
+    // The last global call seen, for asserting the thin API wrappers dispatch to
+    // the right native with the right arguments.
+    public string LastGlobalType { get; private set; } = "";
+    public string LastGlobalFunction { get; private set; } = "";
+    public string LastStringArg { get; private set; } = "";
+
     public Value CallGlobal(string type, string function, ReadOnlySpan<Value> args)
     {
+        LastGlobalType = type;
+        LastGlobalFunction = function;
+        LastStringArg = args.Length > 0 && args[0].Kind == ValueKind.String ? args[0].AsString() : "";
         if (type == "Game" && function == "GetPlayer") return Value.Object(Player);
+        if (type == "Utility" && function == "RandomInt")
+            return Value.Int(args.Length > 0 ? args[0].AsInt() : 0);  // deterministic: the min
         return Value.None;
     }
 

@@ -1,4 +1,5 @@
 using Recreation.Games.Skyrim;
+using Recreation.Interop;
 using Recreation.Modding;
 
 namespace Recreation.Tests;
@@ -8,6 +9,12 @@ namespace Recreation.Tests;
 public static class SkyrimEventTests
 {
     public static void Run(Check check)
+    {
+        QuestTracker(check);
+        Combat(check);
+    }
+
+    private static void QuestTracker(Check check)
     {
         ModHost.Shutdown();
         EventBus.Clear();
@@ -48,5 +55,29 @@ public static class SkyrimEventTests
 
         ModHost.Shutdown();
         EventBus.Clear();
+    }
+
+    private static void Combat(Check check)
+    {
+        var fake = new FakeBackend { Player = 0x14 };
+        Native.Backend = fake;
+        ModHost.Shutdown();
+        EventBus.Clear();
+
+        var tracker = new CombatTracker();
+        ModHost.Register(tracker);
+
+        EventBus.Publish(new ActorDied(0x99));
+        EventBus.Publish(new ActorDied(0xAB));
+        check.Equal("kills counted", 2, tracker.Kills);
+        check.Equal("last victim recorded", 0xABUL, tracker.LastVictim.Handle);
+
+        // The player's own death is not a kill.
+        EventBus.Publish(new ActorDied(fake.Player));
+        check.Equal("player death is not a kill", 2, tracker.Kills);
+
+        ModHost.Shutdown();
+        EventBus.Clear();
+        Native.Backend = null;
     }
 }

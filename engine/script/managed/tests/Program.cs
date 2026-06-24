@@ -11,6 +11,7 @@ internal static class Program
         var check = new Check();
 
         ValueTests.Run(check);
+        SdkApiTests.Run(check);
         EventBusTests.Run(check);
         ModHostTests.Run(check);
         SkyrimRegenTests.Run(check);
