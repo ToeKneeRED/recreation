@@ -16,10 +16,12 @@ public readonly struct FrameUpdate(float deltaTime) : IGameEvent
 
 // Raised when a quest reaches a new stage. The engine publishes these so mods
 // react to story progression without owning the quest.
-public readonly struct QuestStageChanged(uint questFormId, int stage) : IGameEvent
+public readonly struct QuestStageChanged(ulong questHandle, int stage) : IGameEvent
 {
-    public uint QuestFormId { get; } = questFormId;
+    public ulong QuestHandle { get; } = questHandle;
     public int Stage { get; } = stage;
+
+    public Quest Quest => Quest.From(QuestHandle);
 }
 
 // Raised when an actor dies.

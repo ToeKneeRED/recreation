@@ -19,7 +19,7 @@ public static class EngineEvents
                 EventBus.Publish(new ItemAdded(e.A, e.B, e.I));
                 break;
             case ManagedEventId.QuestStageChanged:
-                EventBus.Publish(new QuestStageChanged((uint)e.A, e.I));
+                EventBus.Publish(new QuestStageChanged(e.A, e.I));
                 break;
         }
     }
