@@ -58,9 +58,13 @@ u32 ManifestChunkCount(u32 total_size) {
 // --- server ---
 
 AssetStreamServer::AssetStreamServer(tx::network::ZServer& server,
-                                     const modstream::ModCatalog& catalog)
+                                     const modstream::ModCatalog& catalog,
+                                     unsigned sender_threads)
     : server_(server), catalog_(catalog), transporter_(server) {
-  worker_ = std::thread(&AssetStreamServer::Worker, this);
+  const unsigned count = sender_threads > 0 ? sender_threads : 1;
+  workers_.reserve(count);
+  for (unsigned i = 0; i < count; ++i)
+    workers_.emplace_back(&AssetStreamServer::Worker, this);
 }
 
 AssetStreamServer::~AssetStreamServer() {
@@ -68,11 +72,13 @@ AssetStreamServer::~AssetStreamServer() {
     std::lock_guard<std::mutex> lock(mutex_);
     stop_ = true;
   }
-  // Abort any in-flight transfer so the worker does not wait out the backpressure
+  // Abort in-flight transfers so the workers do not wait out the backpressure
   // timeout, which would hang server shutdown behind a slow client.
   transporter_.RequestStopSending();
   cv_.notify_all();
-  if (worker_.joinable()) worker_.join();
+  for (std::thread& worker : workers_) {
+    if (worker.joinable()) worker.join();
+  }
 }
 
 void AssetStreamServer::SendManifest(u32 peer) {

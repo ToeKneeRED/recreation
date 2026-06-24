@@ -26,12 +26,18 @@ namespace rec::net {
 // Server side of FiveM-style asset streaming. Holds the catalogued server mods
 // directory and feeds requested files to clients over zetanet's reliable file
 // transporter. SendFile blocks (it chunks the file and waits on backpressure),
-// so all streaming runs on a dedicated worker thread; the session thread only
-// queues jobs and hands the manifest to joining peers.
+// so all streaming runs on a small pool of worker threads; the session thread
+// only queues jobs and hands the manifest to joining peers. The pool means one
+// slow or backpressured client does not stall every other client's download.
 class AssetStreamServer {
  public:
+  // A handful of sender threads keeps a slow client from starving the rest while
+  // staying well under the per-process thread budget.
+  static constexpr unsigned kDefaultSenderThreads = 4;
+
   AssetStreamServer(tx::network::ZServer& server,
-                    const modstream::ModCatalog& catalog);
+                    const modstream::ModCatalog& catalog,
+                    unsigned sender_threads = kDefaultSenderThreads);
   ~AssetStreamServer();
 
   AssetStreamServer(const AssetStreamServer&) = delete;
@@ -63,7 +69,7 @@ class AssetStreamServer {
   std::condition_variable cv_;
   std::deque<SendJob> jobs_;
   bool stop_ = false;
-  std::thread worker_;
+  std::vector<std::thread> workers_;
 };
 
 // Client side of asset streaming. Reassembles the manifest, diffs it against the
