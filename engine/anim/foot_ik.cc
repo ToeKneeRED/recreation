@@ -44,6 +44,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
   Plant plants[2];
   f32 lowest_lift = 0;
   bool any = false;
+  f32 leg_span = 0;  // longest leg, in model units: scales offsets to any rig
   for (int i = 0; i < 2; ++i) {
     Plant& p = plants[i];
     p.weight = foot_weight[i];
@@ -51,9 +52,15 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     p.knee = skeleton.Find(kLegs[i].knee);
     p.ankle = skeleton.Find(kLegs[i].ankle);
     if (p.hip < 0 || p.knee < 0 || p.ankle < 0) continue;
+    Vec3 hip_pos = Translation((*bone_model)[p.hip]);
+    Vec3 knee_pos = Translation((*bone_model)[p.knee]);
     Vec3 ankle_pos = Translation((*bone_model)[p.ankle]);
+    f32 leg = Length(knee_pos - hip_pos) + Length(ankle_pos - knee_pos);
+    leg_span = std::max(leg_span, leg);
     Vec3 hit, normal;
-    if (!ground(ankle_pos + up * 0.5f, &hit, &normal)) continue;
+    // Start the down-ray well above the foot, scaled to the leg so it works in
+    // metres (test rig) or game units (Skyrim) alike.
+    if (!ground(ankle_pos + up * (leg * 0.6f), &hit, &normal)) continue;
     p.grounded = true;
     p.normal = normal;
     p.target = hit + up * ankle_height;
@@ -69,7 +76,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
   i32 pelvis = skeleton.Find("NPC Pelvis [Pelv]");
   if (pelvis < 0) pelvis = skeleton.Find("NPC Root [Root]");
   if (pelvis >= 0 && lowest_lift < 0) {
-    f32 drop = std::max(lowest_lift, -0.5f);  // clamp so we never fold up
+    f32 drop = std::max(lowest_lift, -leg_span * 0.5f);  // clamp so we never fold up
     pose->translation[pelvis] += up * drop;
     ComputeModelMatrices(skeleton, *pose, bone_model);
   }
