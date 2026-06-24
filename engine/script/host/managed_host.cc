@@ -42,6 +42,21 @@ void ManagedHost::PublishEvent(const ManagedEvent& event) {
   if (available_ && handshake_.callbacks.publish_event) handshake_.callbacks.publish_event(&event);
 }
 
+void ManagedHost::QueueEvent(const ManagedEvent& event) {
+  std::lock_guard<std::mutex> lock(event_mutex_);
+  pending_events_.push_back(event);
+}
+
+void ManagedHost::DrainEvents() {
+  if (!available_) return;
+  std::vector<ManagedEvent> events;
+  {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    events.swap(pending_events_);
+  }
+  for (const ManagedEvent& e : events) PublishEvent(e);
+}
+
 void ManagedHost::Shutdown() {
   if (available_ && handshake_.callbacks.shutdown) handshake_.callbacks.shutdown();
   available_ = false;

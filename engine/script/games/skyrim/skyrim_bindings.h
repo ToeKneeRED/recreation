@@ -2,6 +2,7 @@
 #define RECREATION_SCRIPT_GAMES_SKYRIM_SKYRIM_BINDINGS_H_
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -16,6 +17,7 @@
 #include "quest/scene_player.h"
 #include "quest/quest_system.h"
 #include "script/games/skyrim/skyrim_natives.h"
+#include "script/host/bridge.h"
 #include "script/world_effect_sink.h"
 
 namespace rec::script::papyrus {
@@ -49,6 +51,14 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // Sink for quest-driven world mutations (spawn/move/enable/delete + cleanup).
   // Set by the runtime; when null, those bindings only update logical state.
   void set_world_sink(WorldEffectSink* sink) { world_sink_ = sink; }
+
+  // Sink for gameplay events the managed (C#) world subscribes to (actor death,
+  // item added, quest stage). Set by the runtime once the managed host is up;
+  // when null, no events are emitted. Called on the guest thread, so the sink
+  // must be thread-safe (the runtime enqueues for the main thread to drain).
+  void set_event_sink(std::function<void(const host::ManagedEvent&)> sink) {
+    event_sink_ = std::move(sink);
+  }
 
   // Replica mode (a multiplayer client): the server is authoritative for quests
   // and quest-driven world state, so the client's own scripts must not mutate
@@ -225,6 +235,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::unordered_map<u64, bool> disabled_;  // Disable() state, for IsDisabled
   std::unordered_map<u64, u64> alias_fills_;  // alias handle -> ForceRefTo override ref
   WorldEffectSink* world_sink_ = nullptr;
+  std::function<void(const host::ManagedEvent&)> event_sink_;  // managed event bus, see above
+  // Emits a gameplay event to the managed world, if a sink is set.
+  void EmitManagedEvent(host::ManagedEventId id, u64 a, u64 b, i32 i);
   bool replica_mode_ = false;  // true on a multiplayer client; see set_replica_mode
   // The quest whose fragment is currently running; world mutations made during
   // it are attributed to it so QuestWorld can roll them back. 0 outside a

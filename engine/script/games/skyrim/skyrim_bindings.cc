@@ -487,6 +487,10 @@ void RecordBackedSkyrimBindings::RaiseFormEvent(u64 target, const char* event,
     REC_INFO("event {} -> 0x{:x} (handler {})", event, target, dispatched ? "ran" : "none");
 }
 
+void RecordBackedSkyrimBindings::EmitManagedEvent(host::ManagedEventId id, u64 a, u64 b, i32 i) {
+  if (event_sink_) event_sink_(host::ManagedEvent{id, a, b, i, 0.0f});
+}
+
 void RecordBackedSkyrimBindings::MaybeNotifyDeath(ObjectRef actor) {
   if (GetActorValue(actor, "health") > 0.0f) {
     dead_.erase(actor.handle);  // healed or resurrected: re-arm the death event
@@ -497,6 +501,7 @@ void RecordBackedSkyrimBindings::MaybeNotifyDeath(ObjectRef actor) {
   const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
   RaiseFormEvent(actor.handle, "OnDying", {none});
   RaiseFormEvent(actor.handle, "OnDeath", {none});
+  EmitManagedEvent(host::ManagedEventId::kActorDied, actor.handle, 0, 0);
 }
 
 void RecordBackedSkyrimBindings::SetActorValue(ObjectRef actor, const std::string& av, f32 value) {
@@ -541,6 +546,7 @@ void RecordBackedSkyrimBindings::AddItem(ObjectRef container, ObjectRef item, i3
   const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
   RaiseFormEvent(container.handle, "OnItemAdded",
                  {papyrus::Value::Object(item), papyrus::Value::Int(count), none, none});
+  EmitManagedEvent(host::ManagedEventId::kItemAdded, container.handle, item.handle, count);
 }
 
 void RecordBackedSkyrimBindings::RemoveItem(ObjectRef container, ObjectRef item, i32 count) {
@@ -708,8 +714,10 @@ void RecordBackedSkyrimBindings::SetStage(ObjectRef quest, i32 stage) {
   // quest graph: Advance enters the stage node and dispatches its on-enter
   // actions (for imported quests, a RunScriptFragment that runs the Papyrus
   // fragment). Re-setting a done stage is a no-op, matching the game.
-  if (quest_system_.SetStage(quest.handle, stage))
+  if (quest_system_.SetStage(quest.handle, stage)) {
     Runtime(quest.handle).instance.Advance(stage, *this);
+    EmitManagedEvent(host::ManagedEventId::kQuestStageChanged, quest.handle, 0, stage);
+  }
 }
 
 bool RecordBackedSkyrimBindings::GetStageDone(ObjectRef quest, i32 stage) {

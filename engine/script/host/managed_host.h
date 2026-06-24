@@ -2,7 +2,9 @@
 #define RECREATION_SCRIPT_HOST_MANAGED_HOST_H_
 
 #include <functional>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include "script/host/bridge.h"
 #include "script/host/clr_host.h"
@@ -45,8 +47,17 @@ class ManagedHost {
 
   // Advances the managed world one frame. No-op when unavailable.
   void Tick(float dt);
-  // Delivers an engine event to the managed event bus. No-op when unavailable.
+  // Delivers an engine event to the managed event bus. Must run on the host
+  // (main) thread; no-op when unavailable.
   void PublishEvent(const ManagedEvent& event);
+
+  // Enqueues an event from any thread (the guest thread raises most of them).
+  // The main loop later drains them with DrainEvents, which is where they reach
+  // managed code, so engine threads never call into the CLR directly.
+  void QueueEvent(const ManagedEvent& event);
+  // Publishes every queued event. Host (main) thread only.
+  void DrainEvents();
+
   // Tears the managed world down. Safe to call more than once.
   void Shutdown();
 
@@ -56,6 +67,9 @@ class ManagedHost {
   ScriptBridge bridge_{};
   HostHandshake handshake_{};
   bool available_ = false;
+
+  std::mutex event_mutex_;
+  std::vector<ManagedEvent> pending_events_;
 };
 
 }  // namespace rec::script::host
