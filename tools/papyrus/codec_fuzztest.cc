@@ -11,6 +11,7 @@
 
 #include "core/types.h"
 #include "modstream/asset_request.h"
+#include "modstream/manifest_chunk.h"
 #include "modstream/manifest_codec.h"
 #include "modstream/mod_resource.h"
 #include "rpc/rpc_message.h"
@@ -97,6 +98,13 @@ int main() {
       (void)modstream::DecodeManifest(noise.data(), noise.size());
       (void)rpc::DecodeCall(noise.data(), noise.size());
       (void)modstream::DecodeHashRequest(noise.data(), noise.size(), 6000);
+      // A decoded chunk view borrows the buffer; reading its payload must stay in
+      // bounds, which only holds if the validation is correct.
+      if (auto v = modstream::DecodeManifestChunk(noise.data(), noise.size())) {
+        volatile u8 sink = 0;
+        for (u32 i = 0; i < v->payload_len; ++i) sink ^= v->payload[i];
+        (void)sink;
+      }
     }
 
     // 2. A valid encoding, round-tripped, then bit-mutated: still must not crash,

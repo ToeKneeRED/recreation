@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "modstream/asset_request.h"
+#include "modstream/manifest_chunk.h"
 #include "modstream/manifest_codec.h"
 #include "modstream/transfer_plan.h"
 #include "net/protocol.h"
@@ -16,32 +17,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Manifest bytes carried per kAssetManifest packet. A datagram cannot be
-// fragmented, so this stays well under the ~64 KiB UDP payload ceiling with room
-// for the chunk header and zetanet's own framing.
-constexpr u32 kManifestChunkPayload = 60000;
-// Refuse a reassembled manifest larger than this; a real catalog is far smaller,
-// and the cap bounds the client's reassembly buffer against a hostile header.
-constexpr u32 kMaxManifestSize = 64u * 1024 * 1024;
 // Content hashes per kAssetRequest packet, kept under the datagram ceiling
 // (8 bytes each plus a 4-byte count). Larger plans split across packets.
 constexpr u32 kRequestHashesPerPacket = 6000;
 
 base::Path ToBasePath(const fs::path& path) {
   return base::Path(path.string().c_str());
-}
-
-void PutU32(std::vector<u8>& out, u32 v) {
-  for (int i = 0; i < 4; ++i) out.push_back(static_cast<u8>(v >> (8 * i)));
-}
-
-u32 LoadU32(const u8* p) {
-  return static_cast<u32>(p[0]) | static_cast<u32>(p[1]) << 8 |
-         static_cast<u32>(p[2]) << 16 | static_cast<u32>(p[3]) << 24;
-}
-
-u32 ManifestChunkCount(u32 total_size) {
-  return (total_size + kManifestChunkPayload - 1) / kManifestChunkPayload;
 }
 
 }  // namespace
@@ -75,17 +56,12 @@ AssetStreamServer::~AssetStreamServer() {
 void AssetStreamServer::SendManifest(u32 peer) {
   const std::vector<u8> bytes = modstream::EncodeManifest(catalog_.manifest());
   const u32 total = static_cast<u32>(bytes.size());
-  const u32 chunks = ManifestChunkCount(total);
+  const u32 chunks = modstream::ManifestChunkCount(total);
   for (u32 i = 0; i < chunks; ++i) {
-    const u32 offset = i * kManifestChunkPayload;
-    const u32 len = std::min<u32>(kManifestChunkPayload, total - offset);
-    std::vector<u8> payload;
-    payload.reserve(12 + len);
-    PutU32(payload, total);
-    PutU32(payload, chunks);
-    PutU32(payload, i);
-    payload.insert(payload.end(), bytes.begin() + offset, bytes.begin() + offset + len);
-    server_.Push(MakePacket(peer, MessageType::kAssetManifest, payload,
+    const u32 offset = i * modstream::kManifestChunkPayload;
+    const u32 len = std::min<u32>(modstream::kManifestChunkPayload, total - offset);
+    server_.Push(MakePacket(peer, MessageType::kAssetManifest,
+                            modstream::EncodeManifestChunk(total, chunks, i, bytes.data() + offset, len),
                             /*reliable=*/true, tx::network::PacketPriority::High));
   }
   REC_INFO("net: sent manifest ({} files, {} bytes) to peer {}",
@@ -162,31 +138,27 @@ u64 AssetStreamClient::bytes_remaining() const {
 
 void AssetStreamClient::OnManifestChunk(const u8* data, size_t size) {
   if (downloading_ || ready_ || failed_) return;  // manifest already resolved
-  if (size < 12) return;
 
-  const u32 total = LoadU32(data);
-  const u32 chunks = LoadU32(data + 4);
-  const u32 index = LoadU32(data + 8);
-  const size_t payload_len = size - 12;
-
-  if (total == 0 || total > kMaxManifestSize) return;
-  if (chunks != ManifestChunkCount(total) || index >= chunks) return;
-
-  const u32 offset = index * kManifestChunkPayload;
-  const u32 expected_len = std::min<u32>(kManifestChunkPayload, total - offset);
-  if (payload_len != expected_len) return;
+  // The codec validates the chunk in isolation (header, counts, index, payload
+  // length), so reassembly below cannot write out of range.
+  std::optional<modstream::ManifestChunkView> chunk =
+      modstream::DecodeManifestChunk(data, size);
+  if (!chunk) return;
 
   if (!manifest_started_) {
-    manifest_total_size_ = total;
-    manifest_total_chunks_ = chunks;
-    manifest_buffer_.assign(total, 0);
+    manifest_total_size_ = chunk->total_size;
+    manifest_total_chunks_ = chunk->total_chunks;
+    manifest_buffer_.assign(chunk->total_size, 0);
     manifest_started_ = true;
-  } else if (total != manifest_total_size_ || chunks != manifest_total_chunks_) {
+  } else if (chunk->total_size != manifest_total_size_ ||
+             chunk->total_chunks != manifest_total_chunks_) {
     return;  // a chunk that disagrees with the first one is corrupt
   }
 
-  std::copy(data + 12, data + size, manifest_buffer_.begin() + offset);
-  manifest_chunks_[index] = true;
+  const u32 offset = chunk->chunk_index * modstream::kManifestChunkPayload;
+  std::copy(chunk->payload, chunk->payload + chunk->payload_len,
+            manifest_buffer_.begin() + offset);
+  manifest_chunks_[chunk->chunk_index] = true;
   if (manifest_chunks_.size() == manifest_total_chunks_) OnManifestComplete();
 }
 
