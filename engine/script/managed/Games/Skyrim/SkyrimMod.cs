@@ -20,5 +20,6 @@ public sealed class SkyrimMod : IMod
         ModHost.Register(new AttributeRegeneration());
         ModHost.Register(new QuestProgressTracker());
         ModHost.Register(new CombatTracker());
+        ModHost.Register(new CombatFastTravelLock());
     }
 }

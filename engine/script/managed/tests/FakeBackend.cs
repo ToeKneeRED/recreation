@@ -36,13 +36,19 @@ public sealed class FakeBackend : IEngineBackend
     public string LastGlobalType { get; private set; } = "";
     public string LastGlobalFunction { get; private set; } = "";
     public string LastStringArg { get; private set; } = "";
+    public bool LastBoolArg { get; private set; }
+
+    // True until the system toggles it; mirrors the engine's fast-travel gate.
+    public bool FastTravelEnabled { get; private set; } = true;
 
     public Value CallGlobal(string type, string function, ReadOnlySpan<Value> args)
     {
         LastGlobalType = type;
         LastGlobalFunction = function;
         LastStringArg = args.Length > 0 && args[0].Kind == ValueKind.String ? args[0].AsString() : "";
+        LastBoolArg = args.Length > 0 && args[0].AsBool();
         if (type == "Game" && function == "GetPlayer") return Value.Object(Player);
+        if (type == "Game" && function == "EnableFastTravel") FastTravelEnabled = LastBoolArg;
         if (type == "Utility" && function == "RandomInt")
             return Value.Int(args.Length > 0 ? args[0].AsInt() : 0);  // deterministic: the min
         return Value.None;

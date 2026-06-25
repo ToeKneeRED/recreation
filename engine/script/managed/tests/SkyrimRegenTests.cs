@@ -56,5 +56,35 @@ public static class SkyrimRegenTests
 
         ModHost.Shutdown();
         Native.Backend = null;
+
+        FastTravelLock(check);
+    }
+
+    private static void FastTravelLock(Check check)
+    {
+        var fake = new FakeBackend();
+        Native.Backend = fake;
+        ModHost.Shutdown();
+
+        var lockSystem = new CombatFastTravelLock();
+        ModHost.Register(lockSystem);
+
+        // Out of combat: the first frame enables fast travel.
+        fake.SetInCombat(fake.Player, false);
+        ModHost.Tick(0.1f);
+        check.That("fast travel enabled out of combat", fake.FastTravelEnabled);
+
+        // Entering combat locks it.
+        fake.SetInCombat(fake.Player, true);
+        ModHost.Tick(0.1f);
+        check.That("fast travel locked in combat", !fake.FastTravelEnabled);
+
+        // Leaving combat unlocks it again.
+        fake.SetInCombat(fake.Player, false);
+        ModHost.Tick(0.1f);
+        check.That("fast travel restored after combat", fake.FastTravelEnabled);
+
+        ModHost.Shutdown();
+        Native.Backend = null;
     }
 }
