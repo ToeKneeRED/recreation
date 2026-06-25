@@ -93,6 +93,7 @@ public static class ModHost
             Behaviours[i].DispatchDestroy();
         Behaviours.Clear();
         Mods.Clear();
+        FormScripts.Clear();
         EventBus.Clear();
         _booted = false;
     }
