@@ -728,6 +728,13 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
         node.children.clear();
         node.children.push_back(active);
         r.ok = true;
+      } else if (type == "NiLODNode" && !node.children.empty()) {
+        // Distance-switched detail levels (children[i] pairs with lod range i,
+        // child 0 starting at the camera). Without this every level would render
+        // stacked. It's 2026 — always keep the finest (child 0).
+        i32 finest = node.children[0];
+        node.children.clear();
+        node.children.push_back(finest);
       }
       if (r.ok) nodes.emplace(i, std::move(node));
     } else if (type == "BSTriShape" || type == "BSMeshLODTriShape" ||
@@ -735,6 +742,9 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
       // BSSubIndexTriShape (FO4 static meshes) shares the BSTriShape geometry
       // header; its trailing segment table sits after the triangles, which the
       // geometry read stops short of, so we treat it identically.
+      // BSMeshLODTriShape likewise: its trailing lod0/lod1/lod2 index counts are
+      // shorter prefixes of the full triangle list, so reading the whole list
+      // keeps the finest detail.
       Shape shape;
       shape.local = ReadAvObject(r, &shape.hidden);
       r.Skip(16);  // bounding sphere
