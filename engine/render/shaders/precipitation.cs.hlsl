@@ -41,6 +41,10 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 dir = normalize(nh.xyz / nh.w - pc.camera_pos.xyz);
   float az = atan2(dir.x, dir.z);
   float alt = asin(clamp(dir.y, -1.0, 1.0));
+  // Azimuth degenerates at the zenith/nadir (dir.x, dir.z -> 0), where the
+  // streak anchor pinwheels. Fade precipitation out within ~10 deg of straight
+  // up/down to hide it; you mostly see sky or ground there anyway.
+  float pole = 1.0 - smoothstep(0.85, 0.985, abs(dir.y));
 
   float3 add = 0.0.xxx;
   const int kLayers = 4;
@@ -97,5 +101,5 @@ void main(uint3 id : SV_DispatchThreadID) {
     add = float3(1.0, 1.0, 1.0) * total * intensity * 0.85;
   }
 
-  out_image[px] = float4(scene + add, 1.0);
+  out_image[px] = float4(scene + add * pole, 1.0);
 }
