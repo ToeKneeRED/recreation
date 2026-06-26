@@ -100,6 +100,10 @@ bool LoadGameData(Engine& engine) {
   {
     std::unordered_map<u64, rec::weather::WeatherDef> weathers;
     const int n = rec::weather::LoadWeathers(self->records_, &weathers);
+    int kinds[4] = {};
+    for (auto& [id, def] : weathers) kinds[static_cast<int>(def.kind)]++;
+    REC_INFO("weather: WTHR kinds -- pleasant {} cloudy {} rainy {} snow {}", kinds[0], kinds[1],
+             kinds[2], kinds[3]);
     const char* worldspace = self->game_ == bethesda::Game::kSkyrimSe      ? "Tamriel"
                              : self->game_ == bethesda::Game::kFallout4     ? "Commonwealth"
                                                                             : "";

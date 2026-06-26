@@ -45,28 +45,42 @@ bool ReadFormRef(const bethesda::RecordStore& records, const bethesda::Record& r
   return out->plugin != 0xffff;
 }
 
-// A climate's WLST: 12-byte entries of (weather form id, chance u32, global).
-std::vector<std::pair<WeatherDef, u32>> FromClimate(
-    const bethesda::RecordStore& records, bethesda::GlobalFormId climate,
+// One WLST stride: each entry is (weather form id, chance u32, ...). The trailing
+// fields differ across games (Skyrim has no per-entry global, Fallout/Starfield
+// do), so the entry size varies; weather id and chance stay at offsets 0 and 4.
+std::vector<std::pair<WeatherDef, u32>> ParseWlst(
+    const bethesda::RecordStore& records, const u8* p, size_t sz, u16 plugin, size_t stride,
     const std::unordered_map<u64, WeatherDef>& weathers) {
   std::vector<std::pair<WeatherDef, u32>> out;
-  const bethesda::RecordStore::StoredRecord* stored = records.Find(climate);
-  bethesda::Record rec;
-  if (!stored || !records.Parse(climate, &rec)) return out;
-  const bethesda::Subrecord* wlst = rec.Find(kWlst);
-  if (!wlst) return out;
-  const u8* p = wlst->data.data();
-  size_t sz = wlst->data.size();
-  for (size_t off = 0; off + 12 <= sz; off += 12) {
+  for (size_t off = 0; off + stride <= sz; off += stride) {
     u32 raw, chance;
     std::memcpy(&raw, p + off, 4);
     std::memcpy(&chance, p + off + 4, 4);
-    bethesda::GlobalFormId wid =
-        records.ResolveFrom(bethesda::RawFormId{raw}, stored->winning_plugin);
+    bethesda::GlobalFormId wid = records.ResolveFrom(bethesda::RawFormId{raw}, plugin);
     auto it = weathers.find(wid.packed());
-    if (it != weathers.end() && chance > 0) out.push_back({it->second, chance});
+    if (it != weathers.end() && chance > 0 && chance <= 100) out.push_back({it->second, chance});
   }
   return out;
+}
+
+// A climate's WLST weather list. The entry stride differs across games, so try
+// the known sizes and keep whichever resolves the most weathers.
+std::vector<std::pair<WeatherDef, u32>> FromClimate(
+    const bethesda::RecordStore& records, bethesda::GlobalFormId climate,
+    const std::unordered_map<u64, WeatherDef>& weathers) {
+  const bethesda::RecordStore::StoredRecord* stored = records.Find(climate);
+  bethesda::Record rec;
+  if (!stored || !records.Parse(climate, &rec)) return {};
+  const bethesda::Subrecord* wlst = rec.Find(kWlst);
+  if (!wlst) return {};
+  const u8* p = wlst->data.data();
+  size_t sz = wlst->data.size();
+  std::vector<std::pair<WeatherDef, u32>> best;
+  for (size_t stride : {8u, 12u, 16u}) {
+    auto list = ParseWlst(records, p, sz, stored->winning_plugin, stride, weathers);
+    if (list.size() > best.size()) best = std::move(list);
+  }
+  return best;
 }
 
 std::vector<std::pair<WeatherDef, u32>> Synthetic(
@@ -118,7 +132,10 @@ std::vector<std::pair<WeatherDef, u32>> BuildClimate(
       bethesda::GlobalFormId climate;
       if (ReadFormRef(records, wrec, kCnam, ws->winning_plugin, &climate)) {
         auto list = FromClimate(records, climate, weathers);
-        if (list.size() >= 2) {  // a real spread, not a partly-parsed list
+        // Use the authored climate only when it is a real spread; a thin list
+        // (Skyrim keeps most variety in REGN region overrides, not the worldspace
+        // climate) yields to the synthetic spread below, which is richer.
+        if (list.size() >= 4) {
           REC_INFO("weather: climate from worldspace {} ({} weathers)", worldspace_edid,
                    list.size());
           return list;
@@ -134,7 +151,7 @@ std::vector<std::pair<WeatherDef, u32>> BuildClimate(
                        auto list = FromClimate(records, id, weathers);
                        if (list.size() > best.size()) best = std::move(list);
                      });
-  if (best.size() >= 2) {
+  if (best.size() >= 4) {
     REC_INFO("weather: climate from largest CLMT ({} weathers)", best.size());
     return best;
   }
