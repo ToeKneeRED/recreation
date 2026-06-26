@@ -270,6 +270,10 @@ class Engine {
   weather::RegionWeather regions_;
   std::vector<std::pair<weather::WeatherDef, u32>> default_climate_;
   u64 active_region_ = 0;
+  // Cross-fade the weather over a few seconds when the region changes, instead
+  // of snapping. region_blend_t_ is 1 once settled.
+  weather::WeatherState region_blend_from_;
+  f32 region_blend_t_ = 1.0f;
   // Debug-UI weather playground: when set, the loop uses weather_override_state_
   // instead of the climate, so the Weather panel can drive the sky live.
   bool weather_override_ = false;

@@ -166,6 +166,10 @@ bool Engine::RunFrame() {
         const auto* climate =
             regions_.ClimateAt(anchor.x * kEngineToGame, -anchor.z * kEngineToGame, &region);
         if (region != active_region_) {
+          // Capture the weather we are leaving (old climate) to cross-fade from.
+          region_blend_from_ =
+              weather_.empty() ? weather::WeatherState{} : weather_.At(clock_.game_days());
+          region_blend_t_ = 0.0f;
           active_region_ = region;
           weather_.SetClimate(climate ? *climate : default_climate_);
           REC_INFO("weather: region {:x} ({} weathers)", region,
@@ -180,6 +184,13 @@ bool Engine::RunFrame() {
         w = weather_override_state_;
       else if (!weather_.empty())
         w = weather_.At(clock_.game_days());
+      // Cross-fade over ~5 s when the region changed, so weather eases in.
+      if (!weather_override_ && region_blend_t_ < 1.0f) {
+        region_blend_t_ =
+            std::min(1.0f, region_blend_t_ + static_cast<f32>(timer_.frame_delta()) / 5.0f);
+        const f32 s = region_blend_t_ * region_blend_t_ * (3.0f - 2.0f * region_blend_t_);
+        w = weather::Lerp(region_blend_from_, w, s);
+      }
       if (has_weather) {
         renderer_.settings().cloud_coverage = w.cloud_coverage;
         renderer_.settings().aerial_perspective = ap_base_ * (1.0f + w.aerosol * 2.0f);
