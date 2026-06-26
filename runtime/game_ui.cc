@@ -488,9 +488,9 @@ std::string BuildEditorSection() {
 // The .ugui fragments composed into root, in draw order. Also the hot-reload
 // watch list.
 const char* const kUiFragments[] = {
-    "hud.ugui",       "vitals.ugui",    "readout.ugui",     "quest.ugui",
-    "hud_gauge.ugui", "journal.ugui",   "dialogue.ugui",    "container.ugui",
-    "csharp_demo.ugui", "pause_menu.ugui", "main_menu.ugui",
+    "hud.ugui",       "vitals.ugui",  "readout.ugui",  "quest.ugui",
+    "hud_gauge.ugui", "journal.ugui", "dialogue.ugui", "container.ugui",
+    "pause_menu.ugui", "main_menu.ugui",
 };
 
 // Directory holding the .ugui fragments: RECREATION_UI_DIR, else the compiled-in
@@ -574,7 +574,6 @@ std::string BuildUi() {
   s += LoadUiFragment("dialogue.ugui");
   s += LoadUiFragment("container.ugui");
   s += BuildEditorSection();              // procedural: Glyph icons; before the menu
-  s += LoadUiFragment("csharp_demo.ugui");
   s += LoadUiFragment("pause_menu.ugui");
   s += LoadUiFragment("main_menu.ugui");
   s += "}\n";
@@ -833,7 +832,6 @@ struct GameUi::Impl {
     SetVisible("readout", hud);
     SetVisible("editor_root", editor.active);
     editor_prev_active = editor.active;
-    if (std::getenv("RECREATION_UI_CSHARP_DEMO")) SetVisible("csdemo_root", true);
     ApplyMenuVisibility();
     ApplyMainMenu();
     REC_INFO("ui: hot-reloaded {} .ugui fragment(s)", sizeof(kUiFragments) / sizeof(*kUiFragments));
@@ -1389,13 +1387,6 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
     if (impl->RouteEditorClick(w)) return;    // editor overlay owns this click
     ugui::WidgetNode* n = impl->ui.world().Get<ugui::WidgetNode>(w);
     if (!n) return;
-    // C# UI bridge demo: send the button click through the (now C#) scripting
-    // runtime instead of handling it here, so the handler runs in managed code.
-    // Checkbox/slider changes already auto-dispatch via WireChangeHandlers.
-    if (n->name.rfind("csdemo_", 0) == 0) {
-      impl->ui.script().CallHandler(("on_" + n->name).c_str(), w);
-      return;
-    }
     if (n->name == "btn_resume") {
       impl->menu_open = false;
       impl->settings_open = false;
@@ -1431,8 +1422,6 @@ bool GameUi::Initialize(Window& window, render::Renderer& renderer) {
   // Editor overlay starts collapsed; the engine reveals it on F4.
   impl_->SetVisible("editor_root", false);
 
-  // Demo: RECREATION_UI_CSHARP_DEMO shows the C# UI bridge panel at startup.
-  if (std::getenv("RECREATION_UI_CSHARP_DEMO")) impl_->SetVisible("csdemo_root", true);
   // Debug aid: RECREATION_UI_MENU opens the pause menu at startup.
   if (std::getenv("RECREATION_UI_MENU")) impl_->menu_open = true;
   impl_->ApplyMenuVisibility();  // menu starts hidden unless forced open

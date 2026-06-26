@@ -41,12 +41,15 @@ public static class UiTests
         Ui.Tick(5.0f);
         check.Equal("timer does not refire", 1, ticks);
 
-        // Attribute discovery: scanning the SDK assembly registers the demo
-        // handlers, so dispatching one is claimed (it no-ops without widget ops).
-        Ui.ScanAssembly(typeof(Ui).Assembly);
-        check.Equal("[UiHandler] methods are discovered", 1, Ui.Dispatch("on_csdemo_check", 0));
-        Ui.Off("on_csdemo_check");
-        Ui.Off("on_csdemo_click");
-        Ui.Off("on_csdemo_slider");
+        // Attribute discovery: scanning an assembly registers its [UiHandler]
+        // methods, so dispatching one by name is claimed.
+        Ui.ScanAssembly(typeof(UiTests).Assembly);
+        check.Equal("[UiHandler] methods are discovered", 1, Ui.Dispatch("on_ut_scanned", 0));
+        Ui.Off("on_ut_scanned");
     }
+
+    // Discovered by the ScanAssembly check above; the body is irrelevant (no
+    // widget ops are bound here), only that the scan finds and registers it.
+    [UiHandler]
+    private static void on_ut_scanned(Widget w) { }
 }
