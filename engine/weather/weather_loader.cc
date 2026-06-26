@@ -178,7 +178,7 @@ int LoadWeathers(const bethesda::RecordStore& records, std::unordered_map<u64, W
 
 std::vector<std::pair<WeatherDef, u32>> BuildClimate(
     const bethesda::RecordStore& records, const std::unordered_map<u64, WeatherDef>& weathers,
-    const char* worldspace_edid) {
+    const char* worldspace_edid, int min_worldspace_weathers) {
   if (weathers.empty()) return {};
 
   // 1) The worldspace's authored climate (WRLD CNAM -> CLMT).
@@ -190,10 +190,10 @@ std::vector<std::pair<WeatherDef, u32>> BuildClimate(
       bethesda::GlobalFormId climate;
       if (ReadFormRef(records, wrec, kCnam, ws->winning_plugin, &climate)) {
         auto list = FromClimate(records, climate, weathers);
-        // Use the authored climate only when it is a real spread; a thin list
-        // (Skyrim keeps most variety in REGN region overrides, not the worldspace
-        // climate) yields to the synthetic spread below, which is richer.
-        if (list.size() >= 4) {
+        // Use the authored climate when it resolves enough weathers. Skyrim sets
+        // the bar high (its thin Tamriel CLMT yields to the richer synthetic
+        // spread + REGN); Starfield sets it to 1 (a planet authors one weather).
+        if (static_cast<int>(list.size()) >= min_worldspace_weathers && !list.empty()) {
           REC_INFO("weather: climate from worldspace {} ({} weathers)", worldspace_edid,
                    list.size());
           return list;

@@ -104,10 +104,15 @@ bool LoadGameData(Engine& engine) {
     for (auto& [id, def] : weathers) kinds[static_cast<int>(def.kind)]++;
     REC_INFO("weather: WTHR kinds -- pleasant {} cloudy {} rainy {} snow {}", kinds[0], kinds[1],
              kinds[2], kinds[3]);
-    const char* worldspace = self->game_ == bethesda::Game::kSkyrimSe      ? "Tamriel"
-                             : self->game_ == bethesda::Game::kFallout4     ? "Commonwealth"
-                                                                            : "";
-    auto climate = rec::weather::BuildClimate(self->records_, weathers, worldspace);
+    const bool starfield = self->game_ == bethesda::Game::kStarfield;
+    const char* worldspace = self->game_ == bethesda::Game::kSkyrimSe  ? "Tamriel"
+                             : self->game_ == bethesda::Game::kFallout4 ? "Commonwealth"
+                             : starfield                                ? "NewAtlantis"
+                                                                        : "";
+    // Starfield authors one characteristic weather per planet worldspace, so a
+    // single-weather CLMT is the real answer (don't fall through to synthetic).
+    auto climate =
+        rec::weather::BuildClimate(self->records_, weathers, worldspace, starfield ? 1 : 4);
     if (const char* forced_kind = std::getenv("REC_WEATHER")) {
       std::string s = forced_kind;
       rec::weather::WeatherDef forced;

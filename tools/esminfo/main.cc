@@ -200,6 +200,16 @@ int DumpWeather(const std::string& data_dir, int limit) {
       std::memcpy(t, &sub.type, 4);
       std::printf("  %s  %zu\n", t, static_cast<size_t>(sub.data.size()));
     }
+    constexpr rec::u32 kDalc = rec::FourCc('D', 'A', 'L', 'C');
+    int dalc_i = 0;
+    for (const Subrecord& sub : w.subrecords) {
+      if (sub.type != kDalc || sub.data.size() < 24) continue;
+      const rec::u8* d = sub.data.data();
+      std::printf("  DALC[%d]:", dalc_i++);
+      for (int k = 0; k < 6; ++k)  // X+ X- Y+ Y- Z+ Z- hemisphere ambient (RGBA)
+        std::printf(" %3u/%3u/%3u", d[k * 4], d[k * 4 + 1], d[k * 4 + 2]);
+      std::printf("\n");
+    }
     if (const Subrecord* nam0 = w.Find(kNam0); nam0 && nam0->data.size() % 16 == 0) {
       const rec::u8* d = nam0->data.data();
       size_t quads = nam0->data.size() / 4;  // RGBA bytes; 4 times-of-day per type
@@ -209,6 +219,42 @@ int DumpWeather(const std::string& data_dir, int limit) {
                     d[i * 4 + 3], (i % 4 == 3) ? "\n" : "  ");
     }
   });
+  return 0;
+}
+
+// Generic: dumps each record of a four-character type with its editor id and
+// subrecord (type, size) list, for reverse-engineering an unfamiliar record.
+// esminfo <data-dir> dump <TYPE> [limit].
+int DumpType(const std::string& data_dir, const std::string& type, int limit) {
+  if (type.size() != 4) {
+    std::printf("type must be 4 chars\n");
+    return 1;
+  }
+  const auto& profile = GameProfile::For(GameProfile::DetectFromDataDir(data_dir));
+  auto order = LoadOrder::FromPluginsTxt(data_dir + "/../plugins.txt", profile);
+  RecordStore records;
+  if (!records.LoadAll(data_dir, order, profile)) return 1;
+
+  rec::u32 fourcc = rec::FourCc(type[0], type[1], type[2], type[3]);
+  int shown = 0, total = 0;
+  records.EachOfType(fourcc, [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    ++total;
+    if (limit > 0 && shown >= limit) return;
+    Record r;
+    if (!records.Parse(id, &r)) return;
+    ++shown;
+    std::printf("%s %04x:%06x %s\n", type.c_str(), id.plugin, id.local_id,
+                r.GetString(kEdid).c_str());
+    for (const Subrecord& sub : r.subrecords) {
+      char t[5] = {};
+      std::memcpy(t, &sub.type, 4);
+      // Show the first 4 bytes as a form ref / int for short subrecords.
+      rec::u32 head = 0;
+      if (sub.data.size() >= 4) std::memcpy(&head, sub.data.data(), 4);
+      std::printf("  %s  %4zu  [%08x]\n", t, static_cast<size_t>(sub.data.size()), head);
+    }
+  });
+  std::printf("total %s: %d\n", type.c_str(), total);
   return 0;
 }
 
@@ -229,6 +275,9 @@ int main(int argc, char** argv) {
 
   if (argc >= 3 && std::string(argv[2]) == "wthr")
     return DumpWeather(argv[1], argc >= 4 ? std::stoi(argv[3]) : 0);
+
+  if (argc >= 4 && std::string(argv[2]) == "dump")
+    return DumpType(argv[1], argv[3], argc >= 5 ? std::stoi(argv[4]) : 0);
 
   if (argc >= 4 && std::string(argv[2]) == "land") {
     std::string coords = argv[3];
