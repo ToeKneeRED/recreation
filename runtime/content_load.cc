@@ -6,6 +6,8 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "asset/gltf_loader.h"
@@ -16,6 +18,7 @@
 #include "core/log.h"
 #include "engine_internal.h"
 #include "script/papyrus/value.h"
+#include "weather/weather_loader.h"
 #include "world/components.h"
 
 // Bringing a universe online: mounts archives, loads the record/string/dialogue
@@ -91,6 +94,33 @@ bool LoadGameData(Engine& engine) {
                                            days_passed.plugin == 0xffff ? 0 : days_passed.packed(),
                                            timescale_glob.plugin == 0xffff ? 0
                                                                            : timescale_glob.packed());
+
+  // Weather: parse the game's WTHR/CLMT into a climate and drive our physical
+  // sky/clouds/atmosphere from it (no baked skydome). REC_WEATHER forces a kind.
+  {
+    std::unordered_map<u64, rec::weather::WeatherDef> weathers;
+    const int n = rec::weather::LoadWeathers(self->records_, &weathers);
+    const char* worldspace = self->game_ == bethesda::Game::kSkyrimSe      ? "Tamriel"
+                             : self->game_ == bethesda::Game::kFallout4     ? "Commonwealth"
+                                                                            : "";
+    auto climate = rec::weather::BuildClimate(self->records_, weathers, worldspace);
+    if (const char* forced_kind = std::getenv("REC_WEATHER")) {
+      std::string s = forced_kind;
+      rec::weather::WeatherDef forced;
+      forced.kind = (s == "rain" || s == "rainy")    ? rec::weather::WeatherDef::Kind::kRainy
+                    : (s == "snow")                  ? rec::weather::WeatherDef::Kind::kSnow
+                    : (s == "cloud" || s == "cloudy") ? rec::weather::WeatherDef::Kind::kCloudy
+                                                      : rec::weather::WeatherDef::Kind::kPleasant;
+      forced.DeriveFromKind();
+      climate = {{forced, 1}};
+      REC_INFO("weather: forced to '{}' via REC_WEATHER", forced_kind);
+    }
+    self->weather_.SetClimate(std::move(climate));
+    self->weather_.set_seed(0xBEE71Eull ^ static_cast<u64>(self->game_));
+    self->ap_base_ = self->renderer_.settings().aerial_perspective;
+    REC_INFO("weather: {} WTHR records, climate {} entries", n, self->weather_.size());
+  }
+
   self->quest_world_.set_on_move_player([self](u64 dest_ref, f32 x, f32 y, f32 z) {
     // When a quest warps the player to a reference inside an interior cell (the
     // Helgen keep, say), stream that cell first so the player lands in a loaded

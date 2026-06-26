@@ -149,20 +149,38 @@ bool Engine::RunFrame() {
 
     if (!config_.headless) {
       f32 frame_delta = static_cast<f32>(timer_.frame_delta());
-      // Day/night: derive the sun direction, intensity, color and ambient from
-      // the clock's time of day, unless REC_SUN_DIR pinned a fixed sun. Throttled
-      // to ~0.02-hour steps (sub-degree sun motion) so the IBL environment is not
-      // rebuilt every frame.
+      // Weather, parsed from the game's WTHR/CLMT, drives our physical sky/clouds
+      // (never its baked skydome). Cloud coverage + aerial-perspective haze update
+      // every frame (cheap, no IBL rebuild); the sun tint/dimming folds into the
+      // throttled day/night update below.
+      const bool has_weather = !weather_.empty();
+      const weather::WeatherState w = weather_.At(clock_.game_days());
+      if (has_weather) {
+        renderer_.settings().cloud_coverage = w.cloud_coverage;
+        renderer_.settings().aerial_perspective = ap_base_ * (1.0f + w.aerosol * 2.0f);
+      }
+      // Day/night: derive the sun direction/intensity/color/ambient from the
+      // clock's time of day (unless REC_SUN_DIR pinned a fixed sun), tinted and
+      // dimmed by the weather. Throttled to ~0.02-hour steps so the IBL
+      // environment is not rebuilt every frame, also re-firing when the weather
+      // light changes.
       if (drive_sun_from_clock_) {
         const f32 hour = clock_.hour();
-        if (last_sky_hour_ < -100.0f || std::abs(hour - last_sky_hour_) >= 0.02f) {
+        const bool weather_dirty = std::abs(w.light_scale - last_weather_scale_) > 0.01f ||
+                                   std::abs(w.light_tint.x - last_weather_tint_.x) > 0.01f ||
+                                   std::abs(w.light_tint.y - last_weather_tint_.y) > 0.01f ||
+                                   std::abs(w.light_tint.z - last_weather_tint_.z) > 0.01f;
+        if (last_sky_hour_ < -100.0f || std::abs(hour - last_sky_hour_) >= 0.02f || weather_dirty) {
           last_sky_hour_ = hour;
+          last_weather_scale_ = w.light_scale;
+          last_weather_tint_ = w.light_tint;
           const SkyLighting sky = ComputeSkyLighting(hour);
           auto& s = renderer_.settings();
           s.sun_direction = sky.sun_direction;
-          s.sun_intensity = sky.sun_intensity;
-          s.sun_color = sky.sun_color;
-          s.ambient = sky.ambient;
+          s.sun_intensity = sky.sun_intensity * w.light_scale;
+          s.sun_color = {sky.sun_color.x * w.light_tint.x, sky.sun_color.y * w.light_tint.y,
+                         sky.sun_color.z * w.light_tint.z};
+          s.ambient = sky.ambient + (has_weather ? w.cloud_coverage * 0.05f : 0.0f);
         }
       }
       TickMenuCapture();  // grab a clean backdrop frame after entering a universe

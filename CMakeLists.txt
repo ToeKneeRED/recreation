@@ -276,6 +276,7 @@ set(RECREATION_MODULES
   bethesda
   world
   quest
+  weather
   dialogue
   script
   modstream

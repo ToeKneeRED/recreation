@@ -20,6 +20,7 @@
 #include "core/window.h"
 #include "core/world_clock.h"
 #include "script/host/managed_host.h"
+#include "weather/weather.h"
 
 #include "actor_system.h"
 #include "content_domain.h"
@@ -245,6 +246,14 @@ class Engine {
   WorldClock clock_;
   bool drive_sun_from_clock_ = true;
   f32 last_sky_hour_ = -1000.0f;
+  // Weather, parsed from the game's WTHR/CLMT and driven off the world clock; it
+  // modulates the renderer's cloud/aerial/sun knobs (not the game's old skydome).
+  // ap_base_ is the aerial-perspective baseline weather scales; last_weather_* let
+  // the throttled sun update re-fire when the weather light changes.
+  weather::WeatherSystem weather_;
+  f32 ap_base_ = 1.0f;
+  f32 last_weather_scale_ = 1.0f;
+  Vec3 last_weather_tint_{1, 1, 1};
 
   ecs::World world_;
   ecs::Scheduler scheduler_;
