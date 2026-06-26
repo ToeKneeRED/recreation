@@ -109,6 +109,10 @@ struct RenderSettings {
 
   bool path_trace = false;  // reference progressive path tracer (needs ray query)
 
+  // Atmospheric aerial perspective: distant geometry hazes/blue-shifts like the
+  // sky, from a camera->surface raymarch of the atmosphere LUTs. 0 disables.
+  f32 aerial_perspective = 1.0f;
+
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)
   f32 fog_density = 0.03f;
   f32 fog_height_falloff = 0.15f;

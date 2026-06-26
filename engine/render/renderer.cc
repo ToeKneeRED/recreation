@@ -176,6 +176,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     path_tracer_.Initialize(*device_, bindless_->set_layout());
   }
   if (rt_available_) volumetric_fog_.Initialize(*device_);
+  aerial_perspective_.Initialize(*device_);  // atmospheric distance haze (no ray tracing)
 
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
@@ -254,6 +255,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   }
   if (const char* pt = std::getenv("REC_PATHTRACE")) settings_.path_trace = std::atoi(pt) != 0;
   if (const char* fg = std::getenv("REC_FOG")) settings_.fog = std::atoi(fg) != 0;
+  // REC_AERIAL overrides aerial-perspective strength (0 off, 1 physical, >1 exaggerated).
+  if (const char* ap = std::getenv("REC_AERIAL")) settings_.aerial_perspective = std::atof(ap);
 
   return true;
 }
@@ -1507,6 +1510,23 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         });
   }
 
+  // Aerial perspective: composite the atmosphere between the camera and each
+  // surface so distant geometry hazes/blue-shifts like the sky. Cheap; skipped
+  // when path tracing (the path tracer scatters its own sky).
+  if (settings_.aerial_perspective > 0.0f && !path_trace) {
+    AerialPerspective::Frame af;
+    af.inv_view_proj = globals.inv_view_proj;
+    af.camera_pos = view.camera.eye;
+    af.sun_direction = settings_.sun_direction;
+    af.sun_intensity = settings_.sun_intensity;
+    af.sun_color = settings_.sun_color;
+    af.strength = settings_.aerial_perspective;
+    lit = aerial_perspective_.AddToGraph(graph_, lit, depth_export,
+                                         environment_->transmittance_view(),
+                                         environment_->multiscatter_view(),
+                                         {render_width_, render_height_}, af);
+  }
+
   // Volumetric fog marches the lit scene against depth before the temporal
   // pass, so the marched noise resolves into stable shafts.
   if (fog_active) {
@@ -1994,6 +2014,7 @@ void Renderer::Shutdown() {
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
     volumetric_fog_.Destroy(*device_);
+  aerial_perspective_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();
     environment_.reset();

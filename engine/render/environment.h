@@ -50,6 +50,8 @@ class EnvironmentSystem {
 
   VkDescriptorSetLayout env_set_layout() const { return env_set_layout_; }
   VkImageView sky_view() const { return sky_.view; }
+  VkImageView transmittance_view() const { return transmittance_lut_.view; }
+  VkImageView multiscatter_view() const { return multiscatter_lut_.view; }
   VkSampler sampler() const { return sampler_; }
 
   struct DdgiBinding {
