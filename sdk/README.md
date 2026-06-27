@@ -12,7 +12,7 @@ engine internal. The native bridge (`engine/script/host/`) stays engine-side.
 |------|------------|----------|
 | `Engine/`, `Modding/`, `Interop/` | the SDK surface: `Game`/`Form`/`Actor`/`Quest`, the modding framework (`IMod`, `EventBus`, `GameBehaviour`, `ModHost`), the native marshalling types | mod authors |
 | `Net/`, `Teams/`, `Economy/`, `Admin/`, `Persistence/`, `Voice/`, `Map/`, `Hud/`, `Chat/`, `Social/`, `Scoreboard/`, `Browser/`, `Entities/`, `Ui/` | the multiplayer platform (`Recreation.Net`) | mixed: API + impl |
-| `Games/{Skyrim,Fallout,Starfield}` | per-game soft-logic, shipped as first-party content | examples |
+| `default_gamemodes/{Skyrim,Fallout,Starfield}` | per-game soft-logic, optional pre-provided content (still namespaced `Recreation.Games.*`) | examples |
 | `Samples/` | example gamemodes (wire-sync, roleplay) | examples |
 | `ScriptHost.cs`, `SdkInfo.cs` | the managed `Main` entrypoint + version accessor | engine glue |
 | `tests/` | the dependency-free test runner (`dotnet run`) | contributors |
