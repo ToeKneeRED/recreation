@@ -15,6 +15,7 @@ internal static class Program
         EventBusTests.Run(check);
         ModHostTests.Run(check);
         ModLoaderTests.Run(check);
+        ModConfigTests.Run(check);
         SchedulerTests.Run(check);
         FormScriptsTests.Run(check);
         SkyrimRegenTests.Run(check);
