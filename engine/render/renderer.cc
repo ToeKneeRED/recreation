@@ -178,6 +178,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (rt_available_) volumetric_fog_.Initialize(*device_);
   aerial_perspective_.Initialize(*device_);  // atmospheric distance haze (no ray tracing)
   clouds_.Initialize(*device_);              // volumetric clouds (no ray tracing)
+  precipitation_.Initialize(*device_);       // screen-space rain/snow
 
   UpdateRenderResolution();
   taa_.Resize(*device_, {render_width_, render_height_});
@@ -261,6 +262,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (const char* cl = std::getenv("REC_CLOUDS")) settings_.clouds = std::atoi(cl) != 0;
   if (const char* cc = std::getenv("REC_CLOUD_COVERAGE"))
     settings_.cloud_coverage = std::atof(cc);
+  // REC_PRECIP forces precipitation (0..1) and REC_SNOW=1 makes it snow, so the
+  // effect is testable without a loaded game's weather.
+  if (const char* pr = std::getenv("REC_PRECIP")) settings_.precipitation = std::atof(pr);
+  if (const char* sn = std::getenv("REC_SNOW")) settings_.precip_snow = std::atoi(sn) != 0;
 
   return true;
 }
@@ -1545,6 +1550,17 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     lit = clouds_.AddToGraph(graph_, lit, depth_export, {render_width_, render_height_}, cf);
   }
 
+  // Screen-space precipitation (rain/snow) over the lit scene, driven by weather.
+  if (settings_.precipitation > 0.0f && !path_trace) {
+    Precipitation::Frame pf;
+    pf.inv_view_proj = globals.inv_view_proj;
+    pf.camera_pos = view.camera.eye;
+    pf.time = static_cast<f32>(time_seconds_);
+    pf.intensity = settings_.precipitation;
+    pf.snow = settings_.precip_snow;
+    lit = precipitation_.AddToGraph(graph_, lit, {render_width_, render_height_}, pf);
+  }
+
   // Volumetric fog marches the lit scene against depth before the temporal
   // pass, so the marched noise resolves into stable shafts.
   if (fog_active) {
@@ -2034,6 +2050,7 @@ void Renderer::Shutdown() {
     volumetric_fog_.Destroy(*device_);
   aerial_perspective_.Destroy(*device_);
   clouds_.Destroy(*device_);
+  precipitation_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();
     environment_.reset();

@@ -158,6 +158,8 @@ bool Engine::RunFrame() {
       if (has_weather) {
         renderer_.settings().cloud_coverage = w.cloud_coverage;
         renderer_.settings().aerial_perspective = ap_base_ * (1.0f + w.aerosol * 2.0f);
+        renderer_.settings().precipitation = w.precipitation;
+        renderer_.settings().precip_snow = w.snow;
       }
       // Day/night: derive the sun direction/intensity/color/ambient from the
       // clock's time of day (unless REC_SUN_DIR pinned a fixed sun), tinted and

@@ -26,6 +26,7 @@
 #include "render/aerial_perspective.h"
 #include "render/clouds.h"
 #include "render/path_tracer.h"
+#include "render/precipitation.h"
 #include "render/volumetric_fog.h"
 #include "render/material_system.h"
 #include "render/mesh_pipeline.h"
@@ -262,6 +263,7 @@ class Renderer {
   VolumetricFog volumetric_fog_;
   AerialPerspective aerial_perspective_;
   Clouds clouds_;
+  Precipitation precipitation_;
   ParticleSystem particles_;
   GaussianSplat gaussians_;
   FurPass fur_;

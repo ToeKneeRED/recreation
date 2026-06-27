@@ -117,6 +117,10 @@ struct RenderSettings {
   bool clouds = true;
   f32 cloud_coverage = 0.46f;  // 0 clear .. 1 overcast
 
+  // Screen-space precipitation, driven by the weather system (0 disables).
+  f32 precipitation = 0.0f;  // 0 none .. 1 heavy
+  bool precip_snow = false;  // snow flakes vs rain streaks
+
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)
   f32 fog_density = 0.03f;
   f32 fog_height_falloff = 0.15f;

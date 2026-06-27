@@ -192,6 +192,14 @@ void Engine::ApplyRenderPreset() {
   tuned.ssgi = env.ssgi;                      // honor REC_SSGI over the preset
   tuned.color_grade = env.color_grade;        // presets never set a grade
   tuned.sun_direction = env.sun_direction;    // honor REC_SUN_DIR over the default
+  // Sky/weather env overrides (REC_AERIAL / REC_CLOUDS / REC_CLOUD_COVERAGE /
+  // REC_PRECIP / REC_SNOW), so they survive the preset. A loaded game's weather
+  // re-drives these per frame; this keeps them working in the demo/glTF scenes.
+  tuned.aerial_perspective = env.aerial_perspective;
+  tuned.clouds = env.clouds;
+  tuned.cloud_coverage = env.cloud_coverage;
+  tuned.precipitation = env.precipitation;
+  tuned.precip_snow = env.precip_snow;
   if (std::getenv("REC_NO_OCCLUSION")) tuned.gpu_occlusion = false;  // a/b baseline
 
   renderer_.settings() = tuned;

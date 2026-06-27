@@ -35,6 +35,7 @@ recreation_add_module(render
   volumetric_fog.cc
   aerial_perspective.cc
   clouds.cc
+  precipitation.cc
   upscaler.cc
   vulkan/vk_device.cc
   vulkan/vk_swapchain.cc
@@ -97,6 +98,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/multiscatter_lut.cs.hlsl
   shaders/aerial_perspective.cs.hlsl
   shaders/clouds.cs.hlsl
+  shaders/precipitation.cs.hlsl
   shaders/sky.cs.hlsl
   shaders/sky.ps.hlsl
   shaders/irradiance.cs.hlsl
