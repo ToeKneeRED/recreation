@@ -265,6 +265,10 @@ class Engine {
   f32 ap_base_ = 1.0f;
   f32 last_weather_scale_ = 1.0f;
   Vec3 last_weather_tint_{1, 1, 1};
+  // Debug-UI weather playground: when set, the loop uses weather_override_state_
+  // instead of the climate, so the Weather panel can drive the sky live.
+  bool weather_override_ = false;
+  weather::WeatherState weather_override_state_;
 
   ecs::World world_;
   ecs::Scheduler scheduler_;

@@ -42,6 +42,7 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
       REC_WARN("debug ui unavailable");
     }
     debug_ui_.set_clock(&clock_);  // Lighting panel scrubs the day/night cycle
+    debug_ui_.set_weather(&weather_override_, &weather_override_state_);  // Weather playground
     if (!game_ui_.Initialize(*window_, renderer_)) {
       REC_WARN("game ui unavailable");
     }

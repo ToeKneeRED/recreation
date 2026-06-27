@@ -10,6 +10,7 @@
 #include "core/window.h"
 #include "core/world_clock.h"
 #include "render/renderer.h"
+#include "weather/weather.h"
 
 namespace rec {
 
@@ -113,6 +114,12 @@ class DebugUi {
   // The day/night clock, so the Lighting panel can scrub the time of day and the
   // timescale. Null leaves those controls out.
   void set_clock(WorldClock* clock) { clock_ = clock; }
+  // The engine's weather override: when `*enable` is set, the loop uses `*state`
+  // instead of the climate, so the Weather panel can drive the sky live.
+  void set_weather(bool* enable, weather::WeatherState* state) {
+    weather_enable_ = enable;
+    weather_state_ = state;
+  }
 
   void ToggleVisible() { visible_ = !visible_; }
   void SetVisible(bool v) { visible_ = v; }
@@ -136,6 +143,8 @@ class DebugUi {
   bool quests_visible_ = true;  // the quest debugger window (F3 toggles)
   bool show_demo_ = false;
   WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
+  bool* weather_enable_ = nullptr;  // engine weather-override flag + state, for the Weather panel
+  weather::WeatherState* weather_state_ = nullptr;
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
   // The set-stage InputInt tracks the selected quest: switching selection resets
   // it instead of carrying a stale stage from the previously expanded quest.

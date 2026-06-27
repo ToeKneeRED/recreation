@@ -360,6 +360,33 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
         ImGui::SliderFloat("Ambient", &settings.ambient, 0.0f, 0.5f);
       }
 
+      // Live weather playground: override the climate and drive the sky/clouds/
+      // rain directly. The engine applies *weather_state_ while the toggle is on.
+      if (weather_enable_ && weather_state_ &&
+          ImGui::CollapsingHeader("Weather", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Override climate (live)", weather_enable_);
+        weather::WeatherState& w = *weather_state_;
+        auto preset = [&](weather::WeatherDef::Kind k) {
+          weather::WeatherDef d;
+          d.kind = k;
+          d.DeriveFromKind();
+          w = weather::ToState(d);
+          *weather_enable_ = true;
+        };
+        if (ImGui::Button("Clear")) preset(weather::WeatherDef::Kind::kPleasant);
+        ImGui::SameLine();
+        if (ImGui::Button("Cloudy")) preset(weather::WeatherDef::Kind::kCloudy);
+        ImGui::SameLine();
+        if (ImGui::Button("Rainy")) preset(weather::WeatherDef::Kind::kRainy);
+        ImGui::SameLine();
+        if (ImGui::Button("Snow")) preset(weather::WeatherDef::Kind::kSnow);
+        ImGui::SliderFloat("Cloud coverage", &w.cloud_coverage, 0.0f, 1.0f);
+        ImGui::SliderFloat("Precipitation", &w.precipitation, 0.0f, 1.0f);
+        ImGui::Checkbox("Snow (vs rain)", &w.snow);
+        ImGui::SliderFloat("Haze", &w.aerosol, 0.0f, 1.0f);
+        ImGui::SliderFloat("Light dimming", &w.light_scale, 0.1f, 1.0f);
+      }
+
       if (ImGui::CollapsingHeader("Post processing", ImGuiTreeNodeFlags_DefaultOpen)) {
         int tonemap = static_cast<int>(settings.tonemap);
         if (ImGui::Combo("Tonemap", &tonemap, kTonemaps, IM_ARRAYSIZE(kTonemaps))) {

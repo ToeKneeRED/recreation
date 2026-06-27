@@ -153,8 +153,14 @@ bool Engine::RunFrame() {
       // (never its baked skydome). Cloud coverage + aerial-perspective haze update
       // every frame (cheap, no IBL rebuild); the sun tint/dimming folds into the
       // throttled day/night update below.
-      const bool has_weather = !weather_.empty();
-      const weather::WeatherState w = weather_.At(clock_.game_days());
+      // The debug Weather panel can override the climate live; otherwise the
+      // loaded game's weather drives the sky.
+      const bool has_weather = weather_override_ || !weather_.empty();
+      weather::WeatherState w;
+      if (weather_override_)
+        w = weather_override_state_;
+      else if (!weather_.empty())
+        w = weather_.At(clock_.game_days());
       if (has_weather) {
         renderer_.settings().cloud_coverage = w.cloud_coverage;
         renderer_.settings().aerial_perspective = ap_base_ * (1.0f + w.aerosol * 2.0f);
