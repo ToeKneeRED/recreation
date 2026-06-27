@@ -152,6 +152,7 @@ bool Engine::RunFrame() {
       }
     }
     npc_->CwBattleTick(static_cast<f32>(timer_.frame_delta()));
+    npc_->CwFieldBattleTick(static_cast<f32>(timer_.frame_delta()));
     npc_->UpdateCombat(static_cast<f32>(timer_.frame_delta()));
     npc_->Mq101DemoTick(static_cast<f32>(timer_.frame_delta()));
     npc_->Mq101SceneTick(static_cast<f32>(timer_.frame_delta()));

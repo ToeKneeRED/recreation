@@ -493,6 +493,103 @@ void NpcDirector::CwBattleTick(f32 dt) {
   }
 }
 
+bool NpcDirector::BattleCam(Vec3* eye, Vec3* target) const {
+  if (!cw_field_active_) return false;
+  *target = cw_field_center_;
+  // Raised and close behind team 1, a steep look down the clash axis so the two
+  // lines read large and foreground terrain does not occlude them.
+  *eye = cw_field_center_ - cw_field_fwd_ * 6.0f + Vec3{0.0f, 10.0f, 0.0f};
+  return true;
+}
+
+u64 NpcDirector::SpawnSoldier(const Vec3& pos, i32 team) {
+  // Synthetic handle in the reserved 0xFFFF plugin slot, offset high so it never
+  // collides with quest PlaceAtMe spawns (which start low in the same slot).
+  const u64 id = 0x40000000u + cw_spawn_seq_++;
+  const u64 handle = (0xFFFFull << 32) | id;
+  ecs::Entity e = world_.Create();
+  world::Transform t;
+  t.position[0] = pos.x;
+  t.position[1] = GroundY(pos.x, pos.z, pos.y);
+  t.position[2] = pos.z;
+  world_.Add(e, t);
+  world_.Add(e, world::Npc{bethesda::GlobalFormId{}});  // generic soldier; rig is shared
+  world_.Add(e, world::FormLink{bethesda::GlobalFormId{0xFFFF, static_cast<u32>(id)}});
+  world_.Add(e, world::CombatTeam{team});
+  if (ctx_.quest_world) ctx_.quest_world->Register(handle, e);
+  return handle;
+}
+
+void NpcDirector::CwFieldBattleTick(f32 dt) {
+  if (!cw_field_pending_ || !actors_->HasPlayer()) return;
+  if (!cw_field_active_) {
+    cw_field_warmup_ += dt;
+    if (cw_field_warmup_ < 2.0f) return;  // let the terrain stream and the player settle
+    Vec3 ppos;
+    if (!actors_->PlayerWorldPos(&ppos)) return;
+    // The player may have spawned facing a wall; pick the most open direction so
+    // the clash stages on clear ground, and turn the camera to it.
+    f32 yaw = ctx_.cam_yaw;
+    f32 clearance = 30.0f;
+    if (physics_.initialized()) {
+      f32 best_clear = -1.0f;
+      for (int i = 0; i < 12; ++i) {
+        const f32 a = ctx_.cam_yaw + static_cast<f32>(i) * 30.0f * 0.0174533f;
+        const Vec3 d{std::sin(a), 0.0f, -std::cos(a)};
+        physics::PhysicsWorld::RayHit hit;
+        const f32 c = physics_.Raycast(Vec3{ppos.x, ppos.y + 1.5f, ppos.z}, d, 30.0f, &hit)
+                          ? hit.distance
+                          : 30.0f;
+        if (c > best_clear) {
+          best_clear = c;
+          yaw = a;
+          clearance = c;
+        }
+      }
+    }
+    ctx_.cam_yaw = yaw;
+    const Vec3 fwd{std::sin(yaw), 0.0f, -std::cos(yaw)};
+    const Vec3 right{std::cos(yaw), 0.0f, std::sin(yaw)};
+    const f32 reach = std::clamp(clearance * 0.6f, 11.0f, 20.0f);
+    const Vec3 center = ppos + fwd * reach;  // stage the clash on the open ground ahead
+    cw_field_center_ = center;
+    cw_field_fwd_ = fwd;
+    constexpr int kPerSide = 8;
+    constexpr f32 kSpacing = 2.4f;
+    constexpr f32 kHalfGap = 5.0f;  // the two lines start 10 m apart and charge
+    for (int i = 0; i < kPerSide; ++i) {
+      const f32 off = (static_cast<f32>(i) - (kPerSide - 1) * 0.5f) * kSpacing;
+      cw_field_soldiers_.push_back(SpawnSoldier(center - fwd * kHalfGap + right * off, 1));
+      cw_field_soldiers_.push_back(SpawnSoldier(center + fwd * kHalfGap + right * off, 2));
+    }
+    std::vector<u64> handles(cw_field_soldiers_.begin(), cw_field_soldiers_.end());
+    auto* binds = ctx_.bindings;
+    if (binds && ctx_.scripts)
+      ctx_.scripts->guest().Submit([binds, handles](rec::script::papyrus::VirtualMachine&) {
+        for (u64 h : handles) binds->SetActorValue(script::papyrus::ObjectRef{h}, "health", 140.0f);
+      });
+    cw_field_active_ = true;
+    REC_INFO("cw field battle: spawned {} soldiers in two lines", cw_field_soldiers_.size());
+  }
+
+  cw_battle_log_timer_ -= dt;
+  if (cw_battle_log_timer_ <= 0.0f) {
+    cw_battle_log_timer_ = 1.0f;
+    int a = 0, b = 0, d = 0;
+    world_.Each<world::CombatTeam>([&](ecs::Entity e, world::CombatTeam& ct) {
+      if (world_.Has<world::Dead>(e)) {
+        ++d;
+        return;
+      }
+      if (ct.team == 1)
+        ++a;
+      else if (ct.team == 2)
+        ++b;
+    });
+    REC_INFO("cw field battle: team1={} team2={} fallen={} engaged={}", a, b, d, combatant_count());
+  }
+}
+
 void NpcDirector::UpdateFollowers(f32 dt) {
   // Host authoritative: a client receives follower motion via actor sync.
 #if RECREATION_HAS_NET

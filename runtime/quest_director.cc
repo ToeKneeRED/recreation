@@ -224,6 +224,12 @@ void QuestDirector::AttachQuestScripts() {
     npc_->ArmCwBattle();
     REC_INFO("debug: CW battle harness armed (nearby NPCs split into two armies)");
   }
+  // REC_CW_FIELD_BATTLE stages a fresh two-army clash in the open in front of the
+  // player, framed for the camera.
+  if (host && std::getenv("REC_CW_FIELD_BATTLE")) {
+    npc_->ArmCwFieldBattle();
+    REC_INFO("debug: CW field battle armed (two lines of soldiers will charge)");
+  }
 
   // REC_JOURNAL opens the quest journal at load (it is normally toggled with J),
   // for screenshots (cf. RECREATION_UI_MENU / REC_HIDE_DEBUG_UI).

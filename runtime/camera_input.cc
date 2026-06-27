@@ -362,6 +362,14 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
     ctx_.walk_eye = body + Vec3{0, 1.7f, 0};
     ctx_.walk_target = ctx_.walk_eye + cam_fwd;
   }
+
+  // A staged field battle takes over the view with an elevated spectator framing,
+  // so the clash is visible even when the player wedged against terrain.
+  Vec3 beye, btarget;
+  if (npc_->BattleCam(&beye, &btarget)) {
+    ctx_.walk_eye = beye;
+    ctx_.walk_target = btarget;
+  }
 }
 
 void Engine::ThrowPhysicsCube() {

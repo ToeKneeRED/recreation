@@ -82,6 +82,21 @@ class NpcDirector {
   // Civil War Papyrus. Not the quest itself.
   void ArmCwBattle() { cw_battle_pending_ = true; }
   void CwBattleTick(f32 dt);
+
+  // Spawns a fighting soldier: a fresh Npc entity (skinned biped via the actor
+  // system) at `pos`, tagged with `team` and registered so combat can resolve it
+  // by handle. Returns its synthetic form handle. The general primitive behind the
+  // staged field battle and, later, the Civil War siege's aliased soldiers.
+  u64 SpawnSoldier(const Vec3& pos, i32 team);
+  // REC_CW_FIELD_BATTLE: spawns two lines of soldiers in the open in front of the
+  // player and lets them charge and clash, framed for the camera (spawning,
+  // combat and rendering together).
+  void ArmCwFieldBattle() { cw_field_pending_ = true; }
+  void CwFieldBattleTick(f32 dt);
+  // An elevated spectator framing of the staged field battle (eye behind one
+  // line looking down the clash), so the camera shows the soldiers regardless of
+  // where the player wedged on the terrain. False when no field battle is staged.
+  bool BattleCam(Vec3* eye, Vec3* target) const;
   // Live army strength for the battle HUD: alive count per team and fallen total.
   // Returns false until a battle is running.
   bool BattleStrength(int* team_a, int* team_b, int* fallen) const;
@@ -149,6 +164,13 @@ class NpcDirector {
   bool cw_battle_pending_ = false;
   bool cw_battle_active_ = false;
   f32 cw_battle_log_timer_ = 0;
+  bool cw_field_pending_ = false;
+  bool cw_field_active_ = false;
+  f32 cw_field_warmup_ = 0;     // let terrain stream before placing soldiers
+  u32 cw_spawn_seq_ = 1;        // synthetic-handle counter for spawned soldiers
+  base::Vector<u64> cw_field_soldiers_;
+  Vec3 cw_field_center_{};      // battle midpoint, for the spectator camera
+  Vec3 cw_field_fwd_{};         // clash axis (team 1 -> team 2)
   u64 ambient_rng_ = 0x243f6a8885a308d3ull;
   f32 AmbientRand(f32 lo, f32 hi);
   bool mq101_demo_pending_ = false;
