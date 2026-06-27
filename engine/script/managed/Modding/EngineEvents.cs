@@ -21,6 +21,9 @@ public static class EngineEvents
             case ManagedEventId.QuestStageChanged:
                 EventBus.Publish(new QuestStageChanged(e.A, e.I));
                 break;
+            case ManagedEventId.FormLoaded:
+                EventBus.Publish(new FormLoaded(e.A));
+                break;
         }
     }
 }
