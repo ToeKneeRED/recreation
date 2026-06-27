@@ -33,6 +33,8 @@ public static class ModConfigTests
 
         // A wrong-typed read still falls back rather than throwing.
         check.Equal("type mismatch falls back", 9, reloaded.GetInt("label", 9));
+        // Reading a non-integer number as an int falls back instead of throwing.
+        check.Equal("non-integer number as int falls back", 3, reloaded.GetInt("rate", 3));
 
         Directory.Delete(dir, recursive: true);
     }

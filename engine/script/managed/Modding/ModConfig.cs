@@ -55,13 +55,16 @@ public sealed class ModConfig
     }
 
     public float GetFloat(string key, float fallback) =>
-        _values.TryGetValue(key, out JsonElement e) && e.ValueKind == JsonValueKind.Number
-            ? e.GetSingle()
+        _values.TryGetValue(key, out JsonElement e) && e.ValueKind == JsonValueKind.Number &&
+        e.TryGetSingle(out float v)
+            ? v
             : fallback;
 
+    // Falls back rather than throwing when the stored number is not an integer.
     public int GetInt(string key, int fallback) =>
-        _values.TryGetValue(key, out JsonElement e) && e.ValueKind == JsonValueKind.Number
-            ? e.GetInt32()
+        _values.TryGetValue(key, out JsonElement e) && e.ValueKind == JsonValueKind.Number &&
+        e.TryGetInt32(out int v)
+            ? v
             : fallback;
 
     public bool GetBool(string key, bool fallback) =>
