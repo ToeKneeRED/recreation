@@ -27,6 +27,9 @@ public static unsafe class ScriptHost
         // Wire the multiplayer RPC layer. Emit is null in single-player, leaving
         // Rpc unbound so sends and dispatch are inert.
         if (handshake->Rpc.Emit != null) Rpc.Bind(new NativeRpcBackend(handshake->Rpc));
+        // Bring the multiplayer platform (state bags, player registry, ...) online
+        // for this process role, before mods load so an OnLoad can use it.
+        Recreation.Net.Platform.Boot(handshake->Realm);
         Console.WriteLine($"[managed] Recreation scripting host online, {Domains.Count} game(s)");
         if (Environment.GetEnvironmentVariable("REC_DOMAINS_REPORT") != null) ReportDomains();
         // Filter which mods start by the process role: server + shared on a host,

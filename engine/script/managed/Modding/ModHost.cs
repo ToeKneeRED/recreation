@@ -121,6 +121,7 @@ public static class ModHost
         PlayerControls.Clear();
         Zones.Clear();
         Rpc.Clear();
+        Recreation.Net.Platform.Reset();
         Time.Reset();
         EventBus.Clear();
         _booted = false;
