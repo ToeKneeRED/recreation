@@ -175,7 +175,9 @@ void PapyrusGuest::BindEngineNatives() {
         "ClearWaypoint", "Scoreboard", "ScoreboardRow", "HideScoreboard", "Menu"}) {
     reg_platform("Hud", f);
   }
-  reg_platform("Net", "Connect");
+  for (const char* f : {"Connect", "SpawnObject", "MoveObject", "DeleteObject"}) {
+    reg_platform("Net", f);
+  }
 }
 
 }  // namespace rec::script

@@ -402,6 +402,13 @@ class Engine {
   PlatformHud platform_hud_;
   // Accumulated chat lines shown in the chat box (bounded tail of the channel).
   std::vector<std::string> platform_chat_display_;
+  // Networked entities a mod spawned (NetEntity id -> the ECS entity placed for it),
+  // so a later move/delete finds the same object.
+  base::UnorderedMap<int, ecs::Entity> net_entities_;
+  // A placeable base form (a static with a model) used as the placeholder visual
+  // for spawned net entities until per-model meshes are wired. Resolved once.
+  bethesda::GlobalFormId net_entity_base_{};
+  bool net_entity_base_ready_ = false;
   physics::PhysicsWorld physics_;
   // Dynamic bodies mirrored into ECS transforms after each step.
   base::Vector<PhysicsEntity> physics_entities_;

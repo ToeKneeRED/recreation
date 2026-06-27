@@ -64,6 +64,18 @@ struct PlatformScoreboard {
   std::vector<PlatformScoreRow> rows;
 };
 
+// One networked-object change from the entity layer: spawn a renderable, move an
+// existing one, or remove it. The runtime applies these to the ECS world each
+// frame so a mod's spawned props appear for the local player. Net.SpawnObject /
+// Net.MoveObject / Net.DeleteObject.
+struct PlatformEntityOp {
+  enum class Kind { kSpawn, kMove, kDelete };
+  Kind kind = Kind::kSpawn;
+  int id = 0;
+  std::string model;
+  f32 x = 0, y = 0, z = 0;
+};
+
 // The game-agnostic sink for the C# multiplayer platform's HUD and Net calls
 // (Hud.* and Net.*). A mod reaches it through Native.CallGlobal; the Papyrus guest
 // routes the call here on the guest thread, and the runtime drains it onto the
@@ -89,6 +101,9 @@ class PlatformHud {
   PlatformScoreboard Scoreboard() const;
   std::optional<std::array<f32, 3>> Waypoint() const;
 
+  // Main thread: take the networked-entity ops queued since the previous drain.
+  std::vector<PlatformEntityOp> DrainEntityOps();
+
   // Net.Connect target a mod requested, consumed once by the runtime.
   std::optional<std::string> TakePendingConnect();
 
@@ -105,6 +120,7 @@ class PlatformHud {
   std::unordered_map<std::string, PlatformBlip> blips_;
   std::optional<std::array<f32, 3>> waypoint_;
   PlatformScoreboard scoreboard_;
+  std::vector<PlatformEntityOp> entity_ops_;  // drained to the ECS world
   std::optional<std::string> pending_connect_;
 };
 

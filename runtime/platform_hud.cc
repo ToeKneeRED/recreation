@@ -69,8 +69,18 @@ void PlatformHud::Submit(const std::string& type, const std::string& func,
     }
     return;
   }
-  if (type == "Net" && func == "Connect") {
-    pending_connect_ = ArgStr(args, 0);
+  if (type == "Net") {
+    if (func == "Connect") {
+      pending_connect_ = ArgStr(args, 0);
+    } else if (func == "SpawnObject" || func == "MoveObject") {
+      // (id, model, x, y, z, rx, ry, rz)
+      entity_ops_.push_back({func == "SpawnObject" ? PlatformEntityOp::Kind::kSpawn
+                                                    : PlatformEntityOp::Kind::kMove,
+                             ArgInt(args, 0), ArgStr(args, 1), ArgF(args, 2), ArgF(args, 3),
+                             ArgF(args, 4)});
+    } else if (func == "DeleteObject") {
+      entity_ops_.push_back({PlatformEntityOp::Kind::kDelete, ArgInt(args, 0), "", 0, 0, 0});
+    }
   }
 }
 
@@ -115,6 +125,11 @@ std::optional<std::array<f32, 3>> PlatformHud::Waypoint() const {
   return waypoint_;
 }
 
+std::vector<PlatformEntityOp> PlatformHud::DrainEntityOps() {
+  std::lock_guard<std::mutex> lock(mu_);
+  return std::move(entity_ops_);
+}
+
 std::optional<std::string> PlatformHud::TakePendingConnect() {
   std::lock_guard<std::mutex> lock(mu_);
   std::optional<std::string> out = std::move(pending_connect_);
@@ -131,6 +146,7 @@ void PlatformHud::Clear() {
   blips_.clear();
   waypoint_.reset();
   scoreboard_ = {};
+  entity_ops_.clear();
   pending_connect_.reset();
 }
 
