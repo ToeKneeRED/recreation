@@ -29,11 +29,13 @@ public static class Platform
     {
         Role = role;
         StateBags.Bind(role);
+        Players.Bind(role);
     }
 
     // Tear every subsystem down. Called by ModHost.Shutdown.
     public static void Reset()
     {
+        Players.Reset();
         StateBags.Reset();
         Role = NetRole.Standalone;
     }

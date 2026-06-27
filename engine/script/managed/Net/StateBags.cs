@@ -9,15 +9,13 @@ namespace Recreation.Net;
 // writes by role, and keeps clients in sync with the host:
 //
 //   * Server     - a set applies locally and broadcasts the new value. Inbound
-//                  client write requests pass a validator before being applied and
-//                  rebroadcast, so the host stays the single source of truth.
+//                  client write requests pass a validator before apply + rebroadcast.
 //   * Client     - a set is sent to the server as a request; the change becomes
 //                  visible only when the server's authoritative echo arrives.
-//   * Standalone - a set just applies locally (nobody to sync with).
+//   * Standalone - a set just applies locally.
 //
-// Replication rides the existing scripting RPC channel (three reserved names), so
-// state bags need no new wire protocol and work anywhere RPC does. A joining
-// player is sent the full current state, so it starts life already in sync.
+// Replication rides the existing scripting RPC channel (three reserved names). A
+// joining player is sent the full current state.
 public static class StateBags
 {
     // Reserved RPC names. Namespaced so they never collide with a mod's own RPCs.
@@ -30,24 +28,25 @@ public static class StateBags
     private static readonly Dictionary<string, StateBag> Bags = new();
     private static NetRole _role = NetRole.Standalone;
     private static readonly List<IDisposable> Subscriptions = new();
+    // Observers of every change across every bag (player roster, scoreboard).
+    private static readonly List<Action<StateBagChange>> GlobalObservers = new();
 
-    // Gate for inbound client writes. Returns true to accept the change. The
-    // default lets a client write only its own player bag, the safe baseline; a mod
-    // widens or tightens it (e.g. trusting clients for entity state they own).
+    // Gate for inbound client writes; returns true to accept. Default lets a client
+    // write only its own player bag; a mod widens or tightens it.
     private static Func<uint, string, string, Value, bool> _writeValidator = DefaultValidator;
 
     // The world-scoped bag every player shares. Server-authoritative.
     public static StateBag Global => Bag(GlobalName);
 
-    // The bag attached to a player (by peer id) and to a networked entity (by net
-    // id). Naming is conventional so both sides resolve the same bag.
+    // Bags attached to a player (by peer id) and to a networked entity (by net id).
+    // Naming is conventional so both sides resolve the same bag.
     public static StateBag Player(uint peer) => Bag($"player:{peer}");
     public static StateBag Entity(ulong netId) => Bag($"entity:{netId}");
 
     public static NetRole Role => _role;
 
-    // Get-or-create a bag by name. Bags are created lazily on both sides so a
-    // client referencing player:7 before any state arrives still gets a live bag.
+    // Get-or-create a bag by name. Created lazily, so referencing player:7 before any
+    // state arrives still gets a live bag.
     public static StateBag Bag(string name)
     {
         if (!Bags.TryGetValue(name, out StateBag? bag))
@@ -63,14 +62,32 @@ public static class StateBags
 
     public static IReadOnlyCollection<StateBag> All => Bags.Values;
 
-    // Replace the client-write gate. The validator sees the sender peer, the target
-    // bag and key, and the proposed value.
+    // Replace the client-write gate. The validator sees sender peer, bag, key, value.
     public static void SetClientWriteValidator(Func<uint, string, string, Value, bool> validator) =>
         _writeValidator = validator ?? DefaultValidator;
 
-    // Wire the layer for a role: clears prior state, then registers the RPC handlers
-    // and lifecycle hooks that role needs. Idempotent (re-binding resets first), so
-    // a session reload starts clean. Called by Platform.Boot.
+    // Observe every change to every bag (systems that span bags). The token detaches.
+    public static IDisposable OnAnyChange(Action<StateBagChange> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        GlobalObservers.Add(handler);
+        return new Unsubscriber(() => GlobalObservers.Remove(handler));
+    }
+
+    // Fired by StateBag.ApplyLocal for each real change. Snapshotted so an observer
+    // may (un)subscribe mid-dispatch.
+    internal static void RaiseGlobalChange(in StateBagChange change)
+    {
+        if (GlobalObservers.Count == 0) return;
+        Action<StateBagChange>[] snapshot = GlobalObservers.ToArray();
+        foreach (Action<StateBagChange> h in snapshot)
+        {
+            try { h(change); }
+            catch (Exception ex) { Console.Error.WriteLine($"[statebag] observer threw: {ex.Message}"); }
+        }
+    }
+
+    // Wire the layer for a role. Idempotent (re-binding resets first). Called by Platform.Boot.
     internal static void Bind(NetRole role)
     {
         Reset();
@@ -79,9 +96,8 @@ public static class StateBags
         {
             case NetRole.Server:
                 Rpc.On(ReqRpc, OnClientWrite);
-                // Sync a player the moment it can receive, and again once its UGC has
-                // streamed (covers sessions with and without mod streaming); the
-                // second pass is a no-op when nothing changed in between.
+                // Sync a player on join, and again once its UGC has streamed (covers
+                // sessions with and without mod streaming); the second pass no-ops if unchanged.
                 Track(EventBus.Subscribe<ClientJoined>(e => SyncTo(e.Peer)));
                 Track(EventBus.Subscribe<ClientAssetsReady>(e => SyncTo(e.Peer)));
                 Track(EventBus.Subscribe<ClientLeft>(e => DropPlayerBag(e.Peer)));
@@ -101,6 +117,7 @@ public static class StateBags
         foreach (IDisposable sub in Subscriptions) sub.Dispose();
         Subscriptions.Clear();
         Bags.Clear();
+        GlobalObservers.Clear();
         _role = NetRole.Standalone;
         _writeValidator = DefaultValidator;
     }
@@ -120,8 +137,8 @@ public static class StateBags
             ApplyAndBroadcast(bag, key, value);
             return;
         }
-        // Client: ask the server. The change lands when the authoritative echo
-        // (sb:set) comes back, keeping the client from diverging optimistically.
+        // Client: ask the server. The change lands when the authoritative echo (sb:set)
+        // comes back, so the client never diverges optimistically.
         Rpc.Emit(ReqRpc, Value.String(bag.Name), Value.String(key), value);
     }
 
@@ -186,9 +203,8 @@ public static class StateBags
         Bags.Remove(name);
     }
 
-    // The safe default: a client may write only the bag that is its own player
-    // bag. Everything else (global, other players, entities) is server-owned until
-    // a mod opts into trusting clients via SetClientWriteValidator.
+    // Safe default: a client may write only its own player bag; everything else is
+    // server-owned unless a mod overrides via SetClientWriteValidator.
     private static bool DefaultValidator(uint peer, string bag, string key, Value value) =>
         bag == $"player:{peer}";
 }

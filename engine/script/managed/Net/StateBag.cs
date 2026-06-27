@@ -4,10 +4,8 @@ using Recreation.Interop;
 
 namespace Recreation.Net;
 
-// One networked change to a state bag, handed to OnChange subscribers. FromServer
-// is true when the change arrived from the authoritative host (a client mirroring
-// the truth), false when it originated locally (a server or single-player set).
-// Mods key authority decisions off it the way FiveM's handler reads `replicated`.
+// One networked change to a state bag. FromServer is true when it came from the
+// host, false when it originated locally.
 public readonly struct StateBagChange
 {
     public readonly StateBag Bag;
@@ -28,14 +26,9 @@ public readonly struct StateBagChange
     public bool Removed => Value.IsNone;
 }
 
-// A named, replicated key/value store: the platform's foundational networked-state
-// primitive, modelled on FiveM's state bags but server-authoritative by default.
-// A bag hangs off a scope (the global world, a player, or an entity); the manager
-// (StateBags) decides who may write and how a change reaches the wire.
-//
-// A bag is a thin data holder: it owns its entries and its change subscribers, and
-// applies mutations locally. Replication policy lives in StateBags so the bag has
-// no notion of the network, which keeps it trivial to reason about and to test.
+// A named, replicated key/value store, server-authoritative by default. A bag is a
+// thin data holder; replication policy lives in StateBags, so the bag has no notion
+// of the network.
 public sealed class StateBag
 {
     private readonly Dictionary<string, Value> _entries = new();
@@ -46,8 +39,7 @@ public sealed class StateBag
 
     internal StateBag(string name) => Name = name;
 
-    // The current value for a key, or None when unset. None and absent are the same
-    // thing, so a mod can treat a removed key and a never-set key alike.
+    // The current value for a key, or None when unset (None and absent are the same).
     public Value Get(string key) => _entries.TryGetValue(key, out Value v) ? v : Value.None;
 
     public bool Has(string key) => _entries.ContainsKey(key);
@@ -56,8 +48,7 @@ public sealed class StateBag
 
     public IReadOnlyCollection<string> Keys => _entries.Keys;
 
-    // Snapshot of the entries, for full-sync and inspection. A copy so iteration is
-    // safe while handlers mutate the bag.
+    // Snapshot of the entries (a copy, so iteration is safe while handlers mutate).
     internal IReadOnlyList<KeyValuePair<string, Value>> Snapshot()
     {
         var list = new List<KeyValuePair<string, Value>>(_entries.Count);
@@ -66,12 +57,11 @@ public sealed class StateBag
     }
 
     // Set (or, with a None value, clear) a key. `replicated` false keeps the change
-    // purely local (UI-only state that never leaves this machine); true (the
-    // default) routes it through the manager's authority and replication rules.
+    // local; true routes it through the manager's authority and replication rules.
     public void Set(string key, Value value, bool replicated = true) =>
         StateBags.SetFrom(this, key, value, replicated);
 
-    // Convenience clears for the common scalar shapes, so mods read naturally.
+    // Convenience overloads for the common scalar shapes.
     public void Set(string key, int value, bool replicated = true) => Set(key, Value.Int(value), replicated);
     public void Set(string key, float value, bool replicated = true) => Set(key, Value.Float(value), replicated);
     public void Set(string key, bool value, bool replicated = true) => Set(key, Value.Bool(value), replicated);
@@ -100,10 +90,8 @@ public sealed class StateBag
         return new Unsubscriber(() => _anyHandlers.Remove(handler));
     }
 
-    // Apply a mutation to the local store and fire subscribers if it actually
-    // changed the value. Returns true on a real change so the manager only puts
-    // genuine deltas on the wire. Called by StateBags for both local sets and
-    // inbound replication; `fromServer` flows straight to the change.
+    // Apply a mutation to the local store, firing subscribers only on a real change.
+    // Returns true on a real change so the manager only puts genuine deltas on the wire.
     internal bool ApplyLocal(string key, Value value, bool fromServer)
     {
         Value previous = Get(key);
@@ -115,11 +103,12 @@ public sealed class StateBag
         var change = new StateBagChange(this, key, value, previous, fromServer);
         Fire(_anyHandlers, change);
         if (_keyHandlers.TryGetValue(key, out List<Action<StateBagChange>>? list)) Fire(list, change);
+        StateBags.RaiseGlobalChange(change);  // manager-level observers (player roster, ...)
         return true;
     }
 
     // Snapshot the handler list so a handler may (un)subscribe mid-dispatch, and
-    // isolate a thrower so the rest still run, matching EventBus semantics.
+    // isolate a thrower so the rest still run.
     private static void Fire(List<Action<StateBagChange>> handlers, in StateBagChange change)
     {
         if (handlers.Count == 0) return;
@@ -131,8 +120,7 @@ public sealed class StateBag
         }
     }
 
-    // Value carries no equality of its own; compare by kind and payload so change
-    // detection is precise (and cheap, versus the reflection ValueType.Equals).
+    // Value carries no equality of its own; compare by kind and payload.
     internal static bool ValuesEqual(Value a, Value b)
     {
         if (a.Kind != b.Kind) return false;
