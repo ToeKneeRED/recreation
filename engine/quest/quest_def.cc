@@ -104,7 +104,10 @@ QuestDef ParseQuestDefinition(u64 handle, const bethesda::Record& record,
         def.name = ResolveLString(sub, strings);
         break;
       case kDnam:
-        // DNAM: flags(u16), priority(u8), ... Priority sits at byte offset 2.
+        // DNAM: flags(u16), priority(u8), ... Priority sits at byte offset 2; the
+        // low flag bit (0x01) is Start Game Enabled.
+        if (sub.data.size() >= 2)
+          def.start_game_enabled = (sub.data.data()[0] & 0x01) != 0;
         if (sub.data.size() >= 3) def.priority = sub.data.data()[2];
         break;
       case kIndx:

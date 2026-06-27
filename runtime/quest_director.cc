@@ -104,6 +104,9 @@ void QuestDirector::AttachQuestScripts() {
   int limit = config_.max_quest_scripts;
   int quests = 0;
   int instances = 0;
+  // Start-Game-Enabled quests come online at load (REC_NO_AUTOSTART disables it).
+  const bool no_autostart_ = std::getenv("REC_NO_AUTOSTART") != nullptr;
+  int autostarted = 0;
   records_.EachOfType(FourCc('Q', 'U', 'S', 'T'),
                       [&](bethesda::GlobalFormId id,
                           const bethesda::RecordStore::StoredRecord& stored) {
@@ -143,18 +146,26 @@ void QuestDirector::AttachQuestScripts() {
                         // Register the stage->fragment map and definition on the
                         // guest thread (the bindings' only caller) so SetStage runs
                         // the quest's authored logic and snapshots carry its text.
+                        // Start-Game-Enabled quests (DNAM 0x01) are the game's
+                        // always-on controllers and intro quests, start them so
+                        // their dialogue topics and start logic come online, the
+                        // way the story manager would (e.g. CW00A's join lines).
+                        const bool sge = def.start_game_enabled && !no_autostart_;
+                        if (sge) ++autostarted;
                         auto* binds = ctx_.bindings;
                         ctx_.scripts->guest().Submit(
-                            [binds, handle, def = std::move(def),
+                            [binds, handle, sge, def = std::move(def),
                              fragments = std::move(fragments)](
                                 rec::script::papyrus::VirtualMachine&) mutable {
                               binds->quest_system().SetDefinition(std::move(def));
                               for (const auto& f : fragments)
                                 binds->SetStageFragment(handle, f.stage, f.function);
+                              if (sge) binds->StartQuest(rec::script::papyrus::ObjectRef{handle});
                             });
                       });
   REC_INFO("papyrus: instantiated {} scripts across {} quests, {} script types loaded", instances,
            quests, ctx_.scripts->loaded_script_count());
+  REC_INFO("quest: auto-started {} start-game-enabled quests", autostarted);
   REC_INFO("quest: resolved {} objective compass targets from forced-ref aliases",
            objective_targets_.size());
 
@@ -419,11 +430,11 @@ void QuestDirector::ReportQuestList(const std::string& prefix) {
             emit(Fmt("=== %zu quest(s) matching prefix '%s' ===", defs.size(),
                      lower_prefix.c_str()));
             for (const quest::QuestDef* def : defs)
-              emit(Fmt("  %-28s 0x%08llx  pri=%-3d stages=%-3zu obj=%-2zu complete@%-4d  %s",
+              emit(Fmt("  %-28s 0x%08llx  pri=%-3d stages=%-3zu obj=%-2zu complete@%-4d %s %s",
                        def->editor_id.c_str(),
                        static_cast<unsigned long long>(def->handle), def->priority,
                        def->stages.size(), def->objectives.size(), def->CompletionStage(),
-                       def->name.c_str()));
+                       def->start_game_enabled ? "SGE" : "   ", def->name.c_str()));
             return r;
           })
           .get();

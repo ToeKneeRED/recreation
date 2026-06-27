@@ -49,6 +49,7 @@ struct QuestDef {
   std::string editor_id;
   std::string name;  // FULL
   i32 priority = 0;
+  bool start_game_enabled = false;  // DNAM flag 0x01: the engine starts it at load
   std::vector<StageDef> stages;
   std::vector<ObjectiveDef> objectives;
   std::vector<AliasDef> aliases;
