@@ -54,6 +54,11 @@ public sealed class MultiplayerDemo : IMod
             SetPos(1, p.X + 3f, p.Y, p.Z - 11f);
             SetPos(2, p.X - 3f, p.Y, p.Z - 13f);
             SetPos(3, p.X + 0.5f, p.Y, p.Z - 16f);
+
+            // Spawn networked objects ahead of us: a mod placing props every player
+            // sees. Placed in front and above the water so they read clearly.
+            NetEntities.Spawn("prop", new Vector3(p.X + 5f, p.Y + 2f, p.Z - 14f));
+            NetEntities.Spawn("prop", new Vector3(p.X - 5f, p.Y + 2f, p.Z - 16f));
         });
     }
 

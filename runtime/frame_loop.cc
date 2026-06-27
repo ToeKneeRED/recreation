@@ -458,17 +458,25 @@ bool Engine::RunFrame() {
               for (const char* bad : {"marker", "fx\\", "loadscreen", "interface", "effects\\"}) {
                 if (path.find(bad) != std::string::npos) return;
               }
-              net_entity_base_ = id;
+              // Prefer a compact, recognizable prop for the placeholder; otherwise
+              // take the first acceptable static found.
+              const bool nice = path.find("barrel") != std::string::npos ||
+                                path.find("crate") != std::string::npos ||
+                                path.find("rock") != std::string::npos ||
+                                path.find("boulder") != std::string::npos;
+              if (!nice && net_entity_base_fallback_.local_id == 0)
+                net_entity_base_fallback_ = id;
+              if (nice) net_entity_base_ = id;
             });
+        if (net_entity_base_.local_id == 0) net_entity_base_ = net_entity_base_fallback_;
       }
       for (const PlatformEntityOp& op : platform_hud_.DrainEntityOps()) {
         if (op.kind == PlatformEntityOp::Kind::kSpawn) {
           if (!streamer_) continue;
           // Place through the cell streamer at the entity's engine-space world
           // position, with a placeholder static until per-model meshes resolve
-          // op.model. NOTE: PlaceObject registers the object and its transform, but
-          // standalone entities are only drawn in the editor view today; rendering
-          // them in the live gameplay path is a separate renderer integration.
+          // op.model. PlaceObject adds Transform + Renderable, so the object is
+          // drawn by the normal frame draw pass above; the model is just a stand-in.
           const Vec3 pos{op.x, op.y, op.z};
           const f32 rot[4] = {0, 0, 0, 1};
           ecs::Entity e = streamer_->PlaceObject(world_, net_entity_base_, pos, rot, 1.0f);

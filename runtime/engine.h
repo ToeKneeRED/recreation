@@ -408,6 +408,7 @@ class Engine {
   // A placeable base form (a static with a model) used as the placeholder visual
   // for spawned net entities until per-model meshes are wired. Resolved once.
   bethesda::GlobalFormId net_entity_base_{};
+  bethesda::GlobalFormId net_entity_base_fallback_{};  // any static, if no nice prop
   bool net_entity_base_ready_ = false;
   physics::PhysicsWorld physics_;
   // Dynamic bodies mirrored into ECS transforms after each step.
