@@ -39,3 +39,4 @@ editor_layout.reclayout
 /run-starfield.sh
 /run-all.sh
 /bench.sh
+run-local.sh

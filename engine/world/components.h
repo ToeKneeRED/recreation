@@ -38,7 +38,7 @@ struct Npc {
 };
 
 // Tag marking an entity disabled (Papyrus Disable()); the render pass skips it.
-// A tag carries no data -- its presence is the state.
+// A tag carries no data, its presence is the state.
 struct Hidden {};
 
 // Tag marking an entity created by a quest (PlaceAtMe), with the issuing quest,

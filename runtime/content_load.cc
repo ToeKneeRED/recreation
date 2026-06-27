@@ -201,6 +201,10 @@ bool LoadGameData(Engine& engine) {
 
   // REC_QUEST_REPORT=<EDID> drives a quest through its stages to completion and
   // prints the journey, then quits; REC_DIALOGUE_REPORT dumps its dialogue.
+  if (const char* want = std::getenv("REC_QUEST_LIST")) {
+    self->quest_->ReportQuestList(want);
+    self->quit_.store(true, std::memory_order_relaxed);
+  }
   if (const char* want = std::getenv("REC_QUEST_REPORT")) {
     self->quest_->ReportQuestToCompletion(want);
     self->quit_.store(true, std::memory_order_relaxed);

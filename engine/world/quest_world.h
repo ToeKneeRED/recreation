@@ -55,7 +55,7 @@ class WorldCommandQueue {
 };
 
 // Applies quest world commands to the ECS and records per-quest provenance, so a
-// quest's world effects can be undone wholesale (CleanupQuest) -- the explicit
+// quest's world effects can be undone wholesale (CleanupQuest), the explicit
 // goal being that quest-created state never leaks. Lives on the main thread with
 // the ECS world.
 class QuestWorld {

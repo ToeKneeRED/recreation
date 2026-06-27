@@ -84,7 +84,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
 
   // Replica mode (a multiplayer client): the server is authoritative for quests
   // and quest-driven world state, so the client's own scripts must not mutate
-  // either -- it mirrors the server via QuestSystem::ApplyStatus and replicated
+  // either, it mirrors the server via QuestSystem::ApplyStatus and replicated
   // world commands instead. Quest definitions still load (for journal text); the
   // authoritative mutators just become no-ops. Host and single-player leave this
   // false and run quests normally.
@@ -427,7 +427,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   u32 scenes_begun_ = 0;  // count of scene begin-fragments run (diagnostics)
 
   // Raises a Skyrim form event (OnDeath, OnItemAdded, ...) on the target form's
-  // script instance, if it defines a handler -- a silent no-op without a VM or
+  // script instance, if it defines a handler, a silent no-op without a VM or
   // handler. Runs synchronously on the guest thread (the bindings' only caller),
   // so a handler that mutates state is visible immediately to the caller.
   void RaiseFormEvent(u64 target, const char* event, std::vector<papyrus::Value> args);

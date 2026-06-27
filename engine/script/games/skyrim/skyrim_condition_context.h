@@ -14,8 +14,8 @@ class RecordBackedSkyrimBindings;
 // It faithfully handles the functions whose meaning is unambiguous without a
 // dialogue-specific subject: GetStage, the "use global" right-hand side, and
 // GetItemCount (defaulting the container to the player). Functions it cannot yet
-// judge -- GetActorValue (needs the AV index->name map), GetDistance (needs the
-// run-on subject), anything unmapped -- are reported by Supports(), and Allows()
+// judge, GetActorValue (needs the AV index->name map), GetDistance (needs the
+// run-on subject), anything unmapped, are reported by Supports(), and Allows()
 // then errs toward showing the line rather than hiding content on a condition it
 // does not understand.
 class SkyrimConditionContext : public quest::ConditionContext {

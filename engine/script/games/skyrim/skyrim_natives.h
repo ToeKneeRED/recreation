@@ -112,7 +112,7 @@ class SkyrimBindings {
 
   // Leveled item lists (LVLI), the data behind loot, vendor stock and drops.
   // GetLeveledListCount parses the list into a cache and returns its entry count
-  // (0 for a non-LVLI form); the other accessors read that cache -- the chance of
+  // (0 for a non-LVLI form); the other accessors read that cache, the chance of
   // nothing (LVLD), the flags (LVLF), and each entry's form/level/count (LVLO).
   // The managed resolver does the level-gating and random picks.
   virtual i32 GetLeveledListCount(papyrus::ObjectRef list) { return 0; }

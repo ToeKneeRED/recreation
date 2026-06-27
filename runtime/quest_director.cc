@@ -1,6 +1,7 @@
 #include "quest_director.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -238,7 +239,7 @@ void QuestDirector::ReportDialogue(const std::string& edid) {
   std::printf("=== dialogue for %s (0x%llx): %zu topics ===\n", edid.c_str(),
               static_cast<unsigned long long>(handle), topics.size());
   // Attaches an INFO's TIF_ script and calls its begin fragment, returning
-  // whether the fragment actually dispatched (script loaded + function found) --
+  // whether the fragment actually dispatched (script loaded + function found),
   // the end-to-end check that dialogue selection can advance quests.
   auto fire = [&](u64 info) -> bool {
     if (!ctx_.scripts || info == 0) return false;
@@ -371,6 +372,50 @@ void QuestDirector::ReportQuestToCompletion(const std::string& edid) {
   std::fflush(stdout);
 }
 
+void QuestDirector::ReportQuestList(const std::string& prefix) {
+  auto* binds = ctx_.bindings;
+  std::string lower_prefix = prefix;
+  std::transform(lower_prefix.begin(), lower_prefix.end(), lower_prefix.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  // Snapshot the definitions on the guest thread (the only legal QuestSystem
+  // caller), sort by editor id, and print on return.
+  std::vector<std::pair<u64, std::string>> records(quest_records_.begin(), quest_records_.end());
+  std::string report =
+      ctx_.scripts->guest()
+          .SubmitFor([binds, records = std::move(records), lower_prefix](
+                         rec::script::papyrus::VirtualMachine&) mutable {
+            quest::QuestSystem& qs = binds->quest_system();
+            std::string r;
+            auto emit = [&](const std::string& line) { r += line; r += '\n'; };
+
+            std::vector<const quest::QuestDef*> defs;
+            for (const auto& [h, name] : records) {
+              std::string low = name;
+              std::transform(low.begin(), low.end(), low.begin(),
+                             [](unsigned char c) { return std::tolower(c); });
+              if (!lower_prefix.empty() && low.rfind(lower_prefix, 0) != 0) continue;
+              if (const quest::QuestDef* def = qs.Definition(h)) defs.push_back(def);
+            }
+            std::sort(defs.begin(), defs.end(),
+                      [](const quest::QuestDef* a, const quest::QuestDef* b) {
+                        return a->editor_id < b->editor_id;
+                      });
+            emit(Fmt("=== %zu quest(s) matching prefix '%s' ===", defs.size(),
+                     lower_prefix.c_str()));
+            for (const quest::QuestDef* def : defs)
+              emit(Fmt("  %-28s 0x%08llx  pri=%-3d stages=%-3zu obj=%-2zu complete@%-4d  %s",
+                       def->editor_id.c_str(),
+                       static_cast<unsigned long long>(def->handle), def->priority,
+                       def->stages.size(), def->objectives.size(), def->CompletionStage(),
+                       def->name.c_str()));
+            return r;
+          })
+          .get();
+  std::printf("%s", report.c_str());
+  std::fflush(stdout);
+}
+
 void QuestDirector::ReportSceneFragments(const std::string& edid) {
   const u64 handle = FindQuestHandle(edid);
   if (handle == 0 || !ctx_.scripts) {
@@ -458,8 +503,8 @@ void QuestDirector::ReportSceneLive(const std::string& edid) {
 
   auto* binds = ctx_.bindings;
   // Start the quest, then tick the ScenePlayer: its stage fragments Start scenes,
-  // whose fragments SetStage, which run more stage fragments -- a self-driving
-  // chain. We report how far it gets on its own (no breadcrumb, no direct stages).
+  // whose fragments SetStage, which run more stage fragments. We report how far
+  // it gets on its own (no breadcrumb, no direct stages).
   std::string report =
       ctx_.scripts->guest()
           .SubmitFor([binds, handle, edid](rec::script::papyrus::VirtualMachine&) {
@@ -477,7 +522,7 @@ void QuestDirector::ReportSceneLive(const std::string& edid) {
               return r;
             }
 
-            // Walk the quest's stages in order -- the gameplay a player would do
+            // Walk the quest's stages in order, the gameplay a player would do
             // (reach a mark, finish a fight) that the engine cannot simulate
             // headless. Setting a stage runs its fragment; where that fragment
             // calls Scene.Start, the scene plays here and its own fragments drive

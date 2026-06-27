@@ -160,7 +160,7 @@ void InteractionSystem::UpdateInteraction(bool activate_pressed) {
     // Local-view affordances first: talking to an NPC, walking through a load
     // door, and opening a container are each the activating player's own view.
     // Anything else raises OnActivate, which a multiplayer client is not
-    // authoritative for -- it asks the server.
+    // authoritative for, it asks the server.
     const ecs::Entity e = quest_world_.Find(handle);
     if (world_.IsAlive(e) && world_.Has<world::Npc>(e)) {
       OpenDialogue(handle);
@@ -264,7 +264,7 @@ void InteractionSystem::RunInfoFragment(u64 info) {
   bethesda::InfoFragments frags;
   if (!bethesda::ParseInfoFragments(vmad->data, &attachment, &frags)) return;
   if (frags.begin.function.empty()) return;
-  // Attach the TIF_ script to the INFO handle (idempotent -- only creates the
+  // Attach the TIF_ script to the INFO handle (idempotent, only creates the
   // instance + seeds properties the first time), then run the begin fragment on
   // it. Its seeded quest property lets the fragment SetStage the right quest.
   ctx_.scripts->AttachScripts(info, attachment);
@@ -399,7 +399,7 @@ bool InteractionSystem::TryActivateDoor(u64 handle) {
 
   // XTEL on the reference is the teleport: dest door form id (4), then the
   // landing position (3 floats) and rotation (3 floats). A door without one is
-  // not a load door -- let it fall through to its OnActivate script.
+  // not a load door, let it fall through to its OnActivate script.
   const bethesda::Subrecord* xtel = record.Find(FourCc('X', 'T', 'E', 'L'));
   if (!xtel || xtel->data.size() < 28) return false;
   u32 dest_raw;

@@ -41,7 +41,7 @@ enum class RunOn : u8 {
 // Condition functions we understand well enough to dispatch to a typed
 // ConditionContext query. Everything else stays kRaw and is handed to the
 // context verbatim, so evaluator correctness never depends on this table being
-// complete -- it is an intentionally partial, high-confidence subset of the
+// complete, it is an intentionally partial, high-confidence subset of the
 // Creation Kit's condition-function enum, extended as coverage is needed.
 enum class Func : u16 {
   kRaw = 0,       // not in the table; raw_function carries the original CK id

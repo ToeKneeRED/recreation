@@ -55,9 +55,14 @@ class QuestDirector {
 
   // Headless debug aids (REC_QUEST_REPORT / REC_DIALOGUE_REPORT / REC_SCENE_REPORT).
   void ReportQuestToCompletion(const std::string& edid);
+  // Lists every loaded quest whose editor id begins with `prefix` (case
+  // insensitive; empty lists all), one line each: handle, priority, stage and
+  // objective counts, completion stage, name. The fast way to survey a whole
+  // questline (e.g. REC_QUEST_LIST=CW) without reloading data per quest.
+  void ReportQuestList(const std::string& prefix);
   void ReportDialogue(const std::string& edid);
   // Attaches a quest's SCEN scripts and fires their begin/phase/end fragments,
-  // reporting which advance the journal -- the end-to-end check that real scene
+  // reporting which advance the journal, the end-to-end check that real scene
   // fragments (Self.GetOwningQuest().SetStage(N)) drive the quest natively.
   void ReportSceneFragments(const std::string& edid);
   // Like ReportSceneFragments but plays each scene through the timer-driven
@@ -68,7 +73,7 @@ class QuestDirector {
   // quest runs (main thread; AttachScripts marshals to the guest).
   void AttachQuestScenes(u64 quest);
   // Headless self-drive check: attach a quest's scenes, start it, and tick the
-  // ScenePlayer so its stage fragments Start scenes whose fragments SetStage --
+  // ScenePlayer so its stage fragments Start scenes whose fragments SetStage,
   // reporting how far the quest drives itself natively.
   void ReportSceneLive(const std::string& edid);
 
