@@ -3,11 +3,8 @@ using Recreation.Modding;
 
 namespace Recreation.Net;
 
-// A tiny built-in showcase that proves the multiplayer platform reaches the
-// on-screen HUD end to end: chat lines flow C# -> the Hud.ChatLine native -> the
-// engine chat box, and a toast notification flows the same way. Inert unless
-// REC_MP_DEMO is set, so it never affects a normal session. Shared realm so it
-// runs in single-player and on either side of a session.
+// Built-in showcase of the multiplayer platform reaching the on-screen HUD: chat
+// lines and toasts flow C# -> native -> engine HUD. Inert unless REC_MP_DEMO is set.
 [Mod("MultiplayerDemo"), Realm(ModRealm.Shared)]
 public sealed class MultiplayerDemo : IMod
 {
@@ -33,7 +30,7 @@ public sealed class MultiplayerDemo : IMod
         Scoreboard.Title = "Recreation RP   |   whiterun-rp.example:29700";
         Scoreboard.Open();
 
-        // A couple of interaction prompts, the bread and butter of a roleplay server.
+        // A couple of interaction prompts.
         Prompts.Show("trade", "Trade with Belethor", "E");
         Prompts.Show("rob", "Rob the till", "G");
 
@@ -55,10 +52,9 @@ public sealed class MultiplayerDemo : IMod
             SetPos(2, p.X - 3f, p.Y, p.Z - 13f);
             SetPos(3, p.X + 0.5f, p.Y, p.Z - 16f);
 
-            // Spawn networked objects ahead of us: a mod placing props every player
-            // sees. Placed in front and above the water so they read clearly.
-            NetEntities.Spawn("prop", new Vector3(p.X + 5f, p.Y + 2f, p.Z - 14f));
-            NetEntities.Spawn("prop", new Vector3(p.X - 5f, p.Y + 2f, p.Z - 16f));
+            // Spawn networked objects ahead of us, in front and above the water.
+            NetEntities.Spawn("WRDrawbridge01", new Vector3(p.X + 6f, p.Y + 2f, p.Z - 16f));
+            NetEntities.Spawn("WRDrawbridge01", new Vector3(p.X - 6f, p.Y + 2f, p.Z - 18f));
         });
     }
 

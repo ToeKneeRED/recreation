@@ -25,6 +25,17 @@
 // core lifecycle unit so the hot loop reads on its own.
 namespace rec {
 
+// Case-insensitive ASCII string compare, for matching a NetEntity model against a
+// record's editor id.
+static bool EqualsIgnoreCase(const std::string& a, const std::string& b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+      return false;
+  }
+  return true;
+}
+
 // Config overrides, populated from the environment by
 // base::InitOptionsFromEnv() at startup.
 static base::Option<float> Lightning{"lightning", 0.0f, "REC_LIGHTNING"};
@@ -434,11 +445,9 @@ bool Engine::RunFrame() {
         }
         game_ui_.SetNametags(screen_tags);
       }
-      // Networked entities: apply a mod's spawn/move/delete onto the ECS world so
-      // its objects appear for the local player. A spawned object uses the
-      // placeholder cube mesh until per-model meshes are wired through PlaceObject.
-      // Resolve a placeholder base form (the first static carrying a model) once.
-      // A spawned net entity uses it as its visual until per-model meshes are wired.
+      // Networked entities: apply a mod's spawn/move/delete onto the ECS world.
+      // Resolve a default placeholder base form (a compact static) once; a spawn
+      // with no model, or an unknown one, falls back to it.
       if (!net_entity_base_ready_) {
         net_entity_base_ready_ = true;
         records_.EachOfType(
@@ -473,13 +482,38 @@ bool Engine::RunFrame() {
       for (const PlatformEntityOp& op : platform_hud_.DrainEntityOps()) {
         if (op.kind == PlatformEntityOp::Kind::kSpawn) {
           if (!streamer_) continue;
+          // Resolve the requested model (an editor id) to a base form so a mod
+          // spawns a specific object by name; fall back to the placeholder static
+          // when it is empty or unknown. Cached, since the lookup scans records.
+          bethesda::GlobalFormId form = net_entity_base_;
+          if (!op.model.empty()) {
+            auto cached = net_model_cache_.find(op.model);
+            if (cached != net_model_cache_.end()) {
+              form = cached->second;
+            } else {
+              bethesda::GlobalFormId resolved{};
+              for (u32 type : {FourCc('S', 'T', 'A', 'T'), FourCc('M', 'S', 'T', 'T'),
+                               FourCc('F', 'U', 'R', 'N'), FourCc('M', 'I', 'S', 'C')}) {
+                if (resolved.local_id != 0) break;
+                records_.EachOfType(type, [&](bethesda::GlobalFormId id,
+                                              const bethesda::RecordStore::StoredRecord&) {
+                  if (resolved.local_id != 0) return;
+                  bethesda::Record r;
+                  if (records_.Parse(id, &r) && EqualsIgnoreCase(r.GetString(FourCc('E', 'D', 'I', 'D')), op.model))
+                    resolved = id;
+                });
+              }
+              if (resolved.local_id == 0) resolved = net_entity_base_;  // unknown -> placeholder
+              net_model_cache_[op.model] = resolved;
+              form = resolved;
+            }
+          }
           // Place through the cell streamer at the entity's engine-space world
-          // position, with a placeholder static until per-model meshes resolve
-          // op.model. PlaceObject adds Transform + Renderable, so the object is
-          // drawn by the normal frame draw pass above; the model is just a stand-in.
+          // position. PlaceObject adds Transform + Renderable, so the object is
+          // drawn by the normal frame draw pass above.
           const Vec3 pos{op.x, op.y, op.z};
           const f32 rot[4] = {0, 0, 0, 1};
-          ecs::Entity e = streamer_->PlaceObject(world_, net_entity_base_, pos, rot, 1.0f);
+          ecs::Entity e = streamer_->PlaceObject(world_, form, pos, rot, 1.0f);
           if (e != ecs::kInvalidEntity) net_entities_.insert(op.id, e);
         } else if (op.kind == PlatformEntityOp::Kind::kMove) {
           if (ecs::Entity* e = net_entities_.find(op.id)) {

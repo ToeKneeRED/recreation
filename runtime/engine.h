@@ -8,6 +8,7 @@
 #include <array>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -410,6 +411,9 @@ class Engine {
   bethesda::GlobalFormId net_entity_base_{};
   bethesda::GlobalFormId net_entity_base_fallback_{};  // any static, if no nice prop
   bool net_entity_base_ready_ = false;
+  // Resolved NetEntity model (editor id) -> base form, so a mod spawns a specific
+  // object by name. Cached because the lookup scans the record store.
+  std::unordered_map<std::string, bethesda::GlobalFormId> net_model_cache_;
   physics::PhysicsWorld physics_;
   // Dynamic bodies mirrored into ECS transforms after each step.
   base::Vector<PhysicsEntity> physics_entities_;
