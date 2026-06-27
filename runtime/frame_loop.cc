@@ -346,6 +346,25 @@ bool Engine::RunFrame() {
             platform_chat_display_.begin(),
             platform_chat_display_.end() - static_cast<std::ptrdiff_t>(kChatDisplayCap));
       game_ui_.SetChatLines(platform_chat_display_);
+      // Scoreboard: format each player's cells into rough fixed-width columns (the
+      // first cell, the name, gets the widest field) and hand the panel the lines.
+      {
+        const PlatformScoreboard sb = platform_hud_.Scoreboard();
+        auto pad = [](const std::string& s, size_t width) {
+          std::string out = s;
+          if (out.size() < width) out.append(width - out.size(), ' ');
+          return out;
+        };
+        auto format_cells = [&pad](const std::vector<std::string>& cells) {
+          std::string line;
+          for (size_t i = 0; i < cells.size(); ++i) line += pad(cells[i], i == 0 ? 26 : 12);
+          return line;
+        };
+        std::vector<std::string> rows;
+        rows.reserve(sb.rows.size());
+        for (const PlatformScoreRow& r : sb.rows) rows.push_back(format_cells(r.cells));
+        game_ui_.SetScoreboard(sb.open, sb.title, format_cells(sb.headers), rows);
+      }
       if (std::optional<std::string> addr = platform_hud_.TakePendingConnect())
         REC_INFO("[platform] connect requested: {}", *addr);
       // Surface managed HUD gauges (oxygen, radiation, ...) pushed via Hud.Gauge

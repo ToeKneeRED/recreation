@@ -23,8 +23,32 @@ public sealed class MultiplayerDemo : IMod
         Scheduler.After(2.0f, () => Say(3, "Mjoll", "on my way to the meadery"));
         Scheduler.After(3.0f, () => Say(2, "Lydia", "save me a mead!"));
         Scheduler.After(4.0f, () => Chat.System("Mjoll reached Whiterun."));
+
+        // Populate a roster and open the scoreboard, so the player list renders too.
+        Players.Local.SetName("Dragonborn");
+        SetStats(0, 1200, 12);
+        AddPlayer(1, "Lydia", 980, 34);
+        AddPlayer(2, "Mjoll", 1450, 58);
+        AddPlayer(3, "Aela the Huntress", 760, 22);
+        Scoreboard.Title = "Recreation RP   |   whiterun-rp.example:29700";
+        Scoreboard.Open();
     }
 
     private static void Say(uint id, string name, string text) =>
         Chat.Post(new ChatMessage(id, name, ChatChannel.Global, text));
+
+    // Mark a player present with a name and stats. In single-player these stay
+    // local; the roster and scoreboard pick them up through state-bag observation.
+    private static void AddPlayer(uint id, string name, int score, int ping)
+    {
+        StateBags.Player(id).Set(Player.PresentKey, true);
+        StateBags.Player(id).Set(Player.NameKey, name);
+        SetStats(id, score, ping);
+    }
+
+    private static void SetStats(uint id, int score, int ping)
+    {
+        StateBags.Player(id).Set("score", score);
+        StateBags.Player(id).Set("ping", ping);
+    }
 }

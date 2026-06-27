@@ -73,6 +73,7 @@ constexpr int kWarHoldRows = 9;         // Skyrim's nine holds on the war-map pa
 constexpr int kContainerRows = 14;      // item rows in the container loot panel
 constexpr int kHudGaugeRows = 6;        // pooled managed-gameplay gauge bars (oxygen, rads, ...)
 constexpr int kChatRows = 8;            // visible lines in the multiplayer chat box
+constexpr int kScoreRows = 12;          // player rows in the multiplayer scoreboard
 constexpr float kToastSeconds = 4.0f;
 
 // NEXUS main menu.
@@ -507,7 +508,8 @@ std::string BuildEditorSection() {
 // watch list.
 const char* const kUiFragments[] = {
     "hud.ugui",       "vitals.ugui",  "readout.ugui",  "quest.ugui",
-    "hud_gauge.ugui", "chat.ugui", "journal.ugui", "war_map.ugui", "dialogue.ugui", "container.ugui",
+    "hud_gauge.ugui", "chat.ugui", "scoreboard.ugui", "journal.ugui", "war_map.ugui",
+    "dialogue.ugui", "container.ugui",
     "pause_menu.ugui", "main_menu.ugui", "first_run.ugui",
 };
 
@@ -589,6 +591,7 @@ std::string BuildUi() {
   s += LoadUiFragment("quest.ugui");
   s += LoadUiFragment("hud_gauge.ugui");
   s += LoadUiFragment("chat.ugui");
+  s += LoadUiFragment("scoreboard.ugui");
   s += LoadUiFragment("journal.ugui");
   s += LoadUiFragment("war_map.ugui");
   s += LoadUiFragment("dialogue.ugui");
@@ -716,6 +719,10 @@ struct GameUi::Impl {
   HudQuest quest;
   std::vector<HudGauge> hud_gauges;  // managed gameplay bars (oxygen, rads, ...)
   std::vector<std::string> chat_lines;  // multiplayer chat box, newest last
+  bool scoreboard_open = false;         // multiplayer scoreboard (hold-Tab list)
+  std::string scoreboard_title;
+  std::string scoreboard_header;
+  std::vector<std::string> scoreboard_rows;
   std::string toast_text;
   float toast_age = kToastSeconds + 1.0f;  // starts expired, so hidden
   std::string activate_prompt;
@@ -1808,6 +1815,15 @@ void GameUi::SetChatLines(const std::vector<std::string>& lines) {
   if (impl_->initialized) impl_->chat_lines = lines;
 }
 
+void GameUi::SetScoreboard(bool open, const std::string& title, const std::string& header,
+                           const std::vector<std::string>& rows) {
+  if (!impl_->initialized) return;
+  impl_->scoreboard_open = open;
+  impl_->scoreboard_title = title;
+  impl_->scoreboard_header = header;
+  impl_->scoreboard_rows = rows;
+}
+
 void GameUi::SetHudGauges(const std::vector<HudGauge>& gauges) {
   if (impl_->initialized) impl_->hud_gauges = gauges;
 }
@@ -2042,6 +2058,23 @@ void GameUi::Build(Window& window, render::Renderer& renderer, FlyCamera& camera
     }
   }
 
+  // Multiplayer scoreboard: a centered panel of player rows, shown while open.
+  impl->SetVisible("scoreboard_box", impl->scoreboard_open);
+  if (impl->scoreboard_open) {
+    ugui::SetText(impl->ui.FindWidget("scoreboard_title"),
+                  impl->scoreboard_title.empty() ? "Players" : impl->scoreboard_title.c_str());
+    ugui::SetText(impl->ui.FindWidget("scoreboard_header"), impl->scoreboard_header.c_str());
+    for (int i = 0; i < kScoreRows; ++i) {
+      const std::string row = "scoreboard_row" + std::to_string(i);
+      if (static_cast<size_t>(i) < impl->scoreboard_rows.size()) {
+        ugui::SetText(impl->ui.FindWidget(row.c_str()), impl->scoreboard_rows[i].c_str());
+        impl->SetVisible(row.c_str(), true);
+      } else {
+        impl->SetVisible(row.c_str(), false);
+      }
+    }
+  }
+
   // --- Quest HUD ---
   const bool has_quest = !impl->quest.title.empty();
   impl->SetVisible("questtracker", has_quest);
@@ -2232,6 +2265,8 @@ void GameUi::Shutdown() {}
 void GameUi::Build(Window&, render::Renderer&, FlyCamera&, f32, render::FrameView*) {}
 void GameUi::SetQuest(const HudQuest&) {}
 void GameUi::SetChatLines(const std::vector<std::string>&) {}
+void GameUi::SetScoreboard(bool, const std::string&, const std::string&,
+                           const std::vector<std::string>&) {}
 void GameUi::SetHudGauges(const std::vector<HudGauge>&) {}
 void GameUi::FlashQuestUpdate(const std::string&) {}
 void GameUi::SetActivatePrompt(const std::string&) {}

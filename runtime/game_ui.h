@@ -310,6 +310,11 @@ class GameUi {
   // The multiplayer chat box lines (newest last); the box shows the last several
   // and collapses when empty. Fed from the platform chat channel each frame.
   void SetChatLines(const std::vector<std::string>& lines);
+  // The multiplayer scoreboard (hold-Tab player list). `open` shows the centered
+  // panel; `header` is the column header line and `rows` the pre-formatted player
+  // rows. Fed from the platform scoreboard channel each frame.
+  void SetScoreboard(bool open, const std::string& title, const std::string& header,
+                     const std::vector<std::string>& rows);
   void FlashQuestUpdate(const std::string& message);
   void SetActivatePrompt(const std::string& prompt);
   // Objective compass waypoint. active shows a pip on the compass at
