@@ -94,7 +94,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.5f;
       s.water_reflections = true;
-      s.fog = true;
+      s.fog = false;  // volumetric fog off by default (REC_FOG=1 / debug UI to enable)
       s.fog_density = 0.02f;
       break;
 
@@ -127,7 +127,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.6f;
       s.water_reflections = true;
-      s.fog = true;
+      s.fog = false;  // volumetric fog off by default (REC_FOG=1 / debug UI to enable)
       break;
 
     case QualityPreset::kUltra:
@@ -144,7 +144,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.85f;
       s.water_reflections = true;
-      s.fog = true;
+      s.fog = false;  // volumetric fog off by default (REC_FOG=1 / debug UI to enable)
       break;
 
     case QualityPreset::kAuto:  // already resolved above
