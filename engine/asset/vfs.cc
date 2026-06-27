@@ -53,6 +53,10 @@ bool Vfs::Contains(std::string_view path) const {
                              [&](const auto& provider) { return provider->Contains(normalized); });
 }
 
+void Vfs::Enumerate(const std::function<void(std::string_view)>& fn) const {
+  for (const auto& provider : providers_) provider->Enumerate(fn);
+}
+
 namespace {
 
 class LooseFileProvider final : public FileProvider {

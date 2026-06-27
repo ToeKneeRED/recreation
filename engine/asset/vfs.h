@@ -41,6 +41,11 @@ class Vfs {
   std::optional<base::Vector<u8>> Read(std::string_view path) const;
   bool Contains(std::string_view path) const;
 
+  // Visits the normalized path of every entry across all mounted providers (with
+  // duplicates when an override shadows a base file). For prefix/suffix discovery
+  // like finding the terrain LOD quads of a worldspace.
+  void Enumerate(const std::function<void(std::string_view)>& fn) const;
+
   size_t mount_count() const { return providers_.size(); }
 
  private:

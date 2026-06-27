@@ -5,6 +5,7 @@
 #include <base/containers/vector.h>
 
 #include <functional>
+#include <string>
 #include <string_view>
 
 #include "asset/asset_database.h"
@@ -54,6 +55,8 @@ class CellStreamer {
     u32 mesh_budget = 6;       // new mesh conversions/uploads per update
     u32 ref_budget = 192;      // reference instantiations per update
     f32 grass_density = 1.0f;  // multiplies every GRAS density, 0 disables
+    bool distant_lod = false;  // load Bethesda .btr/.bto distant LOD for the horizon
+    u32 distant_budget = 2;    // distant LOD quads loaded per update
   };
 
   CellStreamer(const bethesda::RecordStore& records, asset::AssetDatabase& assets)
@@ -153,6 +156,11 @@ class CellStreamer {
   // Destroys the active interior's entities and colliders (see interior_cell_).
   void UnloadInterior(ecs::World& world);
   bool SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
+  // Distant LOD: discovers the coarsest .btr (terrain) + .bto (object) quads of
+  // the streamed worldspace once, then drains them under a budget. They cover the
+  // whole map cheaply (a few dozen quads) so the mesh-shader cull does the rest.
+  void DiscoverDistantQuads();
+  bool SpawnDistantQuad(ecs::World& world, size_t index);
   bool SpawnWater(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
   bool SpawnGrass(ecs::World& world, i16 grid_x, i16 grid_y, LoadedCell& cell);
   // Water level of the cell in game units; false when the cell has none.
@@ -186,8 +194,22 @@ class CellStreamer {
   bool has_fixed_anchor_ = false;
   u64 mesh_id_salt_ = 0;  // namespaces mesh ids in the shared renderer (per domain)
   bethesda::GlobalFormId worldspace_;
+  std::string worldspace_edid_;  // lowercased, for building distant LOD paths
   const bethesda::RecordStore::ExteriorGrid* grid_ = nullptr;
   base::UnorderedMap<u32, LoadedCell> loaded_;
+
+  // Distant LOD quads (the coarsest .btr/.bto of the worldspace). Discovered once
+  // on first Update, then drained: each becomes a persistent renderable proxy.
+  struct DistantQuad {
+    std::string path;
+    i32 cell_x = 0;  // SW cell of the quad (only used by terrain, which is quad-local)
+    i32 cell_y = 0;
+    bool object = false;  // .bto: vertices are absolute world; .btr: quad-local
+  };
+  base::Vector<DistantQuad> distant_quads_;
+  size_t distant_next_ = 0;          // next quad to load from distant_quads_
+  bool distant_discovered_ = false;  // catalog built for the current worldspace
+  base::Vector<ecs::Entity> distant_entities_;
   // While in an interior, exterior streaming is suspended and the interior's
   // placed refs are tracked here so a later transition can unload them.
   bool interior_active_ = false;

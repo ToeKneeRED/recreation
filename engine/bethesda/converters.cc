@@ -563,9 +563,10 @@ void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profi
   }
   // The NIF converter synthesizes materials from the shader property blocks
   // and pre-loads their textures, so a converted mesh's submesh material ids
-  // always resolve against the database.
-  database.RegisterMeshConverter(
-      ".nif", [&database](ByteSpan data, asset::AssetId id, std::string_view path) {
+  // always resolve against the database. Distant LOD meshes (.btr terrain,
+  // .bto objects, .btt trees) are the same NIF format, so they route here too.
+  asset::MeshConverter nif_converter =
+      [&database](ByteSpan data, asset::AssetId id, std::string_view path) {
         NifConversion conversion = ConvertNifScene(data, id, path);
         if (!conversion.mesh) return base::UniquePointer<asset::Mesh>();
         for (const std::string& texture : conversion.texture_paths) {
@@ -604,8 +605,18 @@ void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profi
         if (conversion.skinned_shapes > 0) {
           REC_INFO("{}: baked {} skinned shapes", path, conversion.skinned_shapes);
         }
+        // Distant LOD proxies (.btr/.bto/.btt) must stay out of the tlas: they
+        // would double the geometry the full-detail near meshes already provide
+        // to ray queries (shadows, ao, reflections).
+        if (path.ends_with(".btr") || path.ends_with(".bto") || path.ends_with(".btt")) {
+          conversion.mesh->exclude_from_rt = true;
+        }
         return std::move(conversion.mesh);
-      });
+      };
+  database.RegisterMeshConverter(".nif", nif_converter);
+  database.RegisterMeshConverter(".btr", nif_converter);  // terrain LOD (quad-local verts)
+  database.RegisterMeshConverter(".bto", nif_converter);  // object LOD (absolute world verts)
+  database.RegisterMeshConverter(".btt", nif_converter);  // tree LOD
   database.RegisterTextureConverter(".dds", ConvertDds);
   if (profile.game == Game::kFallout4 || profile.game == Game::kFallout76) {
     database.RegisterMaterialConverter(".bgsm", ConvertBgsm);

@@ -1,6 +1,7 @@
 #include "world/cell_streaming.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,10 @@ constexpr u32 kRecordFlagInitiallyDisabled = 0x800;
 constexpr u32 kCellFlagHasWater = 0x2;
 // XCLW placeholder meaning "use the worldspace default water height".
 constexpr f32 kNoCellWater = 3.0e38f;
+// Distant terrain LOD is sunk this many engine meters so full-detail LAND wins
+// the depth test where they overlap (no z-fighting near the camera); negligible
+// at horizon range where the LOD is the only ground.
+constexpr f32 kDistantTerrainSink = 2.0f;
 
 // The one and only Bethesda -> engine conversion (see the class comment):
 // engine = (x, z, -y) * kUnitsToMeters. As a quaternion the axis change is a
@@ -104,6 +109,12 @@ bool CellStreamer::SelectWorldspace(std::string_view editor_id) {
     return false;
   }
   ground_cache_.clear();  // heights are per worldspace
+  worldspace_edid_.assign(editor_id);
+  for (char& c : worldspace_edid_) c = static_cast<char>(std::tolower(c));
+  distant_quads_.clear();
+  distant_entities_.clear();
+  distant_next_ = 0;
+  distant_discovered_ = false;
   EnsureLandMaterial();
   // WRLD DNAM holds the default land and water heights; cells without their
   // own XCLW flood at the water height (Tamriel: -14000, the ocean).
@@ -155,7 +166,13 @@ void CellStreamer::Update(ecs::World& world, const Vec3& camera_position) {
   f32 beth_y = -anchor.z / kUnitsToMeters;
   i16 center_x = static_cast<i16>(std::floor(beth_x / kCellSize));
   i16 center_y = static_cast<i16>(std::floor(beth_y / kCellSize));
-  i32 radius = settings_.load_radius;
+  // REC_LOAD_RADIUS extends the streamed cell ring for greater draw distance;
+  // affordable on the mesh-shader lod path (gpu cluster cull + distance lods).
+  static const i32 kRadiusOverride = [] {
+    const char* r = std::getenv("REC_LOAD_RADIUS");
+    return r ? std::atoi(r) : -1;
+  }();
+  i32 radius = kRadiusOverride > 0 ? kRadiusOverride : settings_.load_radius;
 
   base::Vector<u32> to_unload;
   for (auto kv : loaded_) {
@@ -190,6 +207,24 @@ void CellStreamer::Update(ecs::World& world, const Vec3& camera_position) {
       }
       if (mesh_budget == 0 || ref_budget == 0) break;
     }
+  }
+
+  // Distant LOD: build the catalog once, then drain a few quads per tick. These
+  // are persistent proxies covering the whole worldspace; the mesh-shader cull
+  // (frustum + occlusion) keeps the off-screen / hidden ones free.
+  static const int kDistantEnv = [] {
+    const char* e = std::getenv("REC_DISTANT_LOD");
+    return e ? std::atoi(e) : -1;
+  }();
+  const bool distant_on = kDistantEnv >= 0 ? kDistantEnv != 0 : settings_.distant_lod;
+  if (distant_on) {
+    if (!distant_discovered_) DiscoverDistantQuads();
+    u32 distant_budget = settings_.distant_budget;
+    while (distant_budget > 0 && distant_next_ < distant_quads_.size()) {
+      if (SpawnDistantQuad(world, distant_next_)) --distant_budget;
+      ++distant_next_;
+    }
+    if (distant_next_ < distant_quads_.size()) all_done = false;
   }
 
   // Exhausted budgets may have cut the ring walk short of unvisited cells.
@@ -378,6 +413,104 @@ bool CellStreamer::SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, Loade
   world.Add(entity, Renderable{RenderMeshId(mesh->id)});
   world.Add(entity, CellMembership{grid_x, grid_y, false});
   cell.entities.push_back(entity);
+  ++spawned_entities_;
+  return true;
+}
+
+namespace {
+
+// Parses "<edid>.<level>.<x>.<y>" (the stem of a .btr/.bto/.btt). Worldspace
+// editor ids carry no dots, so the four right-most dot fields are the grid. The
+// coarsest (largest) level covers the most cells per quad. Returns false on a
+// stem that does not match.
+bool ParseLodStem(std::string_view stem, std::string_view edid, i32* level, i32* x, i32* y) {
+  if (stem.size() <= edid.size() + 1 || stem.compare(0, edid.size(), edid) != 0 ||
+      stem[edid.size()] != '.') {
+    return false;
+  }
+  std::string_view grid = stem.substr(edid.size() + 1);  // "<level>.<x>.<y>"
+  i32 vals[3];
+  for (i32& v : vals) {
+    size_t dot = grid.find('.');
+    std::string_view tok = dot == std::string_view::npos ? grid : grid.substr(0, dot);
+    if (tok.empty()) return false;
+    char* end = nullptr;
+    long parsed = std::strtol(std::string(tok).c_str(), &end, 10);
+    if (*end != '\0') return false;
+    v = static_cast<i32>(parsed);
+    grid = dot == std::string_view::npos ? std::string_view() : grid.substr(dot + 1);
+  }
+  *level = vals[0];
+  *x = vals[1];
+  *y = vals[2];
+  return true;
+}
+
+}  // namespace
+
+void CellStreamer::DiscoverDistantQuads() {
+  distant_discovered_ = true;
+  if (worldspace_edid_.empty()) return;
+  const std::string terrain_prefix = "meshes/terrain/" + worldspace_edid_ + "/";
+  const std::string object_prefix = terrain_prefix + "objects/";
+
+  // One pass over the vfs collecting every .btr/.bto of this worldspace, keeping
+  // each type's coarsest (max) level: those few quads tile the whole map.
+  struct Found {
+    std::string path;
+    i32 level, x, y;
+    bool object;
+  };
+  base::Vector<Found> found;
+  i32 max_terrain = -1, max_object = -1;
+  assets_.vfs().Enumerate([&](std::string_view path) {
+    bool btr = path.ends_with(".btr");
+    bool bto = path.ends_with(".bto");
+    if (!btr && !bto) return;
+    bool object = bto;
+    const std::string& prefix = object ? object_prefix : terrain_prefix;
+    if (path.size() < prefix.size() || path.compare(0, prefix.size(), prefix) != 0) return;
+    std::string_view stem = path.substr(prefix.size());
+    stem = stem.substr(0, stem.size() - 4);  // drop ".btr"/".bto"
+    i32 level, x, y;
+    if (!ParseLodStem(stem, worldspace_edid_, &level, &x, &y)) return;
+    found.push_back({std::string(path), level, x, y, object});
+    (object ? max_object : max_terrain) = std::max(object ? max_object : max_terrain, level);
+  });
+  for (const Found& f : found) {
+    i32 want = f.object ? max_object : max_terrain;
+    if (f.level == want) distant_quads_.push_back({f.path, f.x, f.y, f.object});
+  }
+  REC_INFO("distant lod: {} quads for {} (terrain lvl {}, object lvl {})", distant_quads_.size(),
+           worldspace_edid_, max_terrain, max_object);
+}
+
+bool CellStreamer::SpawnDistantQuad(ecs::World& world, size_t index) {
+  const DistantQuad& quad = distant_quads_[index];
+  // The NIF converter marks .btr/.bto/.btt meshes exclude_from_rt (LOD proxies
+  // stay out of the tlas); they carry no collision either.
+  const asset::Mesh* mesh = assets_.LoadMesh(quad.path);
+  if (!mesh || mesh->lods.empty() || mesh->lods[0].vertices.empty()) return false;
+  if (!EnsureUploaded(*mesh)) return false;
+
+  ecs::Entity entity = world.Create();
+  Transform transform;
+  // .bto object verts are absolute world units (place at the origin); .btr
+  // terrain verts are quad-local (place at the quad's SW cell). Sink terrain a
+  // touch so the full-detail LAND wins the depth test in the overlap region.
+  Vec3 position = quad.object
+                      ? ToWorld(0.0f, 0.0f, 0.0f)
+                      : ToWorld(static_cast<f32>(quad.cell_x) * kCellSize,
+                                static_cast<f32>(quad.cell_y) * kCellSize, 0.0f);
+  if (!quad.object) position.y -= kDistantTerrainSink;
+  transform.position[0] = position.x;
+  transform.position[1] = position.y;
+  transform.position[2] = position.z;
+  std::memcpy(transform.rotation, kAxisChange, sizeof(transform.rotation));
+  transform.scale = kUnitsToMeters;
+  world.Add(entity, transform);
+  world.Add(entity, Renderable{RenderMeshId(mesh->id)});
+  distant_entities_.push_back(entity);
   ++spawned_entities_;
   return true;
 }
