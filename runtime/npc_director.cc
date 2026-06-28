@@ -569,24 +569,44 @@ void NpcDirector::CwFieldBattleTick(f32 dt) {
         for (u64 h : handles) binds->SetActorValue(script::papyrus::ObjectRef{h}, "health", 140.0f);
       });
     cw_field_active_ = true;
+    player_team_ = 1;  // the player fights on the near line; team 2 targets it too
     REC_INFO("cw field battle: spawned {} soldiers in two lines", cw_field_soldiers_.size());
   }
+
+  int a = 0, b = 0, d = 0;
+  world_.Each<world::CombatTeam>([&](ecs::Entity e, world::CombatTeam& ct) {
+    if (world_.Has<world::Dead>(e)) {
+      ++d;
+      return;
+    }
+    if (ct.team == 1)
+      ++a;
+    else if (ct.team == 2)
+      ++b;
+  });
 
   cw_battle_log_timer_ -= dt;
   if (cw_battle_log_timer_ <= 0.0f) {
     cw_battle_log_timer_ = 1.0f;
-    int a = 0, b = 0, d = 0;
-    world_.Each<world::CombatTeam>([&](ecs::Entity e, world::CombatTeam& ct) {
-      if (world_.Has<world::Dead>(e)) {
-        ++d;
-        return;
-      }
-      if (ct.team == 1)
-        ++a;
-      else if (ct.team == 2)
-        ++b;
-    });
     REC_INFO("cw field battle: team1={} team2={} fallen={} engaged={}", a, b, d, combatant_count());
+  }
+
+  // Resolve the battle into the quest: the enemy line is broken, or a grace
+  // timeout passed (a wedged fight should not stall the quest). Advances the
+  // configured quest stage via its real fragment.
+  cw_battle_grace_ += dt;
+  if (!cw_battle_resolved_ && cw_battle_quest_ != 0 && cw_battle_win_stage_ >= 0 &&
+      (b == 0 || cw_battle_grace_ > 45.0f)) {
+    cw_battle_resolved_ = true;
+    const u64 quest = cw_battle_quest_;
+    const i32 stage = cw_battle_win_stage_;
+    auto* binds = ctx_.bindings;
+    if (binds && ctx_.scripts)
+      ctx_.scripts->guest().Submit([binds, quest, stage](rec::script::papyrus::VirtualMachine&) {
+        binds->SetStage(script::papyrus::ObjectRef{quest}, stage);
+      });
+    REC_INFO("cw field battle: enemy line broken ({} left) -> quest 0x{:x} stage {}", b, quest,
+             stage);
   }
 }
 

@@ -241,6 +241,25 @@ void QuestDirector::AttachQuestScripts() {
     npc_->ArmCwFieldBattle();
     REC_INFO("debug: CW field battle armed (two lines of soldiers will charge)");
   }
+  // REC_CW_DEMO: a playable slice of "Joining the Legion" (CW01A). Start the
+  // quest at the clear-the-fort stage (its real fragment surfaces objective 1),
+  // stage a fort skirmish the player fights in, and on victory advance to stage
+  // 100 (its fragment completes objective 1 and surfaces "Report to Legate
+  // Rikke"): combat driving the quest forward.
+  if (host && std::getenv("REC_CW_DEMO")) {
+    const u64 cw01a = FindQuestHandle("CW01A");
+    if (cw01a != 0) {
+      quest_panel_.selected = cw01a;
+      auto* binds = ctx_.bindings;
+      ctx_.scripts->guest().Submit([binds, cw01a](rec::script::papyrus::VirtualMachine&) {
+        binds->StartQuest(rec::script::papyrus::ObjectRef{cw01a});
+        binds->SetStage(rec::script::papyrus::ObjectRef{cw01a}, 1);  // "Clear out Fort Hraggstad"
+      });
+      npc_->ArmCwFieldBattle();
+      npc_->set_battle_quest(cw01a, 100);  // victory -> "Report to Legate Rikke"
+      REC_INFO("debug: CW01A demo armed (clear the fort, then report to Rikke)");
+    }
+  }
 
   // REC_JOURNAL opens the quest journal at load (it is normally toggled with J),
   // for screenshots (cf. RECREATION_UI_MENU / REC_HIDE_DEBUG_UI).

@@ -93,6 +93,15 @@ class NpcDirector {
   // combat and rendering together).
   void ArmCwFieldBattle() { cw_field_pending_ = true; }
   void CwFieldBattleTick(f32 dt);
+  // Bridges a staged battle to a quest: when the enemy (team 2) is wiped out,
+  // or a grace timeout elapses so a wedged fight still resolves, the engine
+  // advances `quest` to `win_stage` (which runs the quest's real stage fragment).
+  // A general battle->quest hook, not quest-specific: any siege can drive any
+  // stage through it.
+  void set_battle_quest(u64 quest, i32 win_stage) {
+    cw_battle_quest_ = quest;
+    cw_battle_win_stage_ = win_stage;
+  }
   // An elevated spectator framing of the staged field battle (eye behind one
   // line looking down the clash), so the camera shows the soldiers regardless of
   // where the player wedged on the terrain. False when no field battle is staged.
@@ -171,6 +180,10 @@ class NpcDirector {
   base::Vector<u64> cw_field_soldiers_;
   Vec3 cw_field_center_{};      // battle midpoint, for the spectator camera
   Vec3 cw_field_fwd_{};         // clash axis (team 1 -> team 2)
+  u64 cw_battle_quest_ = 0;     // quest the battle outcome advances (0 = none)
+  i32 cw_battle_win_stage_ = -1;
+  bool cw_battle_resolved_ = false;
+  f32 cw_battle_grace_ = 0;     // elapsed battle time, for the resolve timeout
   u64 ambient_rng_ = 0x243f6a8885a308d3ull;
   f32 AmbientRand(f32 lo, f32 hi);
   bool mq101_demo_pending_ = false;
