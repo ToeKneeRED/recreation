@@ -396,7 +396,7 @@ bool CellStreamer::SpawnTerrain(ecs::World& world, i16 grid_x, i16 grid_y, Loade
     }
     asset::Submesh submesh;
     submesh.index_count = static_cast<u32>(lod.indices.size());
-    submesh.material = land_material_;
+    submesh.material = material_id;
     lod.submeshes.push_back(submesh);
     built.bounds_center[0] = kCellSize * 0.5f;
     built.bounds_center[1] = kCellSize * 0.5f;
