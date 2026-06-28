@@ -55,6 +55,7 @@ constexpr int kQuestObjectiveRows = 6;
 constexpr int kDialogueOptionRows = 4;  // matches the 1-4 selection keys
 constexpr int kJournalRows = 6;         // quests listed in the journal (1-N pick, 1-4 usable)
 constexpr int kJournalObjRows = 6;      // objectives shown for the selected journal quest
+constexpr int kWarHoldRows = 9;         // Skyrim's nine holds on the war-map panel
 constexpr int kContainerRows = 14;      // item rows in the container loot panel
 constexpr int kHudGaugeRows = 6;        // pooled managed-gameplay gauge bars (oxygen, rads, ...)
 constexpr float kToastSeconds = 4.0f;
@@ -491,7 +492,7 @@ std::string BuildEditorSection() {
 // watch list.
 const char* const kUiFragments[] = {
     "hud.ugui",       "vitals.ugui",  "readout.ugui",  "quest.ugui",
-    "hud_gauge.ugui", "journal.ugui", "dialogue.ugui", "container.ugui",
+    "hud_gauge.ugui", "journal.ugui", "war_map.ugui", "dialogue.ugui", "container.ugui",
     "pause_menu.ugui", "main_menu.ugui", "first_run.ugui",
 };
 
@@ -573,6 +574,7 @@ std::string BuildUi() {
   s += LoadUiFragment("quest.ugui");
   s += LoadUiFragment("hud_gauge.ugui");
   s += LoadUiFragment("journal.ugui");
+  s += LoadUiFragment("war_map.ugui");
   s += LoadUiFragment("dialogue.ugui");
   s += LoadUiFragment("container.ugui");
   s += BuildEditorSection();              // procedural: Glyph icons; before the menu
@@ -710,6 +712,11 @@ struct GameUi::Impl {
   bool journal_open = false;
   std::vector<HudQuest> journal;
   int journal_selected = -1;
+
+  // War-map overlay, driven by the managed Civil War campaign.
+  bool war_map_open = false;
+  std::vector<GameUi::WarHoldEntry> war_holds;
+  float war_progress = 0.0f;
 
   // Map editor overlay state and the sink that receives its widget clicks.
   EditorView editor;
@@ -1817,6 +1824,14 @@ void GameUi::SetContainer(const ContainerView& container) {
   if (impl_->initialized) impl_->container = container;
 }
 
+void GameUi::SetWarMap(bool open, const std::vector<WarHoldEntry>& holds,
+                       float imperial_fraction) {
+  if (!impl_->initialized) return;
+  impl_->war_map_open = open;
+  impl_->war_holds = holds;
+  impl_->war_progress = imperial_fraction;
+}
+
 void GameUi::SetJournal(bool open, const std::vector<HudQuest>& quests, int selected) {
   if (!impl_->initialized) return;
   impl_->journal_open = open;
@@ -2089,6 +2104,40 @@ void GameUi::Build(Window& window, render::Renderer& renderer, FlyCamera& camera
     }
   }
 
+  // War-map overlay: the Civil War campaign board, each hold and its owner,
+  // coloured by side, with the overall war-progress bar.
+  impl->SetVisible("war_map_box", impl->war_map_open);
+  if (impl->war_map_open) {
+    int imperial = 0, stormcloak = 0;
+    for (int i = 0; i < kWarHoldRows; ++i) {
+      const std::string row = "war_hold" + std::to_string(i);
+      if (i < static_cast<int>(impl->war_holds.size())) {
+        const GameUi::WarHoldEntry& h = impl->war_holds[i];
+        const char* owner = h.owner == 1 ? "Imperial" : h.owner == 2 ? "Stormcloak" : "Contested";
+        const ugui::Color col = h.owner == 1   ? Rgba(0x6f9fe8ffu)
+                                : h.owner == 2 ? Rgba(0xe86f6fffu)
+                                               : Rgba(0xb6bdccffu);
+        ugui::SetText(impl->ui.FindWidget(row.c_str()), (h.name + "  --  " + owner).c_str());
+        impl->SetTextColor(row.c_str(), col);
+        impl->SetVisible(row.c_str(), true);
+        if (h.owner == 1) ++imperial;
+        if (h.owner == 2) ++stormcloak;
+      } else {
+        impl->SetVisible(row.c_str(), false);
+      }
+    }
+    char sub[96];
+    std::snprintf(sub, sizeof(sub), "Imperial Legion %d   |   Stormcloaks %d", imperial, stormcloak);
+    ugui::SetText(impl->ui.FindWidget("war_map_sub"), sub);
+    impl->SetStyleField(
+        "war_bar_fill", [](ugui::Style& s, float v) { s.width = ugui::Length::Pct(v); },
+        std::clamp(impl->war_progress, 0.0f, 1.0f) * 100.0f);
+    char prog[96];
+    std::snprintf(prog, sizeof(prog), "Imperial control: %d%%",
+                  static_cast<int>(std::clamp(impl->war_progress, 0.0f, 1.0f) * 100.0f + 0.5f));
+    ugui::SetText(impl->ui.FindWidget("war_map_progress"), prog);
+  }
+
   // Map editor overlay (asset browser, toolbar, inspector, status, reticle).
   impl->ApplyEditorView();
 
@@ -2150,6 +2199,7 @@ void GameUi::SetObjectiveMarker(bool, float, float) {}
 void GameUi::SetDialogue(const DialogueView&) {}
 void GameUi::SetContainer(const ContainerView&) {}
 void GameUi::SetJournal(bool, const std::vector<HudQuest>&, int) {}
+void GameUi::SetWarMap(bool, const std::vector<WarHoldEntry>&, float) {}
 void GameUi::SetEditorView(const EditorView&) {}
 void GameUi::SetEditorEventSink(std::function<void(const EditorUiEvent&)>) {}
 u64 GameUi::CreateUiTexture(int, int, const u8*) { return 0; }

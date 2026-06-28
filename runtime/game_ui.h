@@ -322,6 +322,16 @@ class GameUi {
   // tracked one and lists its objectives. Pressing its number pins that quest.
   void SetJournal(bool open, const std::vector<HudQuest>& quests, int selected);
 
+  // War-map overlay: the Civil War campaign board. `open` shows the panel; each
+  // hold carries its name and owner (0 neutral, 1 Imperial, 2 Stormcloak), and
+  // `imperial_fraction` (0..1) drives the war-progress bar. Pushed by the managed
+  // Civil War campaign and snapshotted onto the panel.
+  struct WarHoldEntry {
+    std::string name;
+    int owner = 0;
+  };
+  void SetWarMap(bool open, const std::vector<WarHoldEntry>& holds, float imperial_fraction);
+
   // Hide or show the gameplay HUD (compass, crosshair, vitals, readout) without
   // touching the pause menu. The cinematic showcase hides it for clean frames.
   void SetHudVisible(bool visible);

@@ -201,6 +201,9 @@ bool LoadGameData(Engine& engine) {
 
   // REC_QUEST_REPORT=<EDID> drives a quest through its stages to completion and
   // prints the journey, then quits; REC_DIALOGUE_REPORT dumps its dialogue.
+  // REC_WAR_MAP opens the Civil War war-map overlay at load (normally toggled
+  // with M), for screenshots.
+  if (std::getenv("REC_WAR_MAP")) self->war_map_open_ = true;
   if (const char* want = std::getenv("REC_QUEST_LIST")) {
     self->quest_->ReportQuestList(want);
     self->quit_.store(true, std::memory_order_relaxed);

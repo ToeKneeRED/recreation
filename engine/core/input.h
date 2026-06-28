@@ -47,6 +47,7 @@ enum class Key : u8 {
   kArrowLeft,
   kArrowRight,
   kTab,
+  kM,  // toggle the Civil War war map (appended to keep prior codes stable)
   kCount,
 };
 

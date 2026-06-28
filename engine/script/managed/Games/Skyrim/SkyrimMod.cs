@@ -59,6 +59,7 @@ public sealed class SkyrimMod : IMod
         ModHost.Register(new BattleReinforcementHud());
         ModHost.Register(new CivilWarCampaignTracker());
         ModHost.Register(new CivilWarRankTracker());
+        ModHost.Register(new WarMapPusher());
 
         // The cross-game NPC reaction layer (Modding): a wanted/heat meter, the
         // guard confrontation it drives, NPC daily schedules, and bystander alarm.

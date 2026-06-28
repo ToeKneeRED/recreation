@@ -295,6 +295,13 @@ class SkyrimBindings {
   virtual void SetHudGauge(const std::string& id, f32 fraction, const std::string& label,
                            u32 color) {}
   virtual void ClearHudGauge(const std::string& id) {}
+
+  // War-map state, pushed by managed gameplay (the Civil War campaign): each hold
+  // by index with its name and owner (0 neutral, 1 Imperial, 2 Stormcloak), plus
+  // the overall Imperial-controlled fraction. The engine snapshots it onto the
+  // toggle-able war-map panel.
+  virtual void SetWarHold(i32 index, const std::string& name, i32 owner) {}
+  virtual void SetWarProgress(f32 imperial_fraction) {}
 };
 
 // Registers the Skyrim Papyrus native surface into reg, bound against bindings

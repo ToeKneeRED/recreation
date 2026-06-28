@@ -158,6 +158,16 @@ void RegisterHud(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
     Resolve(bindings).ClearHudGauge(ArgS(a, 0));
     return Value();
   });
+  // War-map channel: managed code (the Civil War campaign) pushes each hold's
+  // owner and the overall war progress for the toggle-able war-map panel.
+  reg.Register("WarMap", "SetHold", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    Resolve(bindings).SetWarHold(ArgI(a, 0), ArgS(a, 1), ArgI(a, 2));
+    return Value();
+  });
+  reg.Register("WarMap", "SetProgress", [bindings](VirtualMachine&, ObjectRef, Args& a) {
+    Resolve(bindings).SetWarProgress(ArgF(a, 0));
+    return Value();
+  });
 }
 
 void RegisterUtility(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {

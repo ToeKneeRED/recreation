@@ -51,6 +51,10 @@ void Engine::UpdateCamera(f32 frame_delta) {
     ctx_.third_person = !ctx_.third_person;
   if (actions_.pressed(Action::kToggleJournal) && !menu && !kb && !modal && !editor_on)
     quest_->ToggleJournal();
+  // The war map (M): the Civil War campaign board, a modern overlay over the
+  // managed campaign state.
+  if (input.key_pressed(Key::kM) && !menu && !kb && !modal && !editor_on)
+    war_map_open_ = !war_map_open_;
 
   if (editor_on) {
     // Free-fly builder camera: right mouse looks, WASD/QE move (unless the search

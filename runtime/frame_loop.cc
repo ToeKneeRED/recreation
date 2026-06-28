@@ -342,6 +342,16 @@ bool Engine::RunFrame() {
           hud.push_back({"cw_team2", "Stormcloak line", f2, 0xd84f4fffu});    // red
         }
         game_ui_.SetHudGauges(hud);
+
+        // War map (M): the managed Civil War campaign pushes each hold's owner;
+        // snapshot it onto the toggle-able panel.
+        std::vector<script::skyrim::RecordBackedSkyrimBindings::WarHold> war_holds;
+        f32 war_progress = 0.0f;
+        script_bindings_->SnapshotWarMap(war_holds, war_progress);
+        std::vector<GameUi::WarHoldEntry> holds;
+        holds.reserve(war_holds.size());
+        for (const auto& h : war_holds) holds.push_back({h.name, h.owner});
+        game_ui_.SetWarMap(war_map_open_, holds, war_progress);
       }
       game_ui_.Build(*window_, renderer_, camera_, frame_delta, &view);
       renderer_.RenderFrame(view);

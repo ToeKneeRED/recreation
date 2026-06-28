@@ -981,6 +981,25 @@ void RecordBackedSkyrimBindings::SnapshotHudGauges(std::vector<HudGauge>& out) c
   out = hud_gauges_;
 }
 
+void RecordBackedSkyrimBindings::SetWarHold(i32 index, const std::string& name, i32 owner) {
+  if (index < 0 || index > 64) return;  // sanity bound on the hold count
+  std::lock_guard<std::mutex> lock(war_map_mutex_);
+  if (static_cast<size_t>(index) >= war_holds_.size()) war_holds_.resize(index + 1);
+  war_holds_[index] = {name, owner};
+}
+
+void RecordBackedSkyrimBindings::SetWarProgress(f32 imperial_fraction) {
+  std::lock_guard<std::mutex> lock(war_map_mutex_);
+  war_progress_ = std::clamp(imperial_fraction, 0.0f, 1.0f);
+}
+
+void RecordBackedSkyrimBindings::SnapshotWarMap(std::vector<WarHold>& out,
+                                                f32& imperial_fraction) const {
+  std::lock_guard<std::mutex> lock(war_map_mutex_);
+  out = war_holds_;
+  imperial_fraction = war_progress_;
+}
+
 void RecordBackedSkyrimBindings::SetStage(ObjectRef quest, i32 stage) {
   if (replica_mode_) return;  // server-authoritative: stage arrives via ApplyStatus
   // The quest system owns the state and tells us whether this is a fresh stage;

@@ -400,6 +400,7 @@ class Engine {
 
   f32 cam_pitch_ = -0.15f;
   f32 auto_attack_timer_ = 0;  // REC_AUTO_ATTACK swing cadence (playthrough verification)
+  bool war_map_open_ = false;  // Civil War war-map overlay (toggled with M)
   // Last frame's world matrices keyed by entity, for motion vectors.
   base::UnorderedMap<u64, Mat4> prev_transforms_;
 #if RECREATION_HAS_NET

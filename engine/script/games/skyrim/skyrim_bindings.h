@@ -138,6 +138,16 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void ClearHudGauge(const std::string& id) override;
   void SnapshotHudGauges(std::vector<HudGauge>& out) const;
 
+  // War-map state (a hold's name + owner), pushed by managed code and snapshotted
+  // onto the war-map panel. Mutex-guarded like the gauges.
+  struct WarHold {
+    std::string name;
+    i32 owner = 0;  // 0 neutral, 1 Imperial, 2 Stormcloak
+  };
+  void SetWarHold(i32 index, const std::string& name, i32 owner) override;
+  void SetWarProgress(f32 imperial_fraction) override;
+  void SnapshotWarMap(std::vector<WarHold>& out, f32& imperial_fraction) const;
+
   // Applies a server-replicated quest status on a multiplayer client and, when it
   // carries a fresh stage, fires the managed QuestStageChanged event so C# mods
   // (XP rewards, the journal) react to the host's progress exactly as a local
@@ -488,6 +498,9 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // (SnapshotHudGauges); guarded by its own mutex.
   mutable std::mutex hud_gauges_mutex_;
   std::vector<HudGauge> hud_gauges_;
+  mutable std::mutex war_map_mutex_;
+  std::vector<WarHold> war_holds_;
+  f32 war_progress_ = 0.0f;
   std::vector<std::pair<u64, f32>> nearby_cache_;  // last result: (handle, distance in game units)
   // Last GetMagicEffectCount result, read by the GetNthMagicEffect* accessors.
   // Guest-thread only (record parsing), so it needs no lock.
