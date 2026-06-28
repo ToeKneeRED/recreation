@@ -15,8 +15,14 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <!-- The SDK plus the default gamemodes, which now build as their own assemblies.
+       The tests cover the per-game rulesets, so reference each game project (they
+       are copied next to the test runner and resolve the shared SDK once). -->
   <ItemGroup>
     <ProjectReference Include="..\Recreation.Scripting.csproj" />
+    <ProjectReference Include="..\default_gamemodes\Skyrim\Recreation.Skyrim.csproj" />
+    <ProjectReference Include="..\default_gamemodes\Fallout\Recreation.Fallout.csproj" />
+    <ProjectReference Include="..\default_gamemodes\Starfield\Recreation.Starfield.csproj" />
   </ItemGroup>
 
 </Project>

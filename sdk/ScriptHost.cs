@@ -32,6 +32,10 @@ public static unsafe class ScriptHost
         Recreation.Net.Platform.Boot(handshake->Realm);
         Console.WriteLine($"[managed] Recreation scripting host online (SDK {SdkInfo.Version}), {Domains.Count} game(s)");
         if (Environment.GetEnvironmentVariable("REC_DOMAINS_REPORT") != null) ReportDomains();
+        // Bring in the optional default gamemodes (the per-game rulesets) as
+        // separate assemblies before the boot scan, so they load like the built-ins
+        // they replaced. Absent (or disabled) just means a barebones session.
+        ModLoader.PreloadDefaultGamemodes();
         // Filter which mods start by the process role: server + shared on a host,
         // client + shared on a client, everything in single-player.
         ModHost.SetHostRealm(handshake->Realm);

@@ -18,19 +18,38 @@ engine internal. The native bridge (`engine/script/host/`) stays engine-side.
 | `tests/` | the dependency-free test runner (`dotnet run`) | contributors |
 | `templates/mod/` | copy-out starter for a drop-in mod | mod authors |
 
-Today this all compiles into one assembly, `Recreation.Scripting`. Splitting the
-stable contract into its own `Recreation.Sdk` assembly is Stage 2 (below).
+The SDK proper compiles into one assembly, `Recreation.Scripting`. The default
+gamemodes build as their own assemblies loaded at runtime (see below). Splitting
+the stable contract into its own `Recreation.Sdk` assembly is the remaining step
+(Roadmap).
 
 ## Building
 
 ```sh
 # from the nix dev shell (dotnet is only on PATH there)
 ./tools/build_managed.sh            # -> build/managed/Recreation.Scripting.dll
+                                    #    + build/managed/gamemodes/Recreation.{Skyrim,Fallout,Starfield}.dll
 RECREATION_SCRIPTING_DIR=build/managed ./run-local.sh ...
 ```
 
 Tests: `cd sdk/tests && dotnet run -c Release` (also wired into `ctest` as
 `managed_scripting_tests` when a .NET SDK is on the configure PATH).
+
+## Default gamemodes
+
+The per-game rulesets in `default_gamemodes/` build as **separate assemblies**
+(`Recreation.Skyrim/Fallout/Starfield`), not part of the core SDK. At boot the
+host preloads the `gamemodes/` directory beside `Recreation.Scripting.dll`, so
+each ruleset loads and registers exactly like a built-in mod did — but it is now
+optional content:
+
+- Delete a DLL from `gamemodes/` to drop that game.
+- `RECREATION_NO_GAMEMODES=1` skips them all (a barebones session).
+- `RECREATION_GAMEMODES_DIR=<dir>` loads them from elsewhere.
+
+Each game references the SDK compile-time-only, so the DLLs carry no SDK copy and
+bind to the engine's loaded one (same rule as any mod). A ruleset only activates
+when its game is the primary domain, so loading all three is harmless.
 
 ## Versioning
 
@@ -78,7 +97,9 @@ multiplayer workflow.
 
 - **Stage 1 (done):** relocated to `sdk/`, single versioned assembly, packable as
   a NuGet (`dotnet pack`), `SdkInfo.Version` at boot, mod template.
-- **Stage 2 (when contract churn bites):** carve `Recreation.Sdk` (the
+- **Stage 2 (done):** the default gamemodes build as separate, droppable
+  assemblies loaded from `gamemodes/` at boot, out of the core SDK.
+- **Stage 3 (when contract churn bites):** carve `Recreation.Sdk` (the
   `Engine/ Modding/ Interop/` contract + platform public API) out of
-  `Recreation.Scripting`, leaving game logic and samples behind it. This makes the
-  version number trustworthy: the changelog stops being game-logic noise.
+  `Recreation.Scripting`, leaving the platform impl and samples behind it. This
+  makes the version number trustworthy: the changelog stops being game-logic noise.

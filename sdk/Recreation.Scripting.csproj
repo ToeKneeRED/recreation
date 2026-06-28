@@ -25,11 +25,13 @@
     <Description>Recreation modding SDK: the API C# mods are built against.</Description>
   </PropertyGroup>
 
-  <!-- The test runner (tests/) and the mod starter (templates/) are separate
-       projects; keep their sources out of the library build. -->
+  <!-- The test runner (tests/), the mod starter (templates/) and the optional
+       default gamemodes (default_gamemodes/, each its own assembly loaded at
+       runtime) are separate projects; keep their sources out of the library build. -->
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
     <Compile Remove="templates/**/*.cs" />
+    <Compile Remove="default_gamemodes/**/*.cs" />
   </ItemGroup>
 
   <!-- The test runner exercises internal seams (GameWorld, the Domains registry). -->
