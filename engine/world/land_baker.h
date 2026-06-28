@@ -39,6 +39,8 @@ class LandBaker {
   const Layer* LayerFor(u64 ltex_packed);
   const Layer* DefaultLayer();
   bool DecodeTexture(const asset::Texture& texture, Layer* out) const;
+  // Resolves the bake/layer resolution from REC_LAND_BAKE_TEXELS on first use.
+  void EnsureBakeSize();
 
   const bethesda::RecordStore& records_;
   asset::AssetDatabase& assets_;
@@ -46,6 +48,8 @@ class LandBaker {
   Layer default_layer_;
   asset::AssetId default_albedo_;  // shared bake for layerless cells
   size_t baked_ = 0;
+  u32 layer_size_ = 0;  // LTEX texels decoded per repeat (0 until resolved)
+  u32 bake_size_ = 0;   // baked albedo texels across the whole cell
 };
 
 }  // namespace rec::world

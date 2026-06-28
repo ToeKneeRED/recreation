@@ -5,20 +5,24 @@
 #include <cstring>
 #include <string>
 
+#include <base/option.h>
+
 #include "core/log.h"
 
 namespace rec::world {
 namespace {
 
+// LTEX texels decoded per 512-unit repeat; the per-cell bake follows at 8x this
+// (one repeat = kCellSize / kRepeatUnits). 128 -> 1024x1024 per cell, ~28 ms to
+// bake and 4 MB resident: a clear step up from a single land texture stretched
+// across the whole cell. 64 halves the bake cost (and detail) for hitch-free
+// streaming; 256 -> 2048x2048 is sharper but ~110 ms/cell. Clamped to [16,256].
+base::Option<int> LandBakeTexels{"land.bake.texels", 128, "REC_LAND_BAKE_TEXELS"};
+
 constexpr f32 kCellSize = 4096.0f;
 // Land textures repeat every 512 game units (~7.3 m), the same scale the
 // terrain mesh UVs used before baking.
 constexpr f32 kRepeatUnits = 512.0f;
-// 256 keeps the bake around 4 ms; dirt paths stay ~10 texels wide.
-constexpr u32 kBakeSize = 256;
-// One texture repeat covers kBakeSize * kRepeatUnits / kCellSize = 32 bake
-// texels, so layers decode at the mip closest to that.
-constexpr u32 kLayerSize = 32;
 constexpr u32 kQuadGrid = 17;  // VTXT opacity grid per quadrant
 
 constexpr u32 kBtxt = FourCc('B', 'T', 'X', 'T');
@@ -40,9 +44,19 @@ f32 SrgbToLinear(u8 v) {
 }
 
 u8 LinearToSrgb(f32 v) {
+  // 12-bit LUT: the inverse of SrgbToLinear without a per-texel pow, which is
+  // the only transcendental in the bake's inner loop.
+  static const auto table = [] {
+    base::Vector<u8> t(4096);
+    for (u32 i = 0; i < 4096; ++i) {
+      f32 c = static_cast<f32>(i) / 4095.0f;
+      f32 s = c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+      t[i] = static_cast<u8>(std::clamp(s, 0.0f, 1.0f) * 255.0f + 0.5f);
+    }
+    return t;
+  }();
   v = std::clamp(v, 0.0f, 1.0f);
-  f32 c = v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-  return static_cast<u8>(c * 255.0f + 0.5f);
+  return table[static_cast<u32>(v * 4095.0f + 0.5f)];
 }
 
 u32 Rgb565To888(u16 c, u8 out[3]) {
@@ -116,7 +130,7 @@ bool LandBaker::DecodeTexture(const asset::Texture& texture, Layer* out) const {
   // The smallest mip still at or above the sampling resolution.
   u32 mip = 0;
   for (u32 m = 0; m + 1 < texture.mip_count; ++m) {
-    if (std::max(texture.width >> (m + 1), texture.height >> (m + 1)) < kLayerSize) break;
+    if (std::max(texture.width >> (m + 1), texture.height >> (m + 1)) < layer_size_) break;
     mip = m + 1;
   }
   u32 width, height;
@@ -157,14 +171,14 @@ bool LandBaker::DecodeTexture(const asset::Texture& texture, Layer* out) const {
 
   // Square sampling grid in linear space; non square sources resample by
   // nearest.
-  out->size = kLayerSize;
-  out->rgb.resize(static_cast<size_t>(kLayerSize) * kLayerSize * 3);
-  for (u32 y = 0; y < kLayerSize; ++y) {
-    u32 sy = y * height / kLayerSize;
-    for (u32 x = 0; x < kLayerSize; ++x) {
-      u32 sx = x * width / kLayerSize;
+  out->size = layer_size_;
+  out->rgb.resize(static_cast<size_t>(layer_size_) * layer_size_ * 3);
+  for (u32 y = 0; y < layer_size_; ++y) {
+    u32 sy = y * height / layer_size_;
+    for (u32 x = 0; x < layer_size_; ++x) {
+      u32 sx = x * width / layer_size_;
       const u8* src = rgba.data() + (static_cast<size_t>(sy) * width + sx) * 4;
-      f32* dst = out->rgb.data() + (static_cast<size_t>(y) * kLayerSize + x) * 3;
+      f32* dst = out->rgb.data() + (static_cast<size_t>(y) * layer_size_ + x) * 3;
       dst[0] = SrgbToLinear(src[0]);
       dst[1] = SrgbToLinear(src[1]);
       dst[2] = SrgbToLinear(src[2]);
@@ -173,7 +187,14 @@ bool LandBaker::DecodeTexture(const asset::Texture& texture, Layer* out) const {
   return true;
 }
 
+void LandBaker::EnsureBakeSize() {
+  if (bake_size_ != 0) return;
+  layer_size_ = static_cast<u32>(std::clamp(LandBakeTexels.get(), 16, 256));
+  bake_size_ = layer_size_ * static_cast<u32>(kCellSize / kRepeatUnits);  // 8x
+}
+
 const LandBaker::Layer* LandBaker::DefaultLayer() {
+  EnsureBakeSize();
   if (default_layer_.size == 0) {
     const asset::Texture* texture = assets_.LoadTexture("textures/landscape/tundra01.dds");
     if (!texture || !DecodeTexture(*texture, &default_layer_)) {
@@ -225,6 +246,7 @@ const LandBaker::Layer* LandBaker::LayerFor(u64 ltex_packed) {
 
 asset::AssetId LandBaker::BakeAlbedo(const bethesda::Record& land, u16 land_plugin, i16 grid_x,
                                      i16 grid_y) {
+  EnsureBakeSize();
   // Layer setup straight from the subrecord stream: BTXT sets a quadrant
   // base, ATXT opens an additive layer whose VTXT opacities follow.
   u64 base[4] = {};
@@ -300,14 +322,13 @@ asset::AssetId LandBaker::BakeAlbedo(const bethesda::Record& land, u16 land_plug
                          : "land/albedo/default";
   texture.id = asset::MakeAssetId(name);
   texture.format = asset::TextureFormat::kRgba8;
-  texture.width = kBakeSize;
-  texture.height = kBakeSize;
+  texture.width = bake_size_;
+  texture.height = bake_size_;
   texture.is_srgb = true;
-  texture.data.resize(static_cast<size_t>(kBakeSize) * kBakeSize * 4);
+  texture.data.resize(static_cast<size_t>(bake_size_) * bake_size_ * 4);
 
   // Per quadrant so the inner loop only visits the layers that apply there.
-  constexpr f32 kQuadSize = kCellSize * 0.5f;
-  constexpr u32 kQuadTexels = kBakeSize / 2;
+  const u32 kQuadTexels = bake_size_ / 2;
   for (u32 quadrant = 0; quadrant < 4; ++quadrant) {
     base::Vector<u32> quad_layers;
     for (u32 i = 0; i < layers.size(); ++i) {
@@ -318,14 +339,14 @@ asset::AssetId LandBaker::BakeAlbedo(const bethesda::Record& land, u16 land_plug
     for (u32 qy = 0; qy < kQuadTexels; ++qy) {
       u32 ty = ty0 + qy;
       // Texel rows run south to north, matching the terrain mesh V = y/cell.
-      f32 ly = (static_cast<f32>(ty) + 0.5f) / kBakeSize * kCellSize;
+      f32 ly = (static_cast<f32>(ty) + 0.5f) / bake_size_ * kCellSize;
       f32 world_y = static_cast<f32>(grid_y) * kCellSize + ly;
       f32 gy = (static_cast<f32>(qy) + 0.5f) / kQuadTexels * (kQuadGrid - 1);
       u32 cy = std::min(static_cast<u32>(gy), kQuadGrid - 2);
       f32 fy = gy - static_cast<f32>(cy);
       for (u32 qx = 0; qx < kQuadTexels; ++qx) {
         u32 tx = tx0 + qx;
-        f32 lx = (static_cast<f32>(tx) + 0.5f) / kBakeSize * kCellSize;
+        f32 lx = (static_cast<f32>(tx) + 0.5f) / bake_size_ * kCellSize;
         f32 world_x = static_cast<f32>(grid_x) * kCellSize + lx;
         f32 gx = (static_cast<f32>(qx) + 0.5f) / kQuadTexels * (kQuadGrid - 1);
         u32 cx = std::min(static_cast<u32>(gx), kQuadGrid - 2);
@@ -345,7 +366,7 @@ asset::AssetId LandBaker::BakeAlbedo(const bethesda::Record& land, u16 land_plug
           for (int k = 0; k < 3; ++k) color[k] += (layer_color[k] - color[k]) * opacity;
         }
 
-        u8* dst = texture.data.data() + (static_cast<size_t>(ty) * kBakeSize + tx) * 4;
+        u8* dst = texture.data.data() + (static_cast<size_t>(ty) * bake_size_ + tx) * 4;
         dst[0] = LinearToSrgb(color[0]);
         dst[1] = LinearToSrgb(color[1]);
         dst[2] = LinearToSrgb(color[2]);
