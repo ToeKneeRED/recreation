@@ -72,6 +72,20 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.Float(GetCurrent(self, args[0].AsString()));
             case "GetBaseActorValue":
                 return Value.Float(_base.TryGetValue((self, Norm(args[0].AsString())), out float b) ? b : 0f);
+            case "GetActorValuePercentage":
+            {
+                string av = Norm(args[0].AsString());
+                float bv = _base.TryGetValue((self, av), out float bb) ? bb : 0f;
+                if (bv <= 0f) return Value.Float(0f);
+                float cv = _current.TryGetValue((self, av), out float cc) ? cc : 0f;
+                return Value.Float(System.Math.Clamp(cv / bv, 0f, 1f));
+            }
+            case "ModActorValue":
+            {
+                string av = Norm(args[0].AsString());
+                _current[(self, av)] = (_current.TryGetValue((self, av), out float c0) ? c0 : 0f) + args[1].AsFloat();
+                return Value.None;
+            }
             case "RestoreActorValue":
             {
                 string av = Norm(args[0].AsString());

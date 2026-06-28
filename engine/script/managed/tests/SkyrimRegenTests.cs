@@ -58,6 +58,40 @@ public static class SkyrimRegenTests
         Native.Backend = null;
 
         FastTravelLock(check);
+        Injury(check);
+    }
+
+    private static void Injury(Check check)
+    {
+        var fake = new FakeBackend();
+        Native.Backend = fake;
+        ModHost.Shutdown();
+
+        fake.SetValue(fake.Player, ActorValue.SpeedMult, current: 100, baseValue: 100);
+        ModHost.Register(new InjurySlowdown { Threshold = 0.25f, SpeedPenalty = 30f });
+
+        // Healthy: no penalty.
+        fake.SetValue(fake.Player, ActorValue.Health, current: 80, baseValue: 100);
+        ModHost.Tick(0.1f);
+        check.Equal("no penalty while healthy", 100f,
+                    fake.GetCurrent(fake.Player, ActorValue.SpeedMult));
+
+        // Badly hurt: a single speed penalty applies.
+        fake.SetValue(fake.Player, ActorValue.Health, current: 10, baseValue: 100);
+        ModHost.Tick(0.1f);
+        ModHost.Tick(0.1f);  // must not stack on subsequent frames
+        check.Equal("limp applied once when injured", 70f,
+                    fake.GetCurrent(fake.Player, ActorValue.SpeedMult));
+
+        // Recovered: the penalty is removed exactly once.
+        fake.SetValue(fake.Player, ActorValue.Health, current: 60, baseValue: 100);
+        ModHost.Tick(0.1f);
+        ModHost.Tick(0.1f);
+        check.Equal("speed restored on recovery", 100f,
+                    fake.GetCurrent(fake.Player, ActorValue.SpeedMult));
+
+        ModHost.Shutdown();
+        Native.Backend = null;
     }
 
     private static void FastTravelLock(Check check)
