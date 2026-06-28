@@ -241,6 +241,12 @@ void QuestDirector::AttachQuestScripts() {
     npc_->ArmCwFieldBattle();
     REC_INFO("debug: CW field battle armed (two lines of soldiers will charge)");
   }
+  // REC_CW00_DEMO: the live join beat, walk to General Tullius in Castle Dour
+  // and enlist (pair with --interior SolitudeCastleDour REC_PLAYER).
+  if (host && std::getenv("REC_CW00_DEMO")) {
+    npc_->ArmCw00Demo();
+    REC_INFO("debug: CW00 join demo armed (walk to Tullius to enlist)");
+  }
   // REC_CW_DEMO: a playable slice of "Joining the Legion" (CW01A). Start the
   // quest at the clear-the-fort stage (its real fragment surfaces objective 1),
   // stage a fort skirmish the player fights in, and on victory advance to stage

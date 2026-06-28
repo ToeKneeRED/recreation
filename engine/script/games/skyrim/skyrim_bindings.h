@@ -318,6 +318,11 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   bool IsObjectiveDisplayed(papyrus::ObjectRef quest, i32 objective) override;
   bool IsObjectiveCompleted(papyrus::ObjectRef quest, i32 objective) override;
   papyrus::ObjectRef SceneOwningQuest(papyrus::ObjectRef scene) override;
+  // A dialogue INFO's owning quest, so a TIF_ fragment's GetOwningQuest().SetStage
+  // resolves. Registered when the fragment is fired (the dialogue layer knows the
+  // topic's quest), mirroring the scene fragments' owning quest.
+  void SetInfoOwningQuest(u64 info, u64 quest) { info_owning_quest_[info] = quest; }
+  papyrus::ObjectRef InfoOwningQuest(papyrus::ObjectRef info) override;
   void SceneStart(papyrus::ObjectRef scene) override;
   void SceneStop(papyrus::ObjectRef scene) override;
   bool SceneIsPlaying(papyrus::ObjectRef scene) override;
@@ -435,6 +440,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
     bethesda::SceneFragments frags;
   };
   std::unordered_map<u64, SceneFragmentSet> scene_fragments_;
+  std::unordered_map<u64, u64> info_owning_quest_;  // INFO handle -> owning quest
   // Runs one scene fragment function via the VM, attributed to its owning quest.
   void RunSceneFragment(u64 scene, u64 owning_quest, const std::string& function);
   // Plays the scenes a quest fragment Started, firing their phase fragments over

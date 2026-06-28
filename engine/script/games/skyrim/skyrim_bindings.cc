@@ -812,6 +812,11 @@ papyrus::ObjectRef RecordBackedSkyrimBindings::SceneOwningQuest(papyrus::ObjectR
   return papyrus::ObjectRef{it != scene_fragments_.end() ? it->second.owning_quest : 0};
 }
 
+papyrus::ObjectRef RecordBackedSkyrimBindings::InfoOwningQuest(papyrus::ObjectRef info) {
+  auto it = info_owning_quest_.find(info.handle);
+  return papyrus::ObjectRef{it != info_owning_quest_.end() ? it->second : 0};
+}
+
 void RecordBackedSkyrimBindings::SceneStart(papyrus::ObjectRef scene) {
   // Server-authoritative: a client mirrors quest progress via replication.
   if (replica_mode_) return;

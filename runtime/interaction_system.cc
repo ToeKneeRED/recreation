@@ -283,10 +283,10 @@ void InteractionSystem::SelectDialogueOption(int index) {
     ctx_.client_session->SendDialogueSelect(opt.info);
   else
 #endif
-    RunInfoFragment(opt.info);
+    RunInfoFragment(opt.info, opt.quest);
 }
 
-void InteractionSystem::RunInfoFragment(u64 info) {
+void InteractionSystem::RunInfoFragment(u64 info, u64 owning_quest) {
   if (!ctx_.scripts || info == 0) return;
   const bethesda::GlobalFormId id{static_cast<u16>(info >> 32),
                                   static_cast<u32>(info & 0xffffffffu)};
@@ -299,11 +299,13 @@ void InteractionSystem::RunInfoFragment(u64 info) {
   if (!bethesda::ParseInfoFragments(vmad->data, &attachment, &frags)) return;
   if (frags.begin.function.empty()) return;
   // Attach the TIF_ script to the INFO handle (idempotent, only creates the
-  // instance + seeds properties the first time), then run the begin fragment on
-  // it. Its seeded quest property lets the fragment SetStage the right quest.
+  // instance + seeds properties the first time), register the topic's quest so
+  // GetOwningQuest() resolves, then run the begin fragment on it.
   ctx_.scripts->AttachScripts(info, attachment);
   const std::string fn = frags.begin.function;
-  ctx_.scripts->guest().Submit([info, fn](script::papyrus::VirtualMachine& vm) {
+  auto* binds = ctx_.bindings;
+  ctx_.scripts->guest().Submit([binds, info, owning_quest, fn](script::papyrus::VirtualMachine& vm) {
+    if (binds && owning_quest != 0) binds->SetInfoOwningQuest(info, owning_quest);
     vm.TryCall(script::papyrus::ObjectRef{info}, fn, {});
   });
 }

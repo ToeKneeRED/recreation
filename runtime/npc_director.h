@@ -101,6 +101,13 @@ class NpcDirector {
   // combat and rendering together).
   void ArmCwFieldBattle() { cw_field_pending_ = true; }
   void CwFieldBattleTick(f32 dt);
+  // REC_CW00_DEMO: the live "join the Legion" beat. Walks the player to General
+  // Tullius in Castle Dour (load --interior SolitudeCastleDour); on arrival he
+  // greets the player and the enlistment is acknowledged (CW00A runs its real
+  // stage-10 fragment). Instrumentation, like the MQ101 demo: the quest itself
+  // advances through its own Papyrus.
+  void ArmCw00Demo() { cw00_demo_pending_ = true; }
+  void Cw00DemoTick(f32 dt);
   // Bridges a staged battle to a quest: when the enemy (team 2) is wiped out,
   // or a grace timeout elapses so a wedged fight still resolves, the engine
   // advances `quest` to `win_stage` (which runs the quest's real stage fragment).
@@ -185,6 +192,9 @@ class NpcDirector {
   bool cw_battle_active_ = false;
   f32 cw_battle_log_timer_ = 0;
   int cw_start1_ = 0, cw_start2_ = 0;  // each side's starting strength, for the bars
+  bool cw00_demo_pending_ = false;
+  int cw00_demo_phase_ = 0;
+  f32 cw00_demo_timer_ = 0;
   bool cw_field_pending_ = false;
   bool cw_field_active_ = false;
   f32 cw_field_warmup_ = 0;     // let terrain stream before placing soldiers

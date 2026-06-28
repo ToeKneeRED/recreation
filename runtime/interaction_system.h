@@ -50,7 +50,9 @@ class InteractionSystem {
 
   // Authoritative entry points the server / single-player run directly (a client
   // routes the request to the server, which calls these).
-  void RunInfoFragment(u64 info);
+  // Runs a dialogue INFO's begin fragment (the TIF_ script). owning_quest, when
+  // non-zero, is registered so the fragment's GetOwningQuest() resolves.
+  void RunInfoFragment(u64 info, u64 owning_quest = 0);
   void RaiseActivate(u64 handle);
 
   // Activation prompt state, surfaced to the quest debugger.

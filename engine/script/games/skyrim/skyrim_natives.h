@@ -262,6 +262,9 @@ class SkyrimBindings {
   // Scenes: a SCEN fragment runs Self.GetOwningQuest().SetStage(N), so the scene
   // object must resolve to its owning quest. Returns None for an unknown scene.
   virtual papyrus::ObjectRef SceneOwningQuest(papyrus::ObjectRef scene) { return papyrus::ObjectRef{0}; }
+  // The quest a dialogue INFO belongs to (TopicInfo.GetOwningQuest), so a TIF_
+  // fragment's GetOwningQuest().SetStage advances the right quest.
+  virtual papyrus::ObjectRef InfoOwningQuest(papyrus::ObjectRef info) { return papyrus::ObjectRef{0}; }
   // Scene.Start/ForceStart begin playing a scene (a quest fragment calls this);
   // Stop ends it; IsPlaying queries it. Default no-ops for the neutral bindings.
   virtual void SceneStart(papyrus::ObjectRef scene) {}

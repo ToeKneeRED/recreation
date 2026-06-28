@@ -581,6 +581,11 @@ void RegisterQuest(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Scene", "GetOwningQuest", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Object(Resolve(bindings).SceneOwningQuest(self));
   });
+  // A dialogue INFO fragment (TIF_ script, extends TopicInfo) advances its quest
+  // via Self.GetOwningQuest().SetStage(N); resolve the INFO -> its owning quest.
+  reg.Register("TopicInfo", "GetOwningQuest", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Object(Resolve(bindings).InfoOwningQuest(self));
+  });
   // Quest stage fragments call MyScene.Start() to play a scene; the scene's own
   // fragments then SetStage, so this is the hinge of native scene-driven progress.
   reg.Register("Scene", "Start", [bindings](VirtualMachine&, ObjectRef self, Args&) {

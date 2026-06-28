@@ -512,6 +512,60 @@ bool NpcDirector::BattleCam(Vec3* eye, Vec3* target) const {
   return true;
 }
 
+void NpcDirector::Cw00DemoTick(f32 dt) {
+  if (!cw00_demo_pending_ || !actors_->HasPlayer() || !interaction_) return;
+  // Castle Dour war room actors (Skyrim.esm, plugin 0): the placed ACHR refs of
+  // General Tullius and Legate Rikke, and Tullius's CW00A forcegreet INFO whose
+  // fragment is GetOwningQuest().SetStage(10), the enlistment.
+  constexpr u64 kTullius = 0x000198BA;
+  constexpr u64 kRikke = 0x000198BB;
+  constexpr u64 kTulliusForcegreetInfo = 0x000C348B;
+  const u64 target = cw00_demo_phase_ == 0 ? kTullius : kRikke;
+  cw00_demo_timer_ += dt;
+
+  Vec3 ppos;
+  if (!actors_->PlayerWorldPos(&ppos)) return;
+
+  // Steer toward the officer if its ref has streamed in (cosmetic); a forcegreet
+  // has range, so fire within 8 m or after a grace period, a wedged walk (the
+  // war room is multi-level and the flat router cannot always climb to Tullius)
+  // still lands the beat.
+  bool arrived = false;
+  ecs::Entity e;
+  world::Transform* t;
+  if (ResolveCombatant(target, &e, &t)) {
+    ctx_.auto_walk = true;
+    ctx_.auto_walk_goal = {t->position[0], t->position[1], t->position[2]};
+    ctx_.auto_walk_has_goal = true;
+    const float self[3] = {ppos.x, ppos.y, ppos.z};
+    arrived = world::WithinPlanar(self, t->position, 8.0f);
+  }
+  if (!arrived && cw00_demo_timer_ < 14.0f) return;  // still closing the distance
+
+  if (cw00_demo_phase_ == 0) {
+    // Reached Tullius: he greets the player and the enlistment is acknowledged.
+    constexpr u64 kCw00aQuest = 0x000D3C5F;  // CW00A, the INFO's owning quest
+    interaction_->RunInfoFragment(kTulliusForcegreetInfo, kCw00aQuest);
+    if (ctx_.scripts && ctx_.bindings) {
+      auto* binds = ctx_.bindings;
+      constexpr u64 kCw00a = 0x000D3C5F;  // CW00A "Imperial Introductions"
+      ctx_.scripts->guest().Submit([binds](rec::script::papyrus::VirtualMachine&) {
+        REC_INFO("cw00 demo: CW00A is now at stage {} after the forcegreet",
+                 binds->GetStage(script::papyrus::ObjectRef{kCw00a}));
+      });
+    }
+    REC_INFO("cw00 demo: General Tullius hails the player -- enlisted (CW00A stage 10)");
+    cw00_demo_phase_ = 1;
+    cw00_demo_timer_ = 0;
+  } else {
+    // Reached Legate Rikke: the player reports in for the fort assignment.
+    ctx_.auto_walk = false;
+    ctx_.auto_walk_has_goal = false;
+    cw00_demo_pending_ = false;
+    REC_INFO("cw00 demo: reported to Legate Rikke for the fort assignment");
+  }
+}
+
 u64 NpcDirector::SpawnSoldier(const Vec3& pos, i32 team) {
   // Synthetic handle in the reserved 0xFFFF plugin slot, offset high so it never
   // collides with quest PlaceAtMe spawns (which start low in the same slot).
