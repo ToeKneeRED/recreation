@@ -19,6 +19,7 @@
 #include "npc_director.h"
 #include "quest/scene_player.h"
 #include "quest/scene_record.h"
+#include "script/papyrus/alias_handle.h"
 #include "script/papyrus/value.h"
 #include "world/components.h"
 #include "world/objective_marker.h"
@@ -117,7 +118,9 @@ void QuestDirector::AttachQuestScripts() {
                         if (!vmad) return;
                         bethesda::ScriptAttachment attachment;
                         std::vector<bethesda::QuestStageFragment> fragments;
-                        if (!bethesda::ParseQuestFragments(vmad->data, &attachment, &fragments) ||
+                        std::vector<bethesda::QuestAliasScripts> alias_scripts;
+                        if (!bethesda::ParseQuestFragments(vmad->data, &attachment, &fragments,
+                                                           &alias_scripts) ||
                             attachment.scripts.empty())
                           return;
                         u64 handle = static_cast<u64>(id.plugin) << 32 | id.local_id;
@@ -130,6 +133,15 @@ void QuestDirector::AttachQuestScripts() {
                         auto created = ctx_.scripts->AttachScripts(handle, attachment);
                         ++quests;
                         instances += static_cast<int>(created.size());
+                        // Attach the per-alias scripts on their alias handles, so
+                        // an alias's events (OnInit, and OnDeath once the alias is
+                        // filled) run, e.g. the Civil War reinforcement soldiers.
+                        for (const bethesda::QuestAliasScripts& a : alias_scripts) {
+                          const u64 alias_handle =
+                              script::papyrus::EncodeAliasHandle(handle, a.alias_id);
+                          instances += static_cast<int>(
+                              ctx_.scripts->AttachScripts(alias_handle, a.scripts).size());
+                        }
                         // Parse the quest's stages and objectives (log text,
                         // objective text, compass targets) for the HUD/debugger.
                         quest::QuestDef def =

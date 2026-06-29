@@ -186,20 +186,13 @@ void ReadPropertyValue(Reader& r, i16 object_format, ScriptProperty* p) {
 
 // Reads the VMAD header + script list, leaving r positioned at the per-record
 // fragment data that may follow. Returns false on a malformed header/scripts.
-bool ReadScriptsSection(Reader& r, ScriptAttachment* out) {
-  out->version = r.I16();
-  out->object_format = r.I16();
-  // Skyrim/SSE is version 5; Fallout 4 bumps it to 6. The script/property
-  // section is identical for object_format 2; only the fragment tail differs.
-  if (out->version < 1 || out->version > 6 ||
-      (out->object_format != 1 && out->object_format != 2)) {
-    REC_WARN("vmad: bad header version {} format {}", out->version, out->object_format);
-    return false;
-  }
-  bool has_status = out->version >= 4;
-
+// Reads a VMAD script list (count + each script's name/status/properties) given
+// the section's already-read version and object format. Shared by the top-level
+// script section and the per-alias script sections in a QUST fragment tail.
+bool ReadScriptList(Reader& r, i16 version, i16 object_format, std::vector<ScriptEntry>* scripts) {
+  const bool has_status = version >= 4;
   u16 script_count = r.U16();
-  out->scripts.reserve(script_count);
+  scripts->reserve(scripts->size() + script_count);
   for (u16 i = 0; i < script_count && r.ok(); ++i) {
     ScriptEntry entry;
     entry.name = r.Str();
@@ -211,13 +204,25 @@ bool ReadScriptsSection(Reader& r, ScriptAttachment* out) {
       prop.name = r.Str();
       prop.type = r.U8();
       if (has_status) prop.status = r.U8();
-      ReadPropertyValue(r, out->object_format, &prop);
+      ReadPropertyValue(r, object_format, &prop);
       entry.properties.push_back(std::move(prop));
     }
-    out->scripts.push_back(std::move(entry));
+    scripts->push_back(std::move(entry));
   }
+  return r.ok();
+}
 
-  if (!r.ok()) {
+bool ReadScriptsSection(Reader& r, ScriptAttachment* out) {
+  out->version = r.I16();
+  out->object_format = r.I16();
+  // Skyrim/SSE is version 5; Fallout 4 bumps it to 6. The script/property
+  // section is identical for object_format 2; only the fragment tail differs.
+  if (out->version < 1 || out->version > 6 ||
+      (out->object_format != 1 && out->object_format != 2)) {
+    REC_WARN("vmad: bad header version {} format {}", out->version, out->object_format);
+    return false;
+  }
+  if (!ReadScriptList(r, out->version, out->object_format, &out->scripts)) {
     REC_WARN("vmad: truncated near byte {}", r.pos());
     return false;
   }
@@ -244,7 +249,8 @@ bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out) {
 }
 
 bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
-                         std::vector<QuestStageFragment>* fragments) {
+                         std::vector<QuestStageFragment>* fragments,
+                         std::vector<QuestAliasScripts>* alias_scripts) {
   Reader r(vmad);
   if (!ReadScriptsSection(r, out)) return false;
 
@@ -265,7 +271,27 @@ bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
     f.function = r.Str();
     if (r.ok()) fragments->push_back(std::move(f));
   }
-  // Alias fragments may follow; the engine does not need them.
+
+  // Alias scripts follow: a count, then per alias a VMAD object (carrying the
+  // alias id), its own version/object-format header, and a script list. These
+  // are the scripts whose events (OnDeath, OnInit) run on the filled alias --
+  // e.g. the Civil War reinforcement soldiers. Only parsed on request; a
+  // malformed alias tail simply stops, keeping what parsed cleanly.
+  if (alias_scripts && r.ok()) {
+    u16 alias_count = r.U16();
+    for (u16 i = 0; i < alias_count && r.ok(); ++i) {
+      const ScriptObjectValue obj = ReadObject(r, out->object_format);
+      QuestAliasScripts a;
+      a.alias_id = obj.alias_id;
+      a.scripts.version = r.I16();
+      a.scripts.object_format = r.I16();
+      if (a.scripts.version < 1 || a.scripts.version > 6 ||
+          (a.scripts.object_format != 1 && a.scripts.object_format != 2))
+        break;  // malformed alias header: cannot size the rest safely
+      if (!ReadScriptList(r, a.scripts.version, a.scripts.object_format, &a.scripts.scripts)) break;
+      if (!a.scripts.scripts.empty()) alias_scripts->push_back(std::move(a));
+    }
+  }
   return true;
 }
 

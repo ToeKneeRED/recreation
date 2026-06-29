@@ -63,13 +63,24 @@ struct QuestStageFragment {
 // Returns false on a malformed or truncated body.
 bool ParseScriptAttachment(ByteSpan vmad, ScriptAttachment* out);
 
+// The Papyrus scripts attached to one quest alias (ALST/ALLS), e.g. the
+// CWReinforcementAliasScript whose OnDeath drives the Civil War reinforcement
+// pools. The engine instantiates them on the alias handle so the alias's events
+// (OnDeath, OnInit) run.
+struct QuestAliasScripts {
+  u16 alias_id = 0;
+  ScriptAttachment scripts;
+};
+
 // Parses a QUST VMAD: the script list (into `out`) plus the quest fragment
 // section that maps each stage to the Papyrus function run when it is set
-// (into `fragments`). Alias fragments are skipped. Returns false if the script
-// section is malformed; a malformed fragment tail leaves the fragments parsed
-// so far.
+// (into `fragments`). When `alias_scripts` is non-null, the per-alias script
+// sections that follow the stage fragments are parsed into it (so alias scripts
+// can be instantiated). Returns false if the script section is malformed; a
+// malformed fragment/alias tail leaves whatever parsed cleanly.
 bool ParseQuestFragments(ByteSpan vmad, ScriptAttachment* out,
-                         std::vector<QuestStageFragment>* fragments);
+                         std::vector<QuestStageFragment>* fragments,
+                         std::vector<QuestAliasScripts>* alias_scripts = nullptr);
 
 // A dialogue response's Papyrus fragments: the function run when the line
 // starts (begin) and ends (end). They live on the auto-generated TIF_<info>
