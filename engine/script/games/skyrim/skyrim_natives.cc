@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "script/papyrus/alias_handle.h"
 
 namespace rec::script::skyrim {
 namespace {
@@ -595,6 +596,14 @@ void RegisterQuest(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   // via Self.GetOwningQuest().SetStage(N); resolve the INFO -> its owning quest.
   reg.Register("TopicInfo", "GetOwningQuest", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Object(Resolve(bindings).InfoOwningQuest(self));
+  });
+  // An alias script (e.g. CWReinforcementAliasScript) calls
+  // Self.GetOwningQuest().registerDeath(self); the alias handle encodes its quest,
+  // so decode it. No bindings needed, the quest is in the handle.
+  reg.Register("ReferenceAlias", "GetOwningQuest", [](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Object(papyrus::IsAliasHandle(self.handle)
+                             ? ObjectRef{papyrus::AliasHandleQuest(self.handle)}
+                             : ObjectRef{0});
   });
   // Quest stage fragments call MyScene.Start() to play a scene; the scene's own
   // fragments then SetStage, so this is the hinge of native scene-driven progress.

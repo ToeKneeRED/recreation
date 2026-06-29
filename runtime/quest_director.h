@@ -61,6 +61,11 @@ class QuestDirector {
   // questline (e.g. REC_QUEST_LIST=CW) without reloading data per quest.
   void ReportQuestList(const std::string& prefix);
   void ReportDialogue(const std::string& edid);
+  // Headless check that the real Civil War reinforcement Papyrus runs: start the
+  // fort-siege quest, fill a soldier alias with an actor, kill it, and report
+  // whether the reinforcement pool globals decremented (soldier death ->
+  // CWReinforcementAliasScript.OnDeath -> registerDeath -> ModifyPool -> globals).
+  void ReportReinforcementTest();
   // Attaches a quest's SCEN scripts and fires their begin/phase/end fragments,
   // reporting which advance the journal, the end-to-end check that real scene
   // fragments (Self.GetOwningQuest().SetStage(N)) drive the quest natively.

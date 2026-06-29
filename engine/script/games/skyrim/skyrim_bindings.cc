@@ -114,16 +114,32 @@ papyrus::ObjectRef RecordBackedSkyrimBindings::GetForm(u32 form_id) {
   return papyrus::ObjectRef{id.packed()};
 }
 
+void RecordBackedSkyrimBindings::EraseRefAlias(u64 ref, u64 alias_handle) {
+  auto it = ref_to_aliases_.find(ref);
+  if (it == ref_to_aliases_.end()) return;
+  auto& v = it->second;
+  v.erase(std::remove(v.begin(), v.end(), alias_handle), v.end());
+  if (v.empty()) ref_to_aliases_.erase(it);
+}
+
 void RecordBackedSkyrimBindings::AliasForceRefTo(ObjectRef alias, ObjectRef ref) {
   if (replica_mode_ || !papyrus::IsAliasHandle(alias.handle)) return;
-  if (ref.handle == 0)
+  // Maintain the reverse ref->alias index so the filled actor's death reaches its
+  // alias script; drop the previous fill's link before overwriting it.
+  if (auto it = alias_fills_.find(alias.handle); it != alias_fills_.end())
+    EraseRefAlias(it->second, alias.handle);
+  if (ref.handle == 0) {
     alias_fills_.erase(alias.handle);
-  else
+  } else {
     alias_fills_[alias.handle] = ref.handle;
+    ref_to_aliases_[ref.handle].push_back(alias.handle);
+  }
 }
 
 void RecordBackedSkyrimBindings::AliasClear(ObjectRef alias) {
   if (replica_mode_) return;
+  if (auto it = alias_fills_.find(alias.handle); it != alias_fills_.end())
+    EraseRefAlias(it->second, alias.handle);
   alias_fills_.erase(alias.handle);
 }
 
@@ -587,6 +603,11 @@ void RecordBackedSkyrimBindings::MaybeNotifyDeath(ObjectRef actor) {
   const papyrus::Value killer = papyrus::Value::Object(last_attacker_);
   RaiseFormEvent(actor.handle, "OnDying", {killer});
   RaiseFormEvent(actor.handle, "OnDeath", {killer});
+  // Dispatch the death to any alias the actor fills, so the alias's OnDeath script
+  // runs, the Civil War reinforcement soldiers decrement their pool this way.
+  if (auto it = ref_to_aliases_.find(actor.handle); it != ref_to_aliases_.end())
+    for (u64 alias_handle : std::vector<u64>(it->second))  // copy: the handler may refill
+      RaiseFormEvent(alias_handle, "OnDeath", {killer});
   EmitManagedEvent(host::ManagedEventId::kActorDied, actor.handle, last_attacker_.handle, 0);
   // Drop the dead actor from combat (its own target, and anyone fighting it) and
   // tell the main-thread driver, so soldiers stop swinging at a corpse.

@@ -414,6 +414,11 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::unordered_map<u64, bool> open_;
   std::unordered_map<u64, bool> disabled_;  // Disable() state, for IsDisabled
   std::unordered_map<u64, u64> alias_fills_;  // alias handle -> ForceRefTo override ref
+  // Reverse index: a filled ref -> the alias handles it fills, so a dying actor's
+  // death dispatches to its alias scripts (CWReinforcementAliasScript.OnDeath).
+  std::unordered_map<u64, std::vector<u64>> ref_to_aliases_;
+  // Drops the ref -> alias reverse link when an alias is refilled or cleared.
+  void EraseRefAlias(u64 ref, u64 alias_handle);
   WorldEffectSink* world_sink_ = nullptr;
   std::function<void(const host::ManagedEvent&)> event_sink_;  // managed event bus, see above
   // Emits a gameplay event to the managed world, if a sink is set.

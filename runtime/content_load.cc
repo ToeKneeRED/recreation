@@ -212,6 +212,10 @@ bool LoadGameData(Engine& engine) {
     self->quest_->ReportQuestToCompletion(want);
     self->quit_.store(true, std::memory_order_relaxed);
   }
+  if (std::getenv("REC_CW_REINF_TEST")) {
+    self->quest_->ReportReinforcementTest();
+    self->quit_.store(true, std::memory_order_relaxed);
+  }
   if (const char* want = std::getenv("REC_DIALOGUE_REPORT")) {
     self->quest_->ReportDialogue(want);
     self->quit_.store(true, std::memory_order_relaxed);

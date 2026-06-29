@@ -21,6 +21,7 @@
 
 #include "asset/vfs.h"
 #include "bethesda/archive.h"
+#include "script/papyrus/alias_handle.h"
 #include "script/papyrus/interpreter.h"
 #include "script/papyrus/native.h"
 #include "script/papyrus/pex.h"
@@ -392,6 +393,53 @@ int SelfTest() {
     bindings.AddItem(container, ObjectRef{0xA11CE}, 5);
     Value* got_m = it_vm.MemberVar(container, "::Got_var");
     check("AddItem fires OnItemAdded (count delivered)", got_m && got_m->ToInt() == 5);
+  }
+
+  // Alias death dispatch: an actor that fills a quest alias should deliver its
+  // death to the alias's OnDeath script. This is the Civil War reinforcement
+  // path, a soldier dies and its CWReinforcementAliasScript.OnDeath runs.
+  {
+    NativeRegistry al_natives;
+    VirtualMachine al_vm(&al_natives);
+    Builder ab;
+    ab.obj.name = ab.S("CWReinforcementAliasScript");
+    ab.obj.parent_class = ab.S("");
+    MemberVariable deaths;
+    deaths.name = ab.S("::Deaths_var");
+    deaths.type = ab.S("Int");
+    deaths.initial_value = ab.IntV(0);
+    ab.obj.variables.push_back(deaths);
+    Function on_death;
+    on_death.return_type = ab.S("");
+    on_death.params.push_back({ab.S("akKiller"), ab.S("Actor")});
+    on_death.code = {
+        Make(Op::kIAdd, {ab.Id("::Deaths_var"), ab.Id("::Deaths_var"), ab.IntV(1)}),
+        Make(Op::kReturn, {}),
+    };
+    State adef;
+    adef.name = ab.S("");
+    adef.functions.push_back({ab.S("OnDeath"), std::move(on_death)});
+    ab.obj.states.push_back(std::move(adef));
+    ab.pex.objects.push_back(ab.obj);
+    al_vm.AddScript(std::move(ab.pex));
+
+    const unsigned long long alias_handle =
+        rec::script::papyrus::EncodeAliasHandle(/*quest=*/0x83042, /*alias_id=*/1);
+    al_vm.CreateInstanceWithHandle("CWReinforcementAliasScript", alias_handle);
+
+    rec::script::skyrim::RecordBackedSkyrimBindings binds;
+    binds.set_vm(&al_vm);
+    const ObjectRef soldier{0x500};
+    binds.SetActorValue(soldier, "health", 50.0f);
+    binds.AliasForceRefTo(ObjectRef{alias_handle}, soldier);
+    binds.SetActorValue(soldier, "health", 0.0f);  // the soldier dies
+    Value* d = al_vm.MemberVar(ObjectRef{alias_handle}, "::Deaths_var");
+    check("filled actor death runs its alias OnDeath", d && d->ToInt() == 1);
+    // Clearing the fill drops the link: a later death must not re-fire it.
+    binds.AliasClear(ObjectRef{alias_handle});
+    binds.SetActorValue(soldier, "health", 100.0f);  // revive (re-arms the death)
+    binds.SetActorValue(soldier, "health", 0.0f);    // dies again, but unaliased now
+    check("cleared alias no longer receives the death", d && d->ToInt() == 1);
   }
 
   // Bare-ref native dispatch: a method call on a ref with no script instance
@@ -987,6 +1035,13 @@ int SkyrimTest() {
   ObjectRef quest = vm.CreateInstance("Quest");
   vm.Call(quest, "SetStage", {Value::Int(15)});
   check("Quest.SetStage/GetStage dispatch == 15", vm.Call(quest, "GetStage", {}).ToInt() == 15);
+
+  // ReferenceAlias.GetOwningQuest decodes the quest from the alias handle (the
+  // bare-ref native path, no script instance), so an alias's OnDeath can
+  // GetOwningQuest().registerDeath(self).
+  const unsigned long long alias = rec::script::papyrus::EncodeAliasHandle(0x3372b, 7);
+  check("ReferenceAlias.GetOwningQuest decodes its quest",
+        vm.Call(ObjectRef{alias}, "GetOwningQuest", {}).as_object().handle == 0x3372b);
 
   std::printf("%s (%d failures)\n", failures ? "SKYRIMTEST FAILED" : "SKYRIMTEST PASSED", failures);
   return failures ? 1 : 0;
