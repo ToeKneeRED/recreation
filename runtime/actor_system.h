@@ -92,7 +92,12 @@ class ActorSystem {
     f32 capsule_offset = 0;  // entity origin to capsule centre, along up
   };
 
-  bool LoadActorTemplate(Actor* out);
+  // soldier_kind: 0 = bare civilian body, 1 = imperial-side soldier (worn
+  // cuirass in the body slot), 2 = stormcloak-side soldier.
+  bool LoadActorTemplate(Actor* out, int soldier_kind = 0);
+  // Lazily builds + caches the worn-armour template for a battle side (team 1
+  // imperial, team 2 stormcloak), falling back to the bare body template.
+  const Actor* SoldierTemplate(int team);
   bool LoadStarfieldActorTemplate(Actor* out);
   void LoadBuiltinActorTemplate(Actor* out);
   bool LoadActorPart(const std::string& path, Actor& actor, i32 attach_bone = -1);
@@ -114,6 +119,7 @@ class ActorSystem {
   base::Vector<Actor> actors_;
   i32 player_actor_ = -1;  // index into actors_ the walk mode drives, -1 = none
   std::optional<Actor> npc_template_;
+  std::optional<Actor> soldier_templates_[2];  // [0] imperial (team 1), [1] stormcloak (team 2)
   base::UnorderedMap<u64, Actor> npc_actors_;
   base::Vector<u64> scratch_dead_actors_;
   base::UnorderedMap<u64, physics::BodyId> solid_bodies_;

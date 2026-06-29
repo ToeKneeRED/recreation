@@ -243,7 +243,7 @@ base::Vector<std::string> ActorSystem::FindHeadPartModels(u32 part_type, u32 max
   return out;
 }
 
-bool ActorSystem::LoadActorTemplate(Actor* out) {
+bool ActorSystem::LoadActorTemplate(Actor* out, int soldier_kind) {
   const std::string skel_path = "meshes/actors/character/character assets/skeleton.nif";
   auto skel_bytes = vfs_.Read(asset::NormalizePath(skel_path));
   if (!skel_bytes) {
@@ -271,13 +271,20 @@ bool ActorSystem::LoadActorTemplate(Actor* out) {
   // Bind pose up front so rigid parts (head, hair) capture their bone's bind.
   anim::ComputeModelMatrices(out->skeleton, out->pose, &out->bone_model);
 
-  const std::string skinned_parts[] = {
-      "meshes/actors/character/character assets/malebody_1.nif",
-      "meshes/actors/character/character assets/malehands_1.nif",
-      "meshes/actors/character/character assets/malefeet_1.nif",
-  };
-  bool any = false;
-  for (const std::string& p : skinned_parts) any = LoadActorPart(p, *out) || any;
+  // Body slot (slot 32): soldiers wear a faction cuirass, which both reads as a
+  // soldier and, being matte armour rather than skin, stops blowing out white
+  // under bright skies. The cuirass mesh carries the torso/arm/leg geometry, so
+  // it replaces the bare body; hands/feet/head stay skin. Falls back to the
+  // bare body if the armour mesh is missing.
+  const char* body_mesh = "meshes/actors/character/character assets/malebody_1.nif";
+  if (soldier_kind == 1) body_mesh = "meshes/armor/imperial/m/cuirassheavy_1.nif";
+  else if (soldier_kind == 2) body_mesh = "meshes/armor/stormcloaks/cuirasssleeved_0.nif";
+  bool body_ok = LoadActorPart(body_mesh, *out);
+  if (!body_ok && soldier_kind != 0)
+    body_ok = LoadActorPart("meshes/actors/character/character assets/malebody_1.nif", *out);
+  bool any = body_ok;
+  any = LoadActorPart("meshes/actors/character/character assets/malehands_1.nif", *out) || any;
+  any = LoadActorPart("meshes/actors/character/character assets/malefeet_1.nif", *out) || any;
   if (!any) {
     REC_ERROR("no skyrim body parts loaded");
     return false;
@@ -574,6 +581,21 @@ void ActorSystem::EmitOneActor(Actor& actor, render::FrameView& view) {
   actor.prev_model = model;
 }
 
+const ActorSystem::Actor* ActorSystem::SoldierTemplate(int team) {
+  if (team != 1 && team != 2) return nullptr;
+  std::optional<Actor>& slot = soldier_templates_[team - 1];
+  if (!slot) {
+    Actor tmpl;
+    if (!LoadActorTemplate(&tmpl, team)) return nullptr;  // fall back to the bare body
+    tmpl.animate = true;
+    tmpl.speed = 0.0f;
+    tmpl.foot_ik = false;
+    slot = std::move(tmpl);
+    REC_INFO("soldier template ready: team {} ({} parts)", team, slot->parts.size());
+  }
+  return &*slot;
+}
+
 void ActorSystem::SyncNpcActors() {
   if (config_.headless) return;  // dedicated server doesn't render NPCs
   // Build the shared rig once; every NPC actor is instanced from it.
@@ -596,11 +618,16 @@ void ActorSystem::SyncNpcActors() {
     REC_INFO("npc actor template ready ({} parts)", npc_template_->parts.size());
   }
   // Give every NPC entity without one a skinned actor instance (own pose, GPU
-  // meshes shared by hash with the template).
+  // meshes shared by hash with the template). Battle actors (those on a combat
+  // team) instance from their faction's armoured template instead of the bare
+  // civilian body, so the two armies read as soldiers.
   world_.Each<world::Npc, world::Transform>([&](ecs::Entity e, world::Npc&, world::Transform&) {
     const u64 key = static_cast<u64>(e.generation) << 32 | e.index;
     if (npc_actors_.find(key)) return;
-    Actor a = *npc_template_;
+    const Actor* tmpl = &*npc_template_;
+    if (const world::CombatTeam* ct = world_.Get<world::CombatTeam>(e))
+      if (const Actor* st = SoldierTemplate(ct->team)) tmpl = st;
+    Actor a = *tmpl;
     a.entity = e;
     a.character = 0;
     a.pose.ResetToBind(a.skeleton);
