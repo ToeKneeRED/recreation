@@ -58,6 +58,7 @@ public sealed class SkyrimMod : IMod
         ModHost.Register(new CivilWarJournal());
         ModHost.Register(new BattleReinforcementHud());
         ModHost.Register(new CivilWarCampaignTracker());
+        ModHost.Register(new CivilWarFrontline());
         ModHost.Register(new CivilWarRankTracker());
         ModHost.Register(new WarMapPusher());
 

@@ -91,6 +91,27 @@ public static class CivilWarCampaign
         return true;
     }
 
+    // Advances the front for `attacker`: takes the next vulnerable hold, the
+    // contested seat (Whiterun) first, then the nearest enemy-held hold, and
+    // hands it over. The campaign rule behind "win a battle, gain a hold": the
+    // engine reports a siege won, this decides which hold falls (and raises
+    // HoldCaptured, so the war map and rank react). Returns the captured hold, or
+    // null when the attacker already holds everything it can take.
+    public static Hold? AdvanceFront(Side attacker)
+    {
+        if (attacker == Side.Neutral) return null;
+        Side enemy = attacker == Side.Imperial ? Side.Stormcloak : Side.Imperial;
+        if (OwnerOf(Hold.Whiterun) == Side.Neutral && CaptureHold(Hold.Whiterun, attacker))
+            return Hold.Whiterun;
+        for (int i = 0; i < TotalHolds; i++)
+        {
+            var hold = (Hold)i;
+            if (OwnerOf(hold) == enemy && CaptureHold(hold, attacker))
+                return hold;
+        }
+        return null;
+    }
+
     // The seat of a hold, for readouts that name the city the battle was for.
     public static string CityOf(Hold hold) => hold switch
     {

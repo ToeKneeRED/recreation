@@ -56,6 +56,21 @@ public static class CivilWarCampaignTests
 
         CivilWarCampaign.HoldCaptured -= OnCaptured;
 
+        // AdvanceFront takes the contested seat first, then enemy holds, and a
+        // neutral attacker takes nothing.
+        CivilWarCampaign.Reset();
+        check.Equal("neutral attacker advances nothing", (Hold?)null,
+                    CivilWarCampaign.AdvanceFront(Side.Neutral));
+        check.Equal("Imperial advance takes contested Whiterun first", (Hold?)Hold.Whiterun,
+                    CivilWarCampaign.AdvanceFront(Side.Imperial));
+        check.Equal("Whiterun is now Imperial", Side.Imperial, CivilWarCampaign.OwnerOf(Hold.Whiterun));
+        check.Equal("five Imperial holds after the advance", 5, CivilWarCampaign.ImperialHoldCount);
+        Hold? next = CivilWarCampaign.AdvanceFront(Side.Imperial);
+        bool tookEnemyHold = next is Hold h && CivilWarCampaign.OwnerOf(h) == Side.Imperial;
+        check.Equal("next Imperial advance takes a Stormcloak hold", true, tookEnemyHold);
+        check.Equal("Stormcloak holds fall to three after two advances", 3,
+                    CivilWarCampaign.StormcloakHoldCount);
+
         // Teardown restores the canonical board.
         CivilWarCampaign.Reset();
         check.Equal("reset restores four Imperial holds", 4, CivilWarCampaign.ImperialHoldCount);
