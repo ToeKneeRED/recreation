@@ -19,7 +19,7 @@ struct PushData {
 #ifdef REC_SKINNED
   uint64_t bone_address;  // device address of the frame bone palette
   uint skin_offset;       // first bone of this mesh in the palette
-  uint pad;
+  uint tint_packed;       // rgb8 (0xRRGGBB) albedo tint, 0 = none (team colour)
 #endif
 };
 [[vk::push_constant]] PushData push;
@@ -93,5 +93,16 @@ VsOut main(VsIn input) {
   output.tangent = float4(mul((float3x3)push.model, local_tangent), input.tangent.w);
   output.uv = input.uv;
   output.color = input.color;
+#ifdef REC_SKINNED
+  // Modulate the actor's albedo by its packed team/faction tint so the two
+  // armies read apart (and the lower-than-1 factors also tame the snow blowout).
+  if (push.tint_packed != 0u) {
+    float3 t = float3(float((push.tint_packed >> 16) & 0xffu),
+                      float((push.tint_packed >> 8) & 0xffu),
+                      float(push.tint_packed & 0xffu)) /
+               255.0;
+    output.color.rgb *= t;
+  }
+#endif
   return output;
 }

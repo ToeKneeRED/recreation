@@ -54,7 +54,7 @@ struct MeshPushConstants {
   Mat4 prev_model;
   u64 bone_address = 0;  // VkDeviceAddress of the frame bone palette, 0 = none
   u32 skin_offset = 0;   // first bone of this mesh in the palette
-  u32 pad = 0;
+  u32 tint_packed = 0;   // per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = none
 };
 
 // Push constants for the optional mesh-shader opaque path. The geometry buffers

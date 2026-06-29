@@ -77,6 +77,9 @@ struct DrawItem {
   // Index of this mesh's first bone in FrameView::bone_matrices, -1 = static.
   // Only meaningful for skinned meshes.
   i32 skin_offset = -1;
+  // Packed rgb8 tint (0xRRGGBB) modulating this draw's albedo, 0 = untinted.
+  // Colours skinned actors by faction/team (e.g. red vs blue armies).
+  u32 tint = 0;
 };
 
 struct FrameView {

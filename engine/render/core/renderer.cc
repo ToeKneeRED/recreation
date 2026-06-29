@@ -1615,6 +1615,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               push.bone_address = frame.bone_palette_address;
               push.skin_offset = static_cast<u32>(item.skin_offset);
             }
+            push.tint_packed = item.tint;  // faction/team colour for skinned actors
             mesh_pipeline_->Draw(ctx.cmd, *mesh, push);
           }
           for (const GpuSubmesh& submesh : mesh->submeshes) {

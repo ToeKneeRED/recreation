@@ -544,9 +544,18 @@ void ActorSystem::EmitDraws(render::FrameView& view) {
 void ActorSystem::EmitOneActor(Actor& actor, render::FrameView& view) {
   const world::Transform* t = world_.Get<world::Transform>(actor.entity);
   Mat4 model = (t ? TransformMatrix(*t) : Mat4::Identity()) * actor.skeleton_to_local;
+  // Colour battle actors by their combat side so the armies read apart on the
+  // field (a generic engine cue, not quest-specific): team 1 warm red, team 2
+  // cool blue. Actors with no team (the player, town NPCs) stay untinted.
+  u32 tint = 0;
+  if (const world::CombatTeam* ct = world_.Get<world::CombatTeam>(actor.entity)) {
+    if (ct->team == 1) tint = 0xC85040u;       // imperial-side red
+    else if (ct->team == 2) tint = 0x4078C8u;  // stormcloak-side blue
+  }
   for (ActorPart& part : actor.parts) {
     render::DrawItem item;
     item.mesh = part.mesh.hash;
+    item.tint = tint;
     if (part.attach_bone >= 0 && part.attach_bone < static_cast<i32>(actor.bone_model.size())) {
       // Rigid part: ride the bone's animated delta from its bind transform.
       item.transform = model * actor.bone_model[part.attach_bone] * part.attach_inverse_bind;
