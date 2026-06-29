@@ -360,7 +360,18 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
                -std::cos(cam_pitch_) * std::cos(ctx_.cam_yaw)};
   if (ctx_.third_person) {
     Vec3 pivot = body + Vec3{0, 1.5f, 0};
-    ctx_.walk_eye = pivot - cam_fwd * 3.2f;
+    // Inside interiors, pull the boom in when it would punch through a wall so the
+    // camera never wedges into stone (cast from the pivot back toward the eye and
+    // stop a small margin short of the hit). Scoped to interiors: outdoors the
+    // boom rarely clips solid geometry, and a terrain/foliage hit there would
+    // wrongly yank the camera onto the player's back.
+    f32 boom = 3.2f;
+    if (physics_.initialized() && streamer_ && streamer_->in_interior()) {
+      physics::PhysicsWorld::RayHit hit;
+      if (physics_.Raycast(pivot, cam_fwd * -1.0f, boom + 0.3f, &hit))
+        boom = std::max(hit.distance - 0.3f, 0.5f);
+    }
+    ctx_.walk_eye = pivot - cam_fwd * boom;
     ctx_.walk_target = pivot;
   } else {
     ctx_.walk_eye = body + Vec3{0, 1.7f, 0};
