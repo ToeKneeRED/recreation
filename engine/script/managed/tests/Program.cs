@@ -21,6 +21,7 @@ internal static class Program
         FormScriptsTests.Run(check);
         SkyrimRegenTests.Run(check);
         SkyrimEventTests.Run(check);
+        TimeOfDayTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;

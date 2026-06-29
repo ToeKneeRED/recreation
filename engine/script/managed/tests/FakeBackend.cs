@@ -51,6 +51,9 @@ public sealed class FakeBackend : IEngineBackend
     // True until the system toggles it; mirrors the engine's fast-travel gate.
     public bool FastTravelEnabled { get; private set; } = true;
 
+    // In-game time in days; the fractional part is the time of day.
+    public float GameTime { get; set; }
+
     public Value CallGlobal(string type, string function, ReadOnlySpan<Value> args)
     {
         LastGlobalType = type;
@@ -59,6 +62,7 @@ public sealed class FakeBackend : IEngineBackend
         LastBoolArg = args.Length > 0 && args[0].AsBool();
         if (type == "Game" && function == "GetPlayer") return Value.Object(Player);
         if (type == "Game" && function == "EnableFastTravel") FastTravelEnabled = LastBoolArg;
+        if (type == "Utility" && function == "GetCurrentGameTime") return Value.Float(GameTime);
         if (type == "Utility" && function == "RandomInt")
             return Value.Int(args.Length > 0 ? args[0].AsInt() : 0);  // deterministic: the min
         return Value.None;
