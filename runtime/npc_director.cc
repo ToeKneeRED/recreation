@@ -80,6 +80,13 @@ void NpcDirector::AvoidObstacles(const float self_pos[3], const float goal_dir[3
 }
 
 f32 NpcDirector::GroundY(f32 x, f32 z, f32 y_hint) const {
+  // Prefer the streamed terrain heightmap: it exists wherever the cell is loaded
+  // (the same source the player spawn snaps to), whereas the physics collision
+  // streams in a few frames later and, until it does, leaves battle actors
+  // floating at eye height on open ground. The physics cast still refines onto
+  // objects/roads stacked above the terrain when collision is present.
+  f32 h = 0;
+  if (ctx_.streamer && ctx_.streamer->GroundHeight(x, z, &h)) return h;
   if (!physics_.initialized()) return y_hint;
   // Cast down from just above the current height so a slightly embedded NPC still
   // finds the floor; cap the reach so a gap or ledge leaves the NPC where it was
@@ -505,10 +512,12 @@ void NpcDirector::CwBattleTick(f32 dt) {
 
 bool NpcDirector::BattleCam(Vec3* eye, Vec3* target) const {
   if (!cw_field_active_) return false;
-  *target = cw_field_center_;
-  // Raised and close behind team 1, a steep look down the clash axis so the two
-  // lines read large and foreground terrain does not occlude them.
-  *eye = cw_field_center_ - cw_field_fwd_ * 6.0f + Vec3{0.0f, 10.0f, 0.0f};
+  // A near ground-level vantage behind team 1 looking ACROSS the clash, like the
+  // original game's field battles: the soldiers read against the horizon (terrain
+  // + sky) instead of a steep top-down look into terrain that the camera is too
+  // far above for the streamer to have drawn. Aim at chest height of the centre.
+  *target = cw_field_center_ + Vec3{0.0f, 1.1f, 0.0f};
+  *eye = cw_field_center_ - cw_field_fwd_ * 12.0f + Vec3{0.0f, 3.0f, 0.0f};
   return true;
 }
 
@@ -604,31 +613,45 @@ void NpcDirector::CwFieldBattleTick(f32 dt) {
     if (cw_field_warmup_ < warmup) return;
     Vec3 ppos;
     if (!actors_->PlayerWorldPos(&ppos)) return;
-    // The player may have spawned facing a wall; pick the most open direction so
-    // the clash stages on clear ground, and turn the camera to it.
+    // Pick the direction that stages the clash on the FLATTEST nearby ground:
+    // scoring purely by "most open" sends the battle off a clifftop (a drop is
+    // maximally clear), which is exactly the washed-out mid-air framing we want
+    // to avoid. Sample the terrain heightmap a fixed reach out in each direction
+    // and prefer the smallest drop from the player's own ground, lightly favouring
+    // open ground (no wall) so the clash is not staged into a rock face.
+    constexpr f32 kReach = 14.0f;
+    const f32 player_ground = GroundY(ppos.x, ppos.z, ppos.y);
     f32 yaw = ctx_.cam_yaw;
-    f32 clearance = 30.0f;
-    if (physics_.initialized()) {
-      f32 best_clear = -1.0f;
-      for (int i = 0; i < 12; ++i) {
-        const f32 a = ctx_.cam_yaw + static_cast<f32>(i) * 30.0f * 0.0174533f;
-        const Vec3 d{std::sin(a), 0.0f, -std::cos(a)};
+    f32 best_score = -1e9f;
+    for (int i = 0; i < 12; ++i) {
+      const f32 a = ctx_.cam_yaw + static_cast<f32>(i) * 30.0f * 0.0174533f;
+      const Vec3 d{std::sin(a), 0.0f, -std::cos(a)};
+      const Vec3 c = ppos + d * kReach;
+      const f32 drop = std::abs(GroundY(c.x, c.z, player_ground) - player_ground);
+      f32 open = kReach;
+      if (physics_.initialized()) {
         physics::PhysicsWorld::RayHit hit;
-        const f32 c = physics_.Raycast(Vec3{ppos.x, ppos.y + 1.5f, ppos.z}, d, 30.0f, &hit)
-                          ? hit.distance
-                          : 30.0f;
-        if (c > best_clear) {
-          best_clear = c;
-          yaw = a;
-          clearance = c;
-        }
+        if (physics_.Raycast(Vec3{ppos.x, ppos.y + 1.5f, ppos.z}, d, kReach, &hit))
+          open = hit.distance;
+      }
+      // Flatness dominates (metres of drop), with a small open-ground bonus.
+      const f32 score = -drop + open * 0.1f;
+      if (score > best_score) {
+        best_score = score;
+        yaw = a;
       }
     }
+    const f32 clearance = kReach;
     ctx_.cam_yaw = yaw;
     const Vec3 fwd{std::sin(yaw), 0.0f, -std::cos(yaw)};
     const Vec3 right{std::cos(yaw), 0.0f, std::sin(yaw)};
     const f32 reach = std::clamp(clearance * 0.6f, 11.0f, 20.0f);
-    const Vec3 center = ppos + fwd * reach;  // stage the clash on the open ground ahead
+    Vec3 center = ppos + fwd * reach;  // stage the clash on the open ground ahead
+    // Drop the clash anchor onto the ground: ppos sits at eye height, so leaving
+    // center there makes the battle camera look at a point in mid-air and frames
+    // the (ground-level) soldiers against the sky. GroundY puts the look target,
+    // and the spawn ring, on the terrain the soldiers actually stand on.
+    center.y = GroundY(center.x, center.z, ppos.y);
     cw_field_center_ = center;
     cw_field_fwd_ = fwd;
     constexpr int kPerSide = 8;
