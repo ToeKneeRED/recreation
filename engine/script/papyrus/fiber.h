@@ -58,6 +58,7 @@ class Fiber {
   std::vector<char> stack_;
   bool done_ = false;
   bool started_ = false;
+  bool aborting_ = false;  // tearing down a still-suspended fiber: unwind on resume
   Context* ctx_;
 };
 

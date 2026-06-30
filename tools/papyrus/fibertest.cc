@@ -305,6 +305,28 @@ int main() {
     check("resumed activation's depth restored to its own (1)", a_depth == 1);
   }
 
+  // 14. A fiber destroyed while suspended unwinds its frozen stack, running every
+  //     local's destructor, so dropping a parked activation (e.g. the guest stops
+  //     mid-Wait) frees what it held instead of leaking it.
+  {
+    int destroyed = 0;
+    struct Guard {
+      int* counter;
+      std::vector<int> held{64, 7};  // heap a leak check would catch if never freed
+      ~Guard() { ++*counter; }
+    };
+    {
+      Fiber f([&] {
+        Guard g{&destroyed};    // lives on the fiber stack across the suspend
+        Fiber::YieldCurrent();  // park here; this fiber is never resumed
+        (void)g.held[0];
+      });
+      f.Resume();  // runs to the yield; Guard is alive on the suspended stack
+      check("suspended fiber has not run its destructor yet", destroyed == 0);
+    }  // f destroyed while suspended -> force-unwind
+    check("destroying a suspended fiber runs its stack destructors", destroyed == 1);
+  }
+
   std::printf("%s (%d failures)\n", failures ? "FIBERTEST FAILED" : "FIBERTEST PASSED", failures);
   return failures ? 1 : 0;
 }
