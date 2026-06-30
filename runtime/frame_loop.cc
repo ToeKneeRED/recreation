@@ -224,6 +224,22 @@ bool Engine::RunFrame() {
                    climate ? climate->size() : default_climate_.size());
         }
       }
+      // Ambient audio bed: resolve the REGN region the player stands in (its own
+      // point-in-polygon test, independent of the weather system which may be
+      // pinned off) and whether they are indoors. The director cross-fades to the
+      // region's authored ambience, and to silence inside, when the bed changes.
+      if (audio_ && !region_ambience_.empty()) {
+        Vec3 anchor = camera_.position();
+        Vec3 ppos;
+        if (ctx_.walk_mode && actors_->PlayerWorldPos(&ppos)) anchor = ppos;
+        constexpr f32 kEngineToGame = 1.0f / 0.01428f;  // metres -> Bethesda units
+        audio::AmbientContext ambient;
+        ambient.interior = streamer_ && streamer_->in_interior();
+        ambient.region =
+            region_ambience_.RegionAt(anchor.x * kEngineToGame, -anchor.z * kEngineToGame);
+        ambient_director_.Update(ambient);
+      }
+
       // The debug Weather panel can override the climate live; otherwise the
       // loaded game's weather drives the sky.
       const bool has_weather = weather_override_ || !weather_.empty();
@@ -314,6 +330,13 @@ bool Engine::RunFrame() {
         view.camera.target = camera_.target();
       }
       view.frame_delta_seconds = frame_delta;
+      // Move the audio listener to this frame's viewpoint (the walk-mode player or
+      // the fly camera), so positional voices pan and attenuate around the player.
+      if (audio_) {
+        const Vec3 eye = view.camera.eye;
+        const Vec3 forward = Normalize(view.camera.target - eye);
+        audio_->SetListener(eye, forward, Vec3{0, 1, 0});
+      }
       // Rebuilt every frame so destroyed entities drop out on their own.
       base::UnorderedMap<u64, Mat4> transforms;
       world_.Each<world::Transform, world::Renderable>(

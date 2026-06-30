@@ -45,6 +45,10 @@ add_executable(weathertest weathertest.cc)
 target_link_libraries(weathertest PRIVATE recreation::weather)
 recreation_set_warnings(weathertest)
 
+add_executable(audiotest audiotest.cc)
+target_link_libraries(audiotest PRIVATE recreation::audio)
+recreation_set_warnings(audiotest)
+
 add_executable(settings_initest settings_initest.cc)
 target_link_libraries(settings_initest PRIVATE recreation::render)
 target_compile_definitions(settings_initest PRIVATE
@@ -283,6 +287,7 @@ add_test(NAME featuretest COMMAND featuretest)
 add_test(NAME optiontest COMMAND optiontest)
 add_test(NAME skytest COMMAND skytest)
 add_test(NAME weathertest COMMAND weathertest)
+add_test(NAME audiotest COMMAND audiotest)
 add_test(NAME trailertest COMMAND trailertest)
 add_test(NAME quest_aliastest COMMAND quest_aliastest)
 add_test(NAME steering_avoidancetest COMMAND steering_avoidancetest)

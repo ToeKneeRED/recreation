@@ -46,6 +46,8 @@ static base::Option<const char*> ScenePlay{"scene.play", nullptr, "REC_SCENE_PLA
 static base::Option<const char*> SceneLive{"scene.live", nullptr, "REC_SCENE_LIVE"};
 static base::Option<const char*> DomainOffset{"domain.offset", nullptr, "REC_DOMAIN_OFFSET"};
 static base::Option<const char*> DomainCell{"domain.cell", nullptr, "REC_DOMAIN_CELL"};
+static base::Option<bool> AudioDump{"audio.dump", false, "REC_AUDIO_DUMP",
+                                    "resolve and decode each region's ambient bed at load and log it"};
 
 bool LoadGameData(Engine& engine) {
   Engine* const self = &engine;
@@ -163,6 +165,57 @@ bool LoadGameData(Engine& engine) {
       REC_INFO("weather: {} weather regions in {}", rn, worldspace);
     }
   }
+
+  // Ambient audio: catalogue the game's sound files (SOUN/SNDR) and the regions'
+  // ambient sound lists + areas (REGN), then point the director at them. The
+  // ambient regions are resolved independently of the weather system (which the
+  // engine may pin off), so this scopes them to the primary worldspace itself.
+  // Built only when an audio device is live, so a muted run or a dedicated server
+  // skips the scan.
+  if (self->audio_ && self->audio_->active()) {
+    const char* ambient_worldspace = self->game_ == bethesda::Game::kSkyrimSe  ? "Tamriel"
+                                     : self->game_ == bethesda::Game::kFallout4 ? "Commonwealth"
+                                     : self->game_ == bethesda::Game::kStarfield ? "NewAtlantis"
+                                                                                 : "";
+    const bethesda::GlobalFormId ws =
+        *ambient_worldspace ? self->records_.FindWorldspace(ambient_worldspace)
+                            : bethesda::GlobalFormId{};
+    self->sound_catalog_.Build(self->records_);
+    self->region_ambience_.Build(self->records_, ws);
+    self->ambient_director_.Configure(self->audio_.get(), &self->sound_catalog_,
+                                      &self->region_ambience_);
+
+    // audio.dump (REC_AUDIO_DUMP): resolve and decode each region's ambient bed
+    // up front and log the result. A no-GPU way to confirm the SOUN/SNDR/REGN
+    // parse, the Vfs path resolution and the decoder line up against real data.
+    if (AudioDump) {
+      int ok = 0, missing = 0, undecodable = 0;
+      for (u64 region : self->region_ambience_.RegionForms()) {
+        for (const bethesda::GlobalFormId& snd : self->region_ambience_.SoundsFor(region)) {
+          const std::string path = self->sound_catalog_.PathFor(snd);
+          if (path.empty()) continue;
+          if (!self->audio_->HasAsset(path)) {
+            REC_INFO("audio dump: region {:x} sound {:x} -> {} (missing)", region, snd.packed(), path);
+            ++missing;
+            continue;
+          }
+          const u32 voice = self->audio_->PlayLoop(path, {});
+          REC_INFO("audio dump: region {:x} -> {} ({})", region, path,
+                   voice ? "decoded" : "decode failed");
+          if (voice) {
+            self->audio_->Stop(voice, 0.0f);
+            ++ok;
+          } else {
+            ++undecodable;
+          }
+          break;  // one playable bed per region is enough
+        }
+      }
+      REC_INFO("audio dump: {} regions playable, {} missing files, {} undecodable", ok, missing,
+               undecodable);
+    }
+  }
+
   // Skyrim's northern lights: the night-sky aurora (other games don't have it).
   self->renderer_.settings().aurora = self->game_ == bethesda::Game::kSkyrimSe;
 
