@@ -31,6 +31,11 @@ public abstract class GameBehaviour
     protected ScheduledTask InvokeRepeating(System.Action action, float intervalSeconds) =>
         Scheduler.Every(intervalSeconds, action);
 
+    // Starts a Unity-style coroutine, advanced each frame by the host. Returns a
+    // handle the caller can stop.
+    protected Coroutine StartCoroutine(System.Collections.IEnumerator routine) =>
+        Coroutines.Start(routine);
+
     // Lifecycle entry points the mod host calls. Kept internal so only the host
     // drives the order; mod code overrides the protected hooks above.
     internal void DispatchStart()

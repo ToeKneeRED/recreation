@@ -79,6 +79,7 @@ public static class ModHost
     public static void Tick(float deltaTime)
     {
         Scheduler.Advance(deltaTime);
+        Coroutines.Advance(deltaTime);
         // Iterate a snapshot so a behaviour may register or unregister mid-frame.
         var snapshot = Behaviours.ToArray();
         foreach (GameBehaviour b in snapshot)
@@ -96,6 +97,7 @@ public static class ModHost
         Mods.Clear();
         FormScripts.Clear();
         Scheduler.Clear();
+        Coroutines.Clear();
         EventBus.Clear();
         _booted = false;
     }
