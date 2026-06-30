@@ -279,6 +279,10 @@ bool LoadGameData(Engine& engine) {
         self->pending_debug_cmds_.emplace_back(verb, arg);
       });
       guest->set_game_time_provider([self]() { return self->clock_.game_days(); });
+      guest->set_los_provider([self](u64 viewer, u64 target) {
+        return self->script_bindings_->HasLos(rec::script::papyrus::ObjectRef{viewer},
+                                              rec::script::papyrus::ObjectRef{target});
+      });
       guest->set_on_platform_hud(
           [self](const std::string& type, const std::string& func,
                  const std::vector<rec::script::papyrus::Value>& args) {
@@ -604,6 +608,10 @@ void LoadExtraDomains(Engine& engine) {
         self->pending_debug_cmds_.emplace_back(verb, arg);
       });
       guest->set_game_time_provider([self]() { return self->clock_.game_days(); });
+      guest->set_los_provider([self](u64 viewer, u64 target) {
+        return self->script_bindings_->HasLos(rec::script::papyrus::ObjectRef{viewer},
+                                              rec::script::papyrus::ObjectRef{target});
+      });
       guest->set_on_platform_hud(
           [self](const std::string& type, const std::string& func,
                  const std::vector<rec::script::papyrus::Value>& args) {

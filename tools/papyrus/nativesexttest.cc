@@ -4,10 +4,12 @@
 // it needs no game assets and asserts exact values.
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include "script/games/skyrim/skyrim_bindings.h"
 #include "script/games/skyrim/skyrim_natives.h"
 #include "script/papyrus/native.h"
 #include "script/papyrus/value.h"
@@ -74,6 +76,12 @@ class MockBindings : public SkyrimBindings {
     return linked_ref;
   }
   ObjectRef GetParentCell(ObjectRef) override { return parent_cell; }
+  ObjectRef los_target;
+  bool has_los = false;
+  bool HasLos(ObjectRef, ObjectRef target) override {
+    los_target = target;
+    return has_los;
+  }
   i32 GetNumItems(ObjectRef) override { return static_cast<i32>(inventory.size()); }
   ObjectRef GetNthForm(ObjectRef, i32 index) override {
     return index >= 0 && index < static_cast<i32>(inventory.size()) ? inventory[index].first
@@ -214,6 +222,24 @@ int main() {
   check("GetParentCell returns the binding's cell",
         callOn(door, "ObjectReference", "GetParentCell", {}).as_object().handle == hall.handle);
 
+  // Actor.HasLOS routes to the binding, forwarding the target.
+  ObjectRef guard{0xA00}, intruder{0xA01};
+  bindings.has_los = true;
+  check("HasLOS returns the binding result",
+        callOn(guard, "Actor", "HasLOS", {Value::Object(intruder)}).ToBool());
+  check("HasLOS forwards the target", bindings.los_target.handle == intruder.handle);
+
+  // The record-backed HasLos is a real distance gate over the refs' positions.
+  {
+    rec::script::skyrim::RecordBackedSkyrimBindings los_b(nullptr);
+    los_b.SetPosition(ObjectRef{1}, 0.0f, 0.0f, 0.0f);
+    los_b.SetPosition(ObjectRef{2}, 100.0f, 0.0f, 0.0f);
+    los_b.SetPosition(ObjectRef{3}, 9000.0f, 0.0f, 0.0f);
+    check("HasLos true within sight range", los_b.HasLos(ObjectRef{1}, ObjectRef{2}));
+    check("HasLos false beyond sight range", !los_b.HasLos(ObjectRef{1}, ObjectRef{3}));
+    check("HasLos false for a null target", !los_b.HasLos(ObjectRef{1}, ObjectRef{}));
+  }
+
   // Debug.* engine commands route through the guest's command hook with a verb and
   // a string argument. The guest binds these in its constructor.
   {
@@ -253,6 +279,21 @@ int main() {
     (*sched)(gvm, ObjectRef{0x42}, two_hours);
     (*cancel)(gvm, ObjectRef{0x42}, none_args);
     check("game-time schedule and cancel run without error", true);
+
+    // Line-of-sight watches register on every timer type and run their add/remove
+    // paths against a controllable provider.
+    bool los_state = false;
+    guest.set_los_provider([&](std::uint64_t, std::uint64_t) { return los_state; });
+    bool los_registered = true;
+    for (const char* t : {"Form", "Alias", "ActiveMagicEffect"})
+      for (const char* fn : {"RegisterForLOS", "RegisterForSingleLOSGain",
+                             "RegisterForSingleLOSLost", "UnregisterForLOS"})
+        los_registered = los_registered && guest.natives().Find(t, fn) != nullptr;
+    check("line-of-sight watches registered on every type", los_registered);
+    std::vector<Value> watch_args = {Value::Object(ObjectRef{0x50}), Value::Object(ObjectRef{0x51})};
+    (*guest.natives().Find("Form", "RegisterForLOS"))(gvm, ObjectRef{0x52}, watch_args);
+    (*guest.natives().Find("Form", "UnregisterForLOS"))(gvm, ObjectRef{0x52}, watch_args);
+    check("line-of-sight register and unregister run without error", true);
   }
 
   std::printf("%s (%d failures)\n", failures ? "NATIVESEXTTEST FAILED" : "NATIVESEXTTEST PASSED",

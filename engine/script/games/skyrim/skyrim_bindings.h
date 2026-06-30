@@ -246,6 +246,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   f32 GetPositionZ(papyrus::ObjectRef ref) override;
   void SetPosition(papyrus::ObjectRef ref, f32 x, f32 y, f32 z) override;
   f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) override;
+  bool HasLos(papyrus::ObjectRef viewer, papyrus::ObjectRef target) override;
   void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) override;
   void SetEnabled(papyrus::ObjectRef ref, bool enabled) override;
   bool IsDisabled(papyrus::ObjectRef ref) override;

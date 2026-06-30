@@ -105,11 +105,28 @@ class PapyrusGuest {
   // the runtime; read on the guest thread.
   void set_game_time_provider(std::function<f64()> fn) { game_time_provider_ = std::move(fn); }
 
+  // Answers whether a viewer ref has line of sight to a target ref, driving the
+  // RegisterForLOS watches and their OnGainLOS/OnLostLOS callbacks. Set by the
+  // runtime to the binding's HasLos; read on the guest thread.
+  void set_los_provider(std::function<bool(u64, u64)> fn) { los_provider_ = std::move(fn); }
+
  private:
   struct ScheduledUpdate {
     papyrus::ObjectRef target;
     f64 due;
     f64 interval;  // 0 = one-shot
+  };
+
+  // A line-of-sight watch: when `viewer`'s sight of `target` changes, the event
+  // fires on `registrant`. mode selects which transitions matter and whether the
+  // watch is one-shot.
+  enum class LosMode : u8 { kBoth, kSingleGain, kSingleLost };
+  struct LosWatch {
+    papyrus::ObjectRef registrant;
+    papyrus::ObjectRef viewer;
+    papyrus::ObjectRef target;
+    LosMode mode;
+    bool has_los;  // last observed state, so only transitions fire
   };
 
   void ThreadMain();
@@ -122,6 +139,10 @@ class PapyrusGuest {
   void ScheduleGameUpdate(papyrus::ObjectRef target, f64 due, f64 interval);
   void CancelGameUpdate(papyrus::ObjectRef target);
   void AdvanceGameUpdates(f64 now);  // guest thread only
+  void AddLosWatch(LosWatch watch);
+  void RemoveLosWatch(papyrus::ObjectRef registrant, papyrus::ObjectRef viewer,
+                      papyrus::ObjectRef target);
+  void AdvanceLosWatches();  // guest thread only
 
   bethesda::Game game_;
   papyrus::NativeRegistry natives_;
@@ -138,10 +159,15 @@ class PapyrusGuest {
   f64 clock_ = 0;
   std::vector<ScheduledUpdate> updates_;
   std::vector<ScheduledUpdate> game_updates_;
+  std::vector<LosWatch> los_watches_;
 
   // Set once on the guest thread (see set_game_time_provider); read on the guest
   // thread when scheduling and firing game-time timers.
   std::function<f64()> game_time_provider_;
+
+  // Set once on the guest thread (see set_los_provider); read on the guest thread
+  // when evaluating line-of-sight watches.
+  std::function<bool(u64, u64)> los_provider_;
 
   // Set once on the guest thread (see set_on_notification); read by the
   // Debug.Notification native, also on the guest thread.

@@ -121,9 +121,48 @@ void PapyrusGuest::AdvanceGameUpdates(f64 now) {
   }
 }
 
+void PapyrusGuest::AddLosWatch(LosWatch watch) {
+  RemoveLosWatch(watch.registrant, watch.viewer, watch.target);
+  los_watches_.push_back(watch);
+}
+
+void PapyrusGuest::RemoveLosWatch(ObjectRef registrant, ObjectRef viewer, ObjectRef target) {
+  std::erase_if(los_watches_, [&](const LosWatch& w) {
+    return w.registrant == registrant && w.viewer == viewer && w.target == target;
+  });
+}
+
+void PapyrusGuest::AdvanceLosWatches() {
+  if (!los_provider_ || los_watches_.empty()) return;
+  // Evaluate against a snapshot index: a handler may register or drop watches, so
+  // collect the events first, then fire, then prune the one-shots that fired.
+  struct Fired {
+    ObjectRef registrant, viewer, target;
+    bool gained;
+  };
+  std::vector<Fired> fired;
+  std::vector<size_t> drop;
+  for (size_t i = 0; i < los_watches_.size(); ++i) {
+    LosWatch& w = los_watches_[i];
+    bool now = los_provider_(w.viewer.handle, w.target.handle);
+    if (now == w.has_los) continue;
+    w.has_los = now;
+    const bool wants = (now && w.mode != LosMode::kSingleLost) ||
+                       (!now && w.mode != LosMode::kSingleGain);
+    if (!wants) continue;
+    fired.push_back({w.registrant, w.viewer, w.target, now});
+    if (w.mode != LosMode::kBoth) drop.push_back(i);
+  }
+  for (auto it = drop.rbegin(); it != drop.rend(); ++it) los_watches_.erase(los_watches_.begin() + *it);
+  for (const Fired& f : fired)
+    vm_.TryCall(f.registrant, f.gained ? "OnGainLOS" : "OnLostLOS",
+                {Value::Object(f.viewer), Value::Object(f.target)});
+}
+
 void PapyrusGuest::AdvanceUpdates(f64 dt) {
   clock_ += dt;
   if (game_time_provider_) AdvanceGameUpdates(game_time_provider_());
+  AdvanceLosWatches();
   // Snapshot the due set first: an OnUpdate handler may reschedule itself, and
   // we must not fire that new registration in the same tick.
   std::vector<ObjectRef> due;
@@ -189,6 +228,33 @@ void PapyrusGuest::BindEngineNatives() {
     natives_.Register(type, "RegisterForSingleUpdateGameTime", reg_gt_single);
     natives_.Register(type, "RegisterForUpdateGameTime", reg_gt_update);
     natives_.Register(type, "UnregisterForUpdateGameTime", unreg_gt);
+  }
+
+  // Line-of-sight watches. RegisterForLOS(akViewer, akTarget) fires OnGainLOS and
+  // OnLostLOS on the registering script as the viewer's sight of the target
+  // changes; the single variants fire once for one direction. Seed each watch with
+  // the current state so only a transition fires.
+  auto los_now = [this](ObjectRef v, ObjectRef t) {
+    return los_provider_ ? los_provider_(v.handle, t.handle) : false;
+  };
+  auto make_los = [this, los_now](LosMode mode) {
+    return [this, los_now, mode](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
+      if (args.size() < 2) return Value();
+      ObjectRef viewer = args[0].as_object();
+      ObjectRef target = args[1].as_object();
+      AddLosWatch({self, viewer, target, mode, los_now(viewer, target)});
+      return Value();
+    };
+  };
+  auto unreg_los = [this](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
+    if (args.size() >= 2) RemoveLosWatch(self, args[0].as_object(), args[1].as_object());
+    return Value();
+  };
+  for (const char* type : {"Form", "Alias", "ActiveMagicEffect"}) {
+    natives_.Register(type, "RegisterForLOS", make_los(LosMode::kBoth));
+    natives_.Register(type, "RegisterForSingleLOSGain", make_los(LosMode::kSingleGain));
+    natives_.Register(type, "RegisterForSingleLOSLost", make_los(LosMode::kSingleLost));
+    natives_.Register(type, "UnregisterForLOS", unreg_los);
   }
 
   // Debug output: the most common engine-independent Papyrus natives.

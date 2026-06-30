@@ -394,6 +394,26 @@ f32 RecordBackedSkyrimBindings::GetDistance(ObjectRef a, ObjectRef b) {
   return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+bool RecordBackedSkyrimBindings::HasLos(ObjectRef viewer, ObjectRef target) {
+  if (viewer.handle == 0 || target.handle == 0) return false;
+  // Prefer the runtime's live position snapshot (a moving NPC), falling back to the
+  // logical/record placement. Without occlusion geometry, sight is a distance gate:
+  // a generous range that still rejects refs in distant cells.
+  constexpr f32 kLosRange = 4096.0f;  // ~58 m in Skyrim units
+  auto live = [&](ObjectRef ref) -> std::array<f32, 3> {
+    std::lock_guard<std::mutex> lock(live_positions_mutex_);
+    auto it = live_positions_.find(ref.handle);
+    if (it != live_positions_.end()) return it->second;
+    return std::array<f32, 3>{};  // sentinel; replaced below when absent
+  };
+  std::array<f32, 3> pv = live(viewer);
+  if (pv == std::array<f32, 3>{}) pv = Position(viewer);
+  std::array<f32, 3> pt = live(target);
+  if (pt == std::array<f32, 3>{}) pt = Position(target);
+  f32 dx = pv[0] - pt[0], dy = pv[1] - pt[1], dz = pv[2] - pt[2];
+  return dx * dx + dy * dy + dz * dz <= kLosRange * kLosRange;
+}
+
 void RecordBackedSkyrimBindings::MoveTo(ObjectRef ref, ObjectRef target) {
   if (replica_mode_) return;
   std::array<f32, 3> p = Position(target);

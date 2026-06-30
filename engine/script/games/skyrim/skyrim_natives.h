@@ -174,6 +174,9 @@ class SkyrimBindings {
   virtual f32 GetPositionZ(papyrus::ObjectRef ref) { return 0; }
   virtual void SetPosition(papyrus::ObjectRef ref, f32 x, f32 y, f32 z) {}
   virtual f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) { return 0; }
+  // Whether the viewer has line of sight to the target. Distance-gated against the
+  // refs' positions; occlusion geometry is not modelled yet.
+  virtual bool HasLos(papyrus::ObjectRef viewer, papyrus::ObjectRef target) { return false; }
   virtual void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) {}
   virtual void SetEnabled(papyrus::ObjectRef ref, bool enabled) {}
   virtual papyrus::ObjectRef GetBaseObject(papyrus::ObjectRef ref) { return {}; }

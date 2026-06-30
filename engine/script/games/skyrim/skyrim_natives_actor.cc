@@ -267,8 +267,9 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
   reg.Register("Actor", "HasFamilyRelationship",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
-  reg.Register("Actor", "HasLOS",
-               [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
+  reg.Register("Actor", "HasLOS", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    return Value::Bool(Resolve(bindings).HasLos(self, ArgO(a, 0)));
+  });
   reg.Register("Actor", "HasMagicEffect",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
   reg.Register("Actor", "HasMagicEffectWithKeyword",
