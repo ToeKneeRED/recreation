@@ -39,6 +39,14 @@ struct AliasDef {
   std::string name;            // ALID alias name (e.g. "City", "Fort"), for <Alias=> tokens
   u32 forced_ref_raw = 0;      // ALFR forced reference, 0 when none
   u32 unique_actor_raw = 0;    // ALUA unique-actor NPC_ base, 0 when none
+  // "Find Matching Reference" aliases (ALFA present): filled at runtime with a
+  // placed reference of `ref_type_raw` (an ALRT LocationRefType keyword) found in
+  // a location, usually the quest's Fort/City location alias (ALFI find_in_parent
+  // points at it). This binds the Civil War siege's Attacker*/Defender*/Marker*
+  // slots to the fort's placed refs.
+  bool find_matching = false;  // ALFA present
+  u32 ref_type_raw = 0;        // ALRT LocationRefType form id, 0 when none
+  i32 find_in_parent = -1;     // ALFI parent alias id to search within, -1 when none
 };
 
 // The static, display-facing shape of a quest, parsed once from its QUST

@@ -512,6 +512,35 @@ void QuestDirector::ReportReinforcementTest() {
   const u64 pct_atk = glob("CWPercentPoolRemainingAttacker");
   const u64 pool_atk = glob("CWReinforcementPoolAttacker");
 
+  // Probe a fort Location's LCSR (LocationRefType -> placed-ref) table, the
+  // source a find-matching alias resolves against. FortNeugradLocation 0x019183
+  // carries the generic-attacker ref-type 0x087a19.
+  {
+    bethesda::Record loc;
+    if (records_.Parse(bethesda::GlobalFormId{0, 0x019183}, &loc)) {
+      constexpr u32 kLcsr = FourCc('L', 'C', 'S', 'R');
+      for (const bethesda::Subrecord& s : loc.subrecords) {
+        if (s.type != kLcsr) continue;
+        // Each entry is {LocationRefType: u32, Reference: u32}; stride 8.
+        const size_t stride = 8, count = s.data.size() / stride;
+        int attackers = 0;
+        std::string sample;
+        for (size_t i = 0; i < count; ++i) {
+          u32 rt = 0, ref = 0;
+          std::memcpy(&rt, s.data.data() + i * stride, 4);
+          std::memcpy(&ref, s.data.data() + i * stride + 4, 4);
+          if (rt == 0x87a19) {  // generic attacker ref-type
+            ++attackers;
+            if (attackers <= 4) sample += Fmt(" 0x%x", ref);
+          }
+        }
+        std::printf("FortNeugrad LCSR: %zu entries, %d attacker-type(0x87a19) refs e.g.%s\n", count,
+                    attackers, sample.c_str());
+        std::fflush(stdout);
+      }
+    }
+  }
+
   auto* binds = ctx_.bindings;
   // The controller writes the pool globals through its CWs cross-reference (the
   // CW master quest, whose script carries the CWReinforcementPoolAttacker
@@ -540,6 +569,21 @@ void QuestDirector::ReportReinforcementTest() {
             emit(Fmt("reinforcement alias id=%d; pool globals: pct=0x%llx pool=0x%llx", alias_id,
                      static_cast<unsigned long long>(pct_atk),
                      static_cast<unsigned long long>(pool_atk)));
+            // Verify the new "Find Matching Reference" alias parsing (ALFA/ALRT):
+            // these are the slots the siege binds to the fort's placed soldier refs.
+            if (const quest::QuestDef* qd = binds->quest_system().Definition(siege)) {
+              int fm = 0;
+              std::string sample;
+              for (const quest::AliasDef& al : qd->aliases) {
+                if (!al.find_matching) continue;
+                ++fm;
+                if (sample.size() < 100)
+                  sample += Fmt(" %s(rt=0x%x,parent=%d)", al.name.c_str(), al.ref_type_raw,
+                                al.find_in_parent);
+              }
+              emit(Fmt("find-matching aliases: %d / %zu total;%s", fm, qd->aliases.size(),
+                       sample.c_str()));
+            }
 
             // Start the siege and run its battle-stage setup (seeds the pools,
             // registers/enables the soldier aliases).

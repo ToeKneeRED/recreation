@@ -83,6 +83,9 @@ QuestDef ParseQuestDefinition(u64 handle, const bethesda::Record& record,
   constexpr u32 kAlid = FourCc('A', 'L', 'I', 'D');  // alias name (e.g. "City")
   constexpr u32 kAlfr = FourCc('A', 'L', 'F', 'R');  // forced reference form id
   constexpr u32 kAlua = FourCc('A', 'L', 'U', 'A');  // unique-actor NPC_ base
+  constexpr u32 kAlfa = FourCc('A', 'L', 'F', 'A');  // find-matching-reference flag
+  constexpr u32 kAlrt = FourCc('A', 'L', 'R', 'T');  // LocationRefType to match
+  constexpr u32 kAlfi = FourCc('A', 'L', 'F', 'I');  // find-in-parent alias id
   constexpr u32 kAled = FourCc('A', 'L', 'E', 'D');  // alias block end
 
   QuestDef def;
@@ -171,6 +174,17 @@ QuestDef ParseQuestDefinition(u64 handle, const bethesda::Record& record,
       case kAlua:
         if (in_alias && !def.aliases.empty())
           def.aliases.back().unique_actor_raw = ReadLe<u32>(sub);
+        break;
+      case kAlfa:
+        if (in_alias && !def.aliases.empty()) def.aliases.back().find_matching = true;
+        break;
+      case kAlrt:
+        if (in_alias && !def.aliases.empty())
+          def.aliases.back().ref_type_raw = ReadLe<u32>(sub);
+        break;
+      case kAlfi:
+        if (in_alias && !def.aliases.empty())
+          def.aliases.back().find_in_parent = ReadLe<i32>(sub);
         break;
       case kAled:
         in_alias = false;
