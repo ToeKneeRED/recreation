@@ -11,6 +11,7 @@
 
 #include "script/games/skyrim/skyrim_bindings.h"
 #include "script/games/skyrim/skyrim_natives.h"
+#include "script/papyrus/alias_handle.h"
 #include "script/papyrus/native.h"
 #include "script/papyrus/value.h"
 #include "script/papyrus/vm.h"
@@ -81,6 +82,12 @@ class MockBindings : public SkyrimBindings {
   bool HasLos(ObjectRef, ObjectRef target) override {
     los_target = target;
     return has_los;
+  }
+  ObjectRef running_actor;
+  bool actor_running = false;
+  bool IsActorRunning(ObjectRef actor) override {
+    running_actor = actor;
+    return actor_running;
   }
   i32 GetNumItems(ObjectRef) override { return static_cast<i32>(inventory.size()); }
   ObjectRef GetNthForm(ObjectRef, i32 index) override {
@@ -251,7 +258,25 @@ int main() {
     check("HasLos true within sight range", los_b.HasLos(ObjectRef{1}, ObjectRef{2}));
     check("HasLos false beyond sight range", !los_b.HasLos(ObjectRef{1}, ObjectRef{3}));
     check("HasLos false for a null target", !los_b.HasLos(ObjectRef{1}, ObjectRef{}));
+
+    // The runtime's moving-actor set drives IsActorRunning.
+    los_b.UpdateMovingActors({2});
+    check("IsActorRunning true for a moving actor", los_b.IsActorRunning(ObjectRef{2}));
+    check("IsActorRunning false for a still actor", !los_b.IsActorRunning(ObjectRef{1}));
   }
+
+  // Actor.IsRunning routes to the binding.
+  bindings.actor_running = true;
+  check("IsRunning returns the binding result", call("Actor", "IsRunning", {}).ToBool());
+  check("IsRunning queries self",
+        bindings.running_actor.handle == 0x14);
+
+  // Alias.GetOwningQuest unpacks the quest from the alias handle.
+  ObjectRef alias{rec::script::papyrus::EncodeAliasHandle(0xABC, 4)};
+  check("GetOwningQuest unpacks the alias handle's quest",
+        callOn(alias, "Alias", "GetOwningQuest", {}).as_object().handle == 0xABC);
+  check("GetOwningQuest is None for a plain form",
+        callOn(ObjectRef{0x500}, "Alias", "GetOwningQuest", {}).as_object().handle == 0);
 
   // Debug.* engine commands route through the guest's command hook with a verb and
   // a string argument. The guest binds these in its constructor.

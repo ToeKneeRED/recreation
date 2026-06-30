@@ -388,6 +388,8 @@ class Engine {
   // Reused buffer for the per-frame position snapshot handed to the bindings'
   // proximity query. Main-thread only.
   std::vector<std::pair<u64, std::array<f32, 3>>> position_snapshot_;
+  // Previous frame's positions, to derive each ref's speed for Actor.IsRunning.
+  std::unordered_map<u64, std::array<f32, 3>> prev_positions_;
 
   render::Renderer renderer_;
   FlyCamera camera_;

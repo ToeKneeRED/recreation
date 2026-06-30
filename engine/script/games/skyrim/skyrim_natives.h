@@ -177,6 +177,8 @@ class SkyrimBindings {
   // Whether the viewer has line of sight to the target. Distance-gated against the
   // refs' positions; occlusion geometry is not modelled yet.
   virtual bool HasLos(papyrus::ObjectRef viewer, papyrus::ObjectRef target) { return false; }
+  // Whether the actor is moving at a running pace this frame.
+  virtual bool IsActorRunning(papyrus::ObjectRef actor) { return false; }
   virtual void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) {}
   virtual void SetEnabled(papyrus::ObjectRef ref, bool enabled) {}
   virtual papyrus::ObjectRef GetBaseObject(papyrus::ObjectRef ref) { return {}; }

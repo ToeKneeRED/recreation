@@ -149,6 +149,24 @@ bool Engine::RunFrame() {
       Vec3 pp;
       if (actors_->PlayerWorldPos(&pp)) position_snapshot_.push_back({0x14, {pp.x, pp.y, pp.z}});
       ctx_.bindings->UpdatePositionSnapshot(position_snapshot_);
+      // Derive who is moving at a run pace from the frame-to-frame displacement, so
+      // Actor.IsRunning reflects real motion. Skyrim run speed is a few hundred
+      // units/s; gate above a walk to avoid flagging idle drift.
+      constexpr f32 kRunSpeed = 175.0f;  // units per second
+      const f32 fd = static_cast<f32>(timer_.frame_delta());
+      std::vector<u64> running;
+      if (fd > 0.0f) {
+        for (const auto& [handle, pos] : position_snapshot_) {
+          auto prev = prev_positions_.find(handle);
+          if (prev == prev_positions_.end()) continue;
+          const f32 dx = pos[0] - prev->second[0], dy = pos[1] - prev->second[1],
+                    dz = pos[2] - prev->second[2];
+          if (std::sqrt(dx * dx + dy * dy + dz * dz) / fd >= kRunSpeed) running.push_back(handle);
+        }
+      }
+      ctx_.bindings->UpdateMovingActors(running);
+      prev_positions_.clear();
+      for (const auto& [handle, pos] : position_snapshot_) prev_positions_[handle] = pos;
     }
     // Advance the managed world: deliver any queued engine events to mod hooks,
     // then run the per-frame behaviours (Skyrim soft logic), all dispatching back

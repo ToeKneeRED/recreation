@@ -300,8 +300,9 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
   reg.Register("Actor", "IsPlayersLastRiddenHorse",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
-  reg.Register("Actor", "IsRunning",
-               [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
+  reg.Register("Actor", "IsRunning", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(Resolve(bindings).IsActorRunning(self));
+  });
   reg.Register("Actor", "IsSprinting",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
   reg.Register("Actor", "IsTrespassing",

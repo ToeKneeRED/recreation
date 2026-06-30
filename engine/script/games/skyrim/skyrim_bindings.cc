@@ -659,6 +659,17 @@ namespace {
 constexpr f32 kGameUnitsToEngine = 0.01428f;
 }  // namespace
 
+bool RecordBackedSkyrimBindings::IsActorRunning(ObjectRef actor) {
+  std::lock_guard<std::mutex> lock(live_positions_mutex_);
+  return running_actors_.count(actor.handle) != 0;
+}
+
+void RecordBackedSkyrimBindings::UpdateMovingActors(const std::vector<u64>& running) {
+  std::lock_guard<std::mutex> lock(live_positions_mutex_);
+  running_actors_.clear();
+  running_actors_.insert(running.begin(), running.end());
+}
+
 void RecordBackedSkyrimBindings::UpdatePositionSnapshot(
     const std::vector<std::pair<u64, std::array<f32, 3>>>& positions) {
   std::lock_guard<std::mutex> lock(live_positions_mutex_);

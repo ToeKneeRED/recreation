@@ -1,4 +1,5 @@
 #include "script/games/skyrim/skyrim_natives_ext.h"
+#include "script/papyrus/alias_handle.h"
 
 namespace rec::script::skyrim {
 
@@ -8,9 +9,10 @@ using papyrus::VirtualMachine;
 using ext::Args;
 
 void RegisterAliasExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
-  // A bare alias handle does not carry its owning quest here, so report None.
-  reg.Register("Alias", "GetOwningQuest", [](VirtualMachine&, ObjectRef, Args&) {
-    return Value::Object(ObjectRef{});
+  // An alias handle packs its owning quest (see EncodeAliasHandle); unpack it.
+  reg.Register("Alias", "GetOwningQuest", [](VirtualMachine&, ObjectRef self, Args&) {
+    if (!papyrus::IsAliasHandle(self.handle)) return Value::Object(ObjectRef{});
+    return Value::Object(ObjectRef{papyrus::AliasHandleQuest(self.handle)});
   });
 
   auto noop = [](VirtualMachine&, ObjectRef, Args&) { return Value(); };

@@ -89,6 +89,11 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // it is the one method on these bindings safe to call off the guest thread.
   void UpdatePositionSnapshot(const std::vector<std::pair<u64, std::array<f32, 3>>>& positions);
 
+  // Refreshes the set of actors moving at a running pace, derived by the runtime
+  // from frame-to-frame displacement. Called on the main thread; shares the
+  // snapshot mutex, read by Actor.IsRunning on the guest thread.
+  void UpdateMovingActors(const std::vector<u64>& running);
+
   // Replica mode (a multiplayer client): the server is authoritative for quests
   // and quest-driven world state, so the client's own scripts must not mutate
   // either, it mirrors the server via QuestSystem::ApplyStatus and replicated
@@ -247,6 +252,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void SetPosition(papyrus::ObjectRef ref, f32 x, f32 y, f32 z) override;
   f32 GetDistance(papyrus::ObjectRef a, papyrus::ObjectRef b) override;
   bool HasLos(papyrus::ObjectRef viewer, papyrus::ObjectRef target) override;
+  bool IsActorRunning(papyrus::ObjectRef actor) override;
   void MoveTo(papyrus::ObjectRef ref, papyrus::ObjectRef target) override;
   void SetEnabled(papyrus::ObjectRef ref, bool enabled) override;
   bool IsDisabled(papyrus::ObjectRef ref) override;
@@ -527,6 +533,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // bindings state touched from two threads.
   std::mutex live_positions_mutex_;
   std::unordered_map<u64, std::array<f32, 3>> live_positions_;
+  std::unordered_set<u64> running_actors_;  // moving at a run pace this frame
   // Managed HUD gauges, id-keyed, insertion-ordered for a stable HUD layout.
   // Written on the guest thread (SetHudGauge), read on the main thread
   // (SnapshotHudGauges); guarded by its own mutex.
