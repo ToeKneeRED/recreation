@@ -37,6 +37,9 @@ class WorldEffectSink {
   // An actor was reset/resurrected by a script (Reset, ResurrectActor): clear the
   // downed state so it renders and fights again. Mirrors ActorDied.
   virtual void ActorResurrected(u64 quest, u64 actor) {}
+  // An actor was told to keep an offset from the player (KeepOffsetFromActor),
+  // which the runtime drives as following, or to stop (ClearKeepOffsetFromActor).
+  virtual void ActorFollow(u64 quest, u64 actor, bool follow) {}
 };
 
 }  // namespace rec::script

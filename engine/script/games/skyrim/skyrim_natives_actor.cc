@@ -323,7 +323,10 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
   reg.Register("Actor", "ClearExpressionOverride", noop);
   reg.Register("Actor", "ClearExtraArrows", noop);
   reg.Register("Actor", "ClearForcedMovement", noop);
-  reg.Register("Actor", "ClearKeepOffsetFromActor", noop);
+  reg.Register("Actor", "ClearKeepOffsetFromActor", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).SetActorFollowing(self, false);
+    return Value();
+  });
   reg.Register("Actor", "ClearLookAt", noop);
   reg.Register("Actor", "DoCombatSpellApply", noop);
   reg.Register("Actor", "EndDeferredKill", noop);
@@ -336,7 +339,12 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
   reg.Register("Actor", "ForceTargetAngle", noop);
   reg.Register("Actor", "ForceTargetDirection", noop);
   reg.Register("Actor", "ForceTargetSpeed", noop);
-  reg.Register("Actor", "KeepOffsetFromActor", noop);
+  // KeepOffsetFromActor(target, ...) holds a position relative to another actor;
+  // when that target is the player the engine drives it as following.
+  reg.Register("Actor", "KeepOffsetFromActor", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).SetActorFollowing(self, true);
+    return Value();
+  });
   reg.Register("Actor", "MoveToPackageLocation", noop);
   reg.Register("Actor", "OpenInventory", noop);
   reg.Register("Actor", "PlayIdle", noop);

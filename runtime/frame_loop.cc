@@ -175,6 +175,8 @@ bool Engine::RunFrame() {
         case world::CombatOp::kDisengage: npc_->LeaveCombat(e.actor); break;
         case world::CombatOp::kDied: npc_->OnActorDied(e.actor); break;
         case world::CombatOp::kResurrected: npc_->OnActorResurrected(e.actor); break;
+        case world::CombatOp::kFollow: npc_->SetFollower(e.actor, true); break;
+        case world::CombatOp::kUnfollow: npc_->SetFollower(e.actor, false); break;
       }
     }
     npc_->Cw00DemoTick(static_cast<f32>(timer_.frame_delta()));

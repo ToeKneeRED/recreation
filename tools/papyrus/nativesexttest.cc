@@ -35,6 +35,8 @@ class MockBindings : public SkyrimBindings {
   std::vector<std::pair<ObjectRef, bool>> effects;  // (effect, detrimental) for the item under test
   ObjectRef last_played;
   i32 voice_id = 7;
+  ObjectRef follow_actor;
+  bool following = false;
 
   f32 GetCurrentGameTime() override { return game_time; }
   f32 GetGameSettingFloat(const std::string&) override { return 42.7f; }
@@ -53,6 +55,10 @@ class MockBindings : public SkyrimBindings {
   i32 PlaySound(ObjectRef sound, ObjectRef) override {
     last_played = sound;
     return voice_id;
+  }
+  void SetActorFollowing(ObjectRef actor, bool follow) override {
+    follow_actor = actor;
+    following = follow;
   }
   i32 GetFormListSize(ObjectRef) override { return static_cast<i32>(list_forms.size()); }
   ObjectRef GetNthListForm(i32 index) override {
@@ -179,6 +185,14 @@ int main() {
   Value played = callOn(soundForm, "Sound", "Play", {Value::Object(ObjectRef{0x701})});
   check("Sound.Play returns the voice id", played.ToInt() == 7);
   check("Sound.Play forwards the sound form", bindings.last_played.handle == soundForm.handle);
+
+  // KeepOffsetFromActor / ClearKeepOffsetFromActor drive the follow wiring.
+  ObjectRef follower{0x800};
+  callOn(follower, "Actor", "KeepOffsetFromActor", {Value::Object(ObjectRef{0x14})});
+  check("KeepOffsetFromActor starts following",
+        bindings.following && bindings.follow_actor.handle == follower.handle);
+  callOn(follower, "Actor", "ClearKeepOffsetFromActor", {});
+  check("ClearKeepOffsetFromActor stops following", !bindings.following);
 
   std::printf("%s (%d failures)\n", failures ? "NATIVESEXTTEST FAILED" : "NATIVESEXTTEST PASSED",
               failures);

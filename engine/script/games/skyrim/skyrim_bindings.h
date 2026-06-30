@@ -313,6 +313,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void SetKeywordData(papyrus::ObjectRef form, papyrus::ObjectRef keyword, f32 value) override;
   papyrus::ObjectRef GetCombatTarget(papyrus::ObjectRef actor) override;
   void StartCombat(papyrus::ObjectRef actor, papyrus::ObjectRef target) override;
+  void SetActorFollowing(papyrus::ObjectRef actor, bool follow) override;
   void StopCombat(papyrus::ObjectRef actor) override;
   // Applies one connected melee swing: removes `damage` health from `target` and
   // attributes the death to `attacker` if it falls. Called by the engine's

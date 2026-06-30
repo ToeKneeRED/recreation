@@ -82,6 +82,8 @@ enum class CombatOp : u8 {
   kDisengage,    // actor stops fighting (StopCombat)
   kDied,         // actor died: drop it and anyone targeting it
   kResurrected,  // actor brought back (Reset/Resurrect): clear its downed state
+  kFollow,       // actor starts following the player (KeepOffsetFromActor)
+  kUnfollow,     // actor stops following (ClearKeepOffsetFromActor)
 };
 
 struct CombatEvent {

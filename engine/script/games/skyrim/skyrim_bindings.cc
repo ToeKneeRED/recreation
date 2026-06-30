@@ -751,6 +751,10 @@ void RecordBackedSkyrimBindings::StopCombat(ObjectRef actor) {
   if (world_sink_) world_sink_->StopCombat(active_quest_, actor.handle);
 }
 
+void RecordBackedSkyrimBindings::SetActorFollowing(ObjectRef actor, bool follow) {
+  if (world_sink_) world_sink_->ActorFollow(active_quest_, actor.handle, follow);
+}
+
 void RecordBackedSkyrimBindings::ApplyMeleeHit(ObjectRef attacker, ObjectRef target, f32 damage) {
   if (target.handle == 0 || IsDead(target)) return;
   last_attacker_ = attacker;

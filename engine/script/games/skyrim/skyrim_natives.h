@@ -262,6 +262,9 @@ class SkyrimBindings {
   // withdraws it. Quest and AI scripts drive battles through these.
   virtual void StartCombat(papyrus::ObjectRef actor, papyrus::ObjectRef target) {}
   virtual void StopCombat(papyrus::ObjectRef actor) {}
+  // Make an actor follow the player (KeepOffsetFromActor with the player as the
+  // target) or stop (ClearKeepOffsetFromActor). Drives the NPC follow behaviour.
+  virtual void SetActorFollowing(papyrus::ObjectRef actor, bool follow) {}
   virtual void EquipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) {}
   virtual void AddSpell(papyrus::ObjectRef actor, papyrus::ObjectRef spell) {}
 
