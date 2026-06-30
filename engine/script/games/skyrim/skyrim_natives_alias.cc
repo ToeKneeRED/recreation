@@ -18,17 +18,14 @@ void RegisterAliasExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
   reg.Register("Alias", "RegisterForLOS", noop);
   reg.Register("Alias", "RegisterForSingleLOSGain", noop);
   reg.Register("Alias", "RegisterForSingleLOSLost", noop);
-  reg.Register("Alias", "RegisterForSingleUpdateGameTime", noop);
   reg.Register("Alias", "RegisterForSleep", noop);
   reg.Register("Alias", "RegisterForTrackedStatsEvent", noop);
-  reg.Register("Alias", "RegisterForUpdateGameTime", noop);
   reg.Register("Alias", "StartObjectProfiling", noop);
   reg.Register("Alias", "StopObjectProfiling", noop);
   reg.Register("Alias", "UnregisterForAnimationEvent", noop);
   reg.Register("Alias", "UnregisterForLOS", noop);
   reg.Register("Alias", "UnregisterForSleep", noop);
   reg.Register("Alias", "UnregisterForTrackedStatsEvent", noop);
-  reg.Register("Alias", "UnregisterForUpdateGameTime", noop);
 
   reg.Register("LocationAlias", "Clear", noop);
 

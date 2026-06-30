@@ -278,6 +278,7 @@ bool LoadGameData(Engine& engine) {
         std::lock_guard<std::mutex> lock(self->debug_cmd_mutex_);
         self->pending_debug_cmds_.emplace_back(verb, arg);
       });
+      guest->set_game_time_provider([self]() { return self->clock_.game_days(); });
       guest->set_on_platform_hud(
           [self](const std::string& type, const std::string& func,
                  const std::vector<rec::script::papyrus::Value>& args) {
@@ -602,6 +603,7 @@ void LoadExtraDomains(Engine& engine) {
         std::lock_guard<std::mutex> lock(self->debug_cmd_mutex_);
         self->pending_debug_cmds_.emplace_back(verb, arg);
       });
+      guest->set_game_time_provider([self]() { return self->clock_.game_days(); });
       guest->set_on_platform_hud(
           [self](const std::string& type, const std::string& func,
                  const std::vector<rec::script::papyrus::Value>& args) {

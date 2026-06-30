@@ -93,8 +93,37 @@ void PapyrusGuest::CancelUpdate(ObjectRef target) {
   std::erase_if(updates_, [&](const ScheduledUpdate& u) { return u.target == target; });
 }
 
+void PapyrusGuest::ScheduleGameUpdate(ObjectRef target, f64 due, f64 interval) {
+  CancelGameUpdate(target);
+  game_updates_.push_back({target, due, interval});
+}
+
+void PapyrusGuest::CancelGameUpdate(ObjectRef target) {
+  std::erase_if(game_updates_, [&](const ScheduledUpdate& u) { return u.target == target; });
+}
+
+void PapyrusGuest::AdvanceGameUpdates(f64 now) {
+  // Same snapshot-then-fire discipline as AdvanceUpdates: a handler may reschedule
+  // itself and must not fire again this tick.
+  std::vector<ObjectRef> due;
+  for (ScheduledUpdate& u : game_updates_)
+    if (u.due <= now) due.push_back(u.target);
+  for (ObjectRef target : due) {
+    auto it = std::find_if(game_updates_.begin(), game_updates_.end(),
+                           [&](const ScheduledUpdate& u) { return u.target == target; });
+    if (it == game_updates_.end()) continue;
+    f64 interval = it->interval;
+    if (interval > 0)
+      it->due += interval;
+    else
+      game_updates_.erase(it);
+    vm_.Call(target, "OnUpdateGameTime", {});
+  }
+}
+
 void PapyrusGuest::AdvanceUpdates(f64 dt) {
   clock_ += dt;
+  if (game_time_provider_) AdvanceGameUpdates(game_time_provider_());
   // Snapshot the due set first: an OnUpdate handler may reschedule itself, and
   // we must not fire that new registration in the same tick.
   std::vector<ObjectRef> due;
@@ -136,6 +165,30 @@ void PapyrusGuest::BindEngineNatives() {
     natives_.Register(type, "RegisterForSingleUpdate", reg_single);
     natives_.Register(type, "RegisterForUpdate", reg_update);
     natives_.Register(type, "UnregisterForUpdate", unreg);
+  }
+
+  // Game-time timers. The interval is in game hours; the world clock (game_days)
+  // is the reference, so a script can wait a number of in-game hours and receive
+  // OnUpdateGameTime. Without a provider these never fire.
+  auto game_now = [this] { return game_time_provider_ ? game_time_provider_() : 0.0; };
+  auto reg_gt_single = [this, game_now](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
+    f64 hours = args.empty() ? 0 : args[0].ToFloat();
+    ScheduleGameUpdate(self, game_now() + hours / 24.0, 0);
+    return Value();
+  };
+  auto reg_gt_update = [this, game_now](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
+    f64 interval = (args.empty() ? 0 : args[0].ToFloat()) / 24.0;
+    ScheduleGameUpdate(self, game_now() + interval, interval > 0 ? interval : 0);
+    return Value();
+  };
+  auto unreg_gt = [this](VirtualMachine&, ObjectRef self, std::vector<Value>&) {
+    CancelGameUpdate(self);
+    return Value();
+  };
+  for (const char* type : {"Form", "Alias", "ActiveMagicEffect"}) {
+    natives_.Register(type, "RegisterForSingleUpdateGameTime", reg_gt_single);
+    natives_.Register(type, "RegisterForUpdateGameTime", reg_gt_update);
+    natives_.Register(type, "UnregisterForUpdateGameTime", unreg_gt);
   }
 
   // Debug output: the most common engine-independent Papyrus natives.

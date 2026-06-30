@@ -100,6 +100,11 @@ class PapyrusGuest {
     local_pos_provider_ = std::move(fn);
   }
 
+  // Supplies the current game time in days (WorldClock::game_days), driving the
+  // RegisterForUpdateGameTime timers and their OnUpdateGameTime callbacks. Set by
+  // the runtime; read on the guest thread.
+  void set_game_time_provider(std::function<f64()> fn) { game_time_provider_ = std::move(fn); }
+
  private:
   struct ScheduledUpdate {
     papyrus::ObjectRef target;
@@ -112,6 +117,11 @@ class PapyrusGuest {
   void ScheduleUpdate(papyrus::ObjectRef target, f64 due, f64 interval);
   void CancelUpdate(papyrus::ObjectRef target);
   void AdvanceUpdates(f64 dt);       // guest thread only
+  // Game-time timers: due/interval are in game days, fired when the world clock
+  // (via game_time_provider_) passes them. Mirror the real-time set above.
+  void ScheduleGameUpdate(papyrus::ObjectRef target, f64 due, f64 interval);
+  void CancelGameUpdate(papyrus::ObjectRef target);
+  void AdvanceGameUpdates(f64 now);  // guest thread only
 
   bethesda::Game game_;
   papyrus::NativeRegistry natives_;
@@ -127,6 +137,11 @@ class PapyrusGuest {
   // Touched only on the guest thread.
   f64 clock_ = 0;
   std::vector<ScheduledUpdate> updates_;
+  std::vector<ScheduledUpdate> game_updates_;
+
+  // Set once on the guest thread (see set_game_time_provider); read on the guest
+  // thread when scheduling and firing game-time timers.
+  std::function<f64()> game_time_provider_;
 
   // Set once on the guest thread (see set_on_notification); read by the
   // Debug.Notification native, also on the guest thread.

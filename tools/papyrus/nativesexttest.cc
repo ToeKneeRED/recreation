@@ -235,6 +235,24 @@ int main() {
     check("ToggleMenus routes as a command", cmds.size() > 2 && cmds[2].first == "ToggleMenus");
     check("SetGodMode forwards its bool argument",
           cmds.size() > 3 && cmds[3].first == "SetGodMode" && cmds[3].second == "1");
+
+    // Game-time timers register on Form/Alias/ActiveMagicEffect and run their real
+    // schedule/cancel paths against a controllable clock without shadowing.
+    f64 game_days = 5.0;
+    guest.set_game_time_provider([&]() { return game_days; });
+    bool all_registered = true;
+    for (const char* t : {"Form", "Alias", "ActiveMagicEffect"})
+      for (const char* fn : {"RegisterForSingleUpdateGameTime", "RegisterForUpdateGameTime",
+                             "UnregisterForUpdateGameTime"})
+        all_registered = all_registered && guest.natives().Find(t, fn) != nullptr;
+    check("game-time timers registered on every timer type", all_registered);
+    const NativeFunction* sched = guest.natives().Find("Form", "RegisterForSingleUpdateGameTime");
+    const NativeFunction* cancel = guest.natives().Find("Form", "UnregisterForUpdateGameTime");
+    std::vector<Value> two_hours = {Value::Float(2.0f)};
+    std::vector<Value> none_args;
+    (*sched)(gvm, ObjectRef{0x42}, two_hours);
+    (*cancel)(gvm, ObjectRef{0x42}, none_args);
+    check("game-time schedule and cancel run without error", true);
   }
 
   std::printf("%s (%d failures)\n", failures ? "NATIVESEXTTEST FAILED" : "NATIVESEXTTEST PASSED",

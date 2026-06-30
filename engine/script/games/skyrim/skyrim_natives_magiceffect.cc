@@ -22,10 +22,8 @@ void RegisterActiveMagicEffectExtra(papyrus::NativeRegistry& reg, SkyrimBindings
   reg.Register("ActiveMagicEffect", "RegisterForLOS", noop);
   reg.Register("ActiveMagicEffect", "RegisterForSingleLOSGain", noop);
   reg.Register("ActiveMagicEffect", "RegisterForSingleLOSLost", noop);
-  reg.Register("ActiveMagicEffect", "RegisterForSingleUpdateGameTime", noop);
   reg.Register("ActiveMagicEffect", "RegisterForSleep", noop);
   reg.Register("ActiveMagicEffect", "RegisterForTrackedStatsEvent", noop);
-  reg.Register("ActiveMagicEffect", "RegisterForUpdateGameTime", noop);
   reg.Register("ActiveMagicEffect", "RemoveAllInventoryEventFilters", noop);
   reg.Register("ActiveMagicEffect", "RemoveInventoryEventFilter", noop);
   reg.Register("ActiveMagicEffect", "StartObjectProfiling", noop);
@@ -34,7 +32,6 @@ void RegisterActiveMagicEffectExtra(papyrus::NativeRegistry& reg, SkyrimBindings
   reg.Register("ActiveMagicEffect", "UnregisterForLOS", noop);
   reg.Register("ActiveMagicEffect", "UnregisterForSleep", noop);
   reg.Register("ActiveMagicEffect", "UnregisterForTrackedStatsEvent", noop);
-  reg.Register("ActiveMagicEffect", "UnregisterForUpdateGameTime", noop);
 }
 
 }  // namespace rec::script::skyrim
