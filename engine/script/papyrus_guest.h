@@ -173,6 +173,9 @@ class PapyrusGuest {
 
   // Touched only on the guest thread.
   f64 clock_ = 0;
+  // TODO: serialize these into a savegame once one exists. Each entry is plain data
+  // (target handle + due/interval, or registrant/viewer/target), so they survive a
+  // save directly, unlike the fiber-parked Waits in fiber_sched_.
   std::vector<ScheduledUpdate> updates_;
   std::vector<ScheduledUpdate> game_updates_;
   std::vector<LosWatch> los_watches_;

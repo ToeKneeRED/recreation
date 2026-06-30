@@ -27,6 +27,7 @@ struct LatentRequest {
 // activation runs on a fiber, so Wait can yield without unwinding the interpreter.
 // POSIX ucontext backs it (Linux/macOS/Android); a Windows fiber backend would
 // slot in behind the same interface.
+// TODO: add a Windows CreateFiber/SwitchToFiber backend before shipping on Windows.
 class Fiber {
  public:
   explicit Fiber(std::function<void()> entry, std::size_t stack_bytes = 256 * 1024);

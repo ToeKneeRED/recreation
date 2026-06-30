@@ -18,6 +18,13 @@ namespace rec::script::papyrus {
 // Single-threaded: every method runs on the guest thread, the only place the VM
 // executes. `take_request` returns the suspending activation's wait (the VM's
 // TakeLatentRequest), queried right after a fiber yields.
+//
+// In-session only: a parked fiber holds its continuation on a live stack, which
+// cannot be serialized. A save captured mid-Wait therefore loses the pending wait.
+// TODO: to persist parked activations across a save, snapshot each suspended
+// activation's frame stack (script, function, ip, locals per frame) as data and
+// resume it via a stackless path. Needs a savegame system first; the timer and LOS
+// registrations in PapyrusGuest are already serializable and would persist first.
 class FiberScheduler {
  public:
   explicit FiberScheduler(std::function<LatentRequest()> take_request)

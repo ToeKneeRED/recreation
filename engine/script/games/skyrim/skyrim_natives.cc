@@ -196,6 +196,8 @@ void RegisterUtility(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   // count real seconds; WaitGameTime counts in-game hours. Off a fiber (a path the
   // scheduler does not drive) SuspendCurrentFor is a no-op and the call returns at
   // once, as before.
+  // TODO: a wait in progress is lost across a save; see FiberScheduler for what
+  // persisting it would take.
   auto wait_real = [](VirtualMachine& vm, ObjectRef, Args& a) {
     vm.SuspendCurrentFor(ArgF(a, 0), -1.0);
     return Value();
