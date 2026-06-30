@@ -172,6 +172,12 @@ class SkyrimBindings {
   virtual int FillFindMatchingAliases(papyrus::ObjectRef quest, papyrus::ObjectRef location) {
     return 0;
   }
+  // A quest location alias (ALLS): GetAliasLocation reads the location it is filled
+  // with, ForceAliasLocation sets it (ReferenceAlias/LocationAlias.GetLocation /
+  // ForceLocationTo). The Civil War siege's Alias_Fort is set this way to the fort
+  // being attacked, which scopes its find-matching reference aliases.
+  virtual papyrus::ObjectRef GetAliasLocation(papyrus::ObjectRef alias) { return {}; }
+  virtual void ForceAliasLocation(papyrus::ObjectRef alias, papyrus::ObjectRef location) {}
 
   // Cell data (CELL record).
   virtual bool IsInterior(papyrus::ObjectRef cell) { return false; }

@@ -601,6 +601,46 @@ void QuestDirector::ReportReinforcementTest() {
                                       .handle;
               emit(Fmt("FillFindMatchingAliases: %d filled; attacker alias %d -> ref 0x%llx",
                        nfilled, atk_alias, static_cast<unsigned long long>(atk_ref)));
+              // Drive the REAL stage-0 setup: point Alias_Fort at the fort and run
+              // Fragment_0. With the find-matching aliases filled, GetLocation +
+              // GetReference resolve, so SetUpAliases/RegisterAlias should register
+              // the controller's A1.. spawn slots and seed the pool.
+              i32 fort_alias = -1;
+              for (const quest::AliasDef& al : qd->aliases)
+                if (al.name == "Fort") {
+                  fort_alias = al.id;
+                  break;
+                }
+              if (fort_alias >= 0)
+                binds->ForceAliasLocation(
+                    ObjectRef{rec::script::papyrus::EncodeAliasHandle(siege, fort_alias)},
+                    ObjectRef{0x019183});
+              vm.Call(ObjectRef{siege}, "Fragment_0", {});
+              auto memo = [&](const char* v) -> std::string {
+                rec::script::papyrus::Value* p = vm.MemberVar(ObjectRef{siege}, v);
+                if (!p) return "(absent)";
+                if (p->type() == rec::script::papyrus::ValueType::kObject)
+                  return Fmt("obj:0x%llx", static_cast<unsigned long long>(p->as_object().handle));
+                if (p->type() == rec::script::papyrus::ValueType::kFloat)
+                  return Fmt("%.1f", p->as_float());
+                return p->is_none() ? "None" : "(other)";
+              };
+              // A generic Attacker slot (CWReinforcementAliasScript alias) should
+              // now hold a placed ref if SetUpAliases ran its ForceRefTo chain.
+              u64 gen_ref = 0;
+              for (i32 id = 0; id < 60; ++id)
+                if (vm.TypeOf(ObjectRef{rec::script::papyrus::EncodeAliasHandle(siege, id)})
+                        .find("Reinforcement") != std::string::npos) {
+                  gen_ref = binds
+                                ->AliasReference(ObjectRef{
+                                    rec::script::papyrus::EncodeAliasHandle(siege, id)})
+                                .handle;
+                  if (gen_ref) break;
+                }
+              emit(Fmt("after Fragment_0: Fort alias=%d ::PoolAttacker_var=%s; a generic "
+                       "reinforcement slot -> ref 0x%llx",
+                       fort_alias, memo("::PoolAttacker_var").c_str(),
+                       static_cast<unsigned long long>(gen_ref)));
             }
 
             // Start the siege and run its battle-stage setup (seeds the pools,

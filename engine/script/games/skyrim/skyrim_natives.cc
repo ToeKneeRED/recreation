@@ -498,6 +498,17 @@ void RegisterObjectReference(papyrus::NativeRegistry& reg, SkyrimBindings* bindi
     Resolve(bindings).AliasClear(self);
     return Value();
   });
+  // A LocationAlias holds a location (the fort/city a siege scopes to). GetLocation
+  // reads it, ForceLocationTo sets it, how the Civil War orchestrator points the
+  // fort-siege quest at the fort being attacked.
+  reg.Register("LocationAlias", "GetLocation", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Object(Resolve(bindings).GetAliasLocation(self));
+  });
+  reg.Register("LocationAlias", "ForceLocationTo",
+               [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+                 Resolve(bindings).ForceAliasLocation(self, ArgO(a, 0));
+                 return Value();
+               });
   // Lock(abLock=true,...): Lock(false) is the in-game way to unlock.
   reg.Register("ObjectReference", "Lock", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).SetLocked(self, ArgB(a, 0, true));

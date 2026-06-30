@@ -136,6 +136,19 @@ void RecordBackedSkyrimBindings::AliasForceRefTo(ObjectRef alias, ObjectRef ref)
   }
 }
 
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetAliasLocation(ObjectRef alias) {
+  const auto it = location_fills_.find(alias.handle);
+  return it == location_fills_.end() ? ObjectRef{} : ObjectRef{it->second};
+}
+
+void RecordBackedSkyrimBindings::ForceAliasLocation(ObjectRef alias, ObjectRef location) {
+  if (replica_mode_) return;
+  if (location.handle == 0)
+    location_fills_.erase(alias.handle);
+  else
+    location_fills_[alias.handle] = location.handle;
+}
+
 int RecordBackedSkyrimBindings::FillFindMatchingAliases(ObjectRef quest, ObjectRef location) {
   if (!records_ || replica_mode_) return 0;
   const quest::QuestDef* def = quest_system_.Definition(quest.handle);
