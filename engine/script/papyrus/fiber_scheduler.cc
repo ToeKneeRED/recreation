@@ -5,6 +5,9 @@
 namespace rec::script::papyrus {
 
 bool FiberScheduler::Run(std::function<void()> body, f64 real_now, f64 game_now) {
+  // A fresh top-level activation starts from the baseline, not a parked fiber's
+  // in-flight context (which stays with that fiber until it resumes).
+  if (reset_context_) reset_context_();
   auto fiber = std::make_unique<Fiber>(std::move(body));
   fiber->Resume();
   if (fiber->done()) return false;
@@ -17,7 +20,7 @@ void FiberScheduler::Park(std::unique_ptr<Fiber> fiber, f64 real_now, f64 game_n
   Parked p;
   p.real_due = req.real_seconds >= 0 ? real_now + req.real_seconds : -1.0;
   p.game_due = req.game_days >= 0 ? game_now + req.game_days : -1.0;
-  p.context = capture_context_ ? capture_context_() : 0;
+  if (capture_context_) p.restore = capture_context_();
   p.fiber = std::move(fiber);
   parked_.push_back(std::move(p));
 }
@@ -37,7 +40,7 @@ void FiberScheduler::Advance(f64 real_now, f64 game_now) {
     }
   }
   for (Parked& p : due) {
-    if (restore_context_) restore_context_(p.context);
+    if (p.restore) p.restore();
     p.fiber->Resume();
     if (!p.fiber->done()) Park(std::move(p.fiber), real_now, game_now);
   }

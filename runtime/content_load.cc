@@ -263,11 +263,25 @@ bool LoadGameData(Engine& engine) {
       [guest = &self->scripts_->guest()](std::function<void()> body) {
         guest->RunScript(std::move(body));
       });
-  // Preserve each suspended fragment's quest provenance across a Wait that lets a
-  // different fragment run, so world mutations stay attributed to the right quest.
-  self->scripts_->guest().set_fiber_context_hooks(
-      [binds = self->script_bindings_.get()] { return binds->active_quest(); },
-      [binds = self->script_bindings_.get()](u64 quest) { binds->set_active_quest(quest); });
+  // Keep each suspended fragment's provenance (quest + recursion depth) fiber-local
+  // across a Wait that lets a different fragment run: a fresh activation starts from
+  // the baseline, and a resumed one gets its own values back.
+  {
+    auto* binds = self->script_bindings_.get();
+    self->scripts_->guest().set_fiber_context_hooks(
+        [binds] {
+          binds->set_active_quest(0);
+          binds->set_fragment_depth(0);
+        },
+        [binds]() -> std::function<void()> {
+          const u64 quest = binds->active_quest();
+          const int depth = binds->fragment_depth();
+          return [binds, quest, depth] {
+            binds->set_active_quest(quest);
+            binds->set_fragment_depth(depth);
+          };
+        });
+  }
   // Hand the bindings the guest VM so quest stage fragments can execute (run on
   // the guest thread, where the bindings live).
   {

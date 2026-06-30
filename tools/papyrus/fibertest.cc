@@ -244,7 +244,10 @@ int main() {
     VirtualMachine vm(&reg);
     u64 ctx = 0;
     FiberScheduler sched([&] { return vm.TakeLatentRequest(); });
-    sched.set_context_hooks([&] { return ctx; }, [&](u64 c) { ctx = c; });
+    sched.set_context_hooks([&] { ctx = 0; }, [&]() -> std::function<void()> {
+      const u64 c = ctx;
+      return [&ctx, c] { ctx = c; };
+    });
     u64 a_saw = 0, b_saw = 0;
     sched.Run(
         [&] {
@@ -265,6 +268,41 @@ int main() {
     check("B resumes with its own context", b_saw == 200 && sched.parked() == 1);
     sched.Advance(2.5, 0.0);  // A's deadline
     check("A resumes with its own context, not B's", a_saw == 100 && sched.parked() == 0);
+  }
+
+  // 13. A relative counter (like fragment_depth_) stays fiber-local: a fresh
+  //     activation starts from the reset baseline rather than inheriting a parked
+  //     fiber's in-flight depth, and a resumed one gets its own depth back.
+  {
+    NativeRegistry reg;
+    VirtualMachine vm(&reg);
+    int depth = 0;
+    FiberScheduler sched([&] { return vm.TakeLatentRequest(); });
+    sched.set_context_hooks([&] { depth = 0; }, [&]() -> std::function<void()> {
+      const int d = depth;
+      return [&depth, d] { depth = d; };
+    });
+    int a_depth = 0, b_depth = 0;
+    sched.Run(
+        [&] {
+          ++depth;  // A's chain enters depth 1
+          vm.SuspendCurrentFor(2.0, -1.0);
+          a_depth = depth;
+          --depth;
+        },
+        0.0, 0.0);
+    sched.Run(
+        [&] {
+          ++depth;  // B must start from 0, not A's parked 1
+          vm.SuspendCurrentFor(1.0, -1.0);
+          b_depth = depth;
+          --depth;
+        },
+        0.0, 0.0);
+    sched.Advance(1.5, 0.0);
+    check("fresh activation's depth is fiber-local (1, not inherited 2)", b_depth == 1);
+    sched.Advance(2.5, 0.0);
+    check("resumed activation's depth restored to its own (1)", a_depth == 1);
   }
 
   std::printf("%s (%d failures)\n", failures ? "FIBERTEST FAILED" : "FIBERTEST PASSED", failures);

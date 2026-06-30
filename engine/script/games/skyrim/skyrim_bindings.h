@@ -83,11 +83,14 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
     fiber_runner_ = std::move(run);
   }
 
-  // The quest a stage fragment's world mutations are attributed to. The fiber
-  // scheduler reads it when a fragment suspends and writes it back before resuming,
-  // so a Wait that lets another fragment run keeps its own provenance. Guest thread.
+  // The fragment provenance the fiber scheduler keeps local to each activation: the
+  // quest its world mutations attribute to, and the stage-fragment recursion depth.
+  // Captured when a fragment suspends and restored before it resumes, so a Wait that
+  // lets another fragment run does not cross-contaminate either. Guest thread.
   u64 active_quest() const { return active_quest_; }
   void set_active_quest(u64 quest) { active_quest_ = quest; }
+  int fragment_depth() const { return fragment_depth_; }
+  void set_fragment_depth(int depth) { fragment_depth_ = depth; }
 
   // Sink for gameplay events the managed (C#) world subscribes to (actor death,
   // item added, quest stage). Set by the runtime once the managed host is up;
