@@ -4,6 +4,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -290,6 +291,8 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   bool IsDead(papyrus::ObjectRef actor) override;
   void Resurrect(papyrus::ObjectRef actor) override;
   bool IsInCombat(papyrus::ObjectRef actor) override;
+  void SetRelationshipRank(papyrus::ObjectRef a, papyrus::ObjectRef b, i32 rank) override;
+  i32 GetRelationshipRank(papyrus::ObjectRef a, papyrus::ObjectRef b) override;
   papyrus::ObjectRef GetCombatTarget(papyrus::ObjectRef actor) override;
   void StartCombat(papyrus::ObjectRef actor, papyrus::ObjectRef target) override;
   void StopCombat(papyrus::ObjectRef actor) override;
@@ -486,6 +489,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   std::array<bool, SkyrimBindings::kControlCount> player_controls_{};   // true = enabled
   bool player_controls_init_ = false;
   std::unordered_map<u64, f32> global_values_;  // GlobalVariable overrides
+  std::map<std::pair<u64, u64>, i32> relationship_ranks_;  // symmetric actor-pair ranks
   // The day/night clock and the packed handles of the globals that proxy it.
   // Owned by the runtime; null/0 until wired (see set_clock/set_time_globals).
   WorldClock* clock_ = nullptr;

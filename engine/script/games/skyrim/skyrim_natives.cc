@@ -634,6 +634,11 @@ void RegisterQuest(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Quest", "IsRunning", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Bool(Resolve(bindings).IsRunning(self));
   });
+  // IsStopped is the inverse of IsRunning (distinct native the CW siege-lock
+  // scripts test). A stopped quest is one that is not running.
+  reg.Register("Quest", "IsStopped", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Bool(!Resolve(bindings).IsRunning(self));
+  });
   reg.Register("Quest", "Start", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     Resolve(bindings).StartQuest(self);
     return Value::Bool(true);
@@ -659,6 +664,13 @@ void RegisterQuest(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   });
   reg.Register("Quest", "SetObjectiveCompleted", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).SetObjectiveCompleted(self, ArgI(a, 0), ArgB(a, 1, true));
+    return Value();
+  });
+  // A failed objective is, like a completed one, no longer an active goal, so it
+  // drops off the tracker. We don't model the struck-through "failed" styling yet;
+  // resolving it keeps the CW siege/mission objective flow correct.
+  reg.Register("Quest", "SetObjectiveFailed", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    if (ArgB(a, 1, true)) Resolve(bindings).SetObjectiveCompleted(self, ArgI(a, 0), true);
     return Value();
   });
   reg.Register("Quest", "IsObjectiveDisplayed", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
@@ -714,6 +726,13 @@ void RegisterActor(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Actor", "GetCombatTarget", [bindings](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Object(Resolve(bindings).GetCombatTarget(self));
   });
+  reg.Register("Actor", "SetRelationshipRank", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    Resolve(bindings).SetRelationshipRank(self, ArgO(a, 0), ArgI(a, 1));
+    return Value();
+  });
+  reg.Register("Actor", "GetRelationshipRank", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    return Value::Int(Resolve(bindings).GetRelationshipRank(self, ArgO(a, 0)));
+  });
   reg.Register("Actor", "StartCombat", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).StartCombat(self, ArgO(a, 0));
     return Value();
@@ -734,6 +753,25 @@ void RegisterActor(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) {
   reg.Register("Actor", "Kill", kill);
   reg.Register("Actor", "KillSilent", kill);
   reg.Register("Actor", "KillEssential", kill);
+  // Constant/alias natives the Civil War combat + social scripts read, with no
+  // engine state behind them yet. Binding them gives the correct default (rather
+  // than the unbound None) so script branches that test them behave: the engine
+  // has no bleedout or child actors, and AI-package / restraint calls are no-ops
+  // because there is no Papyrus AI package layer to re-evaluate.
+  reg.Register("Actor", "IsBleedingOut",
+               [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
+  reg.Register("Actor", "IsChild",
+               [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
+  reg.Register("Actor", "StopCombatAlarm", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    Resolve(bindings).StopCombat(self);
+    return Value();
+  });
+  auto actor_noop = [](VirtualMachine&, ObjectRef, Args&) { return Value(); };
+  reg.Register("Actor", "EvaluatePackage", actor_noop);
+  reg.Register("Actor", "EnableAI", actor_noop);
+  reg.Register("Actor", "SetRestrained", actor_noop);
+  reg.Register("Actor", "SetDontMove", actor_noop);
+  reg.Register("Actor", "SetNoBleedoutRecovery", actor_noop);
   reg.Register("Actor", "EquipItem", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     Resolve(bindings).EquipItem(self, ArgO(a, 0));
     return Value();

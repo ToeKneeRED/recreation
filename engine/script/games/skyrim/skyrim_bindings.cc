@@ -625,6 +625,15 @@ bool RecordBackedSkyrimBindings::IsInCombat(ObjectRef actor) {
   return combat_target_.count(actor.handle) != 0;
 }
 
+void RecordBackedSkyrimBindings::SetRelationshipRank(ObjectRef a, ObjectRef b, i32 rank) {
+  relationship_ranks_[{std::min(a.handle, b.handle), std::max(a.handle, b.handle)}] = rank;
+}
+
+i32 RecordBackedSkyrimBindings::GetRelationshipRank(ObjectRef a, ObjectRef b) {
+  auto it = relationship_ranks_.find({std::min(a.handle, b.handle), std::max(a.handle, b.handle)});
+  return it == relationship_ranks_.end() ? 0 : it->second;
+}
+
 ObjectRef RecordBackedSkyrimBindings::GetCombatTarget(ObjectRef actor) {
   auto it = combat_target_.find(actor.handle);
   return it == combat_target_.end() ? ObjectRef{0} : ObjectRef{it->second};

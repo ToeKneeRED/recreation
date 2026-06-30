@@ -213,6 +213,11 @@ class SkyrimBindings {
   virtual bool IsInCombat(papyrus::ObjectRef actor) { return false; }
   virtual bool IsSneaking(papyrus::ObjectRef actor) { return false; }
   virtual papyrus::ObjectRef GetCombatTarget(papyrus::ObjectRef actor) { return {}; }
+  // Relationship rank between two actors (-4 archnemesis .. 4 lover). The Civil
+  // War governance scripts set it and read it back; a stored symmetric value
+  // round-trips so those branches behave.
+  virtual void SetRelationshipRank(papyrus::ObjectRef a, papyrus::ObjectRef b, i32 rank) {}
+  virtual i32 GetRelationshipRank(papyrus::ObjectRef a, papyrus::ObjectRef b) { return 0; }
   // Enters/leaves melee combat. StartCombat makes `actor` fight `target` (the
   // engine's combat driver then closes the distance and swings); StopCombat
   // withdraws it. Quest and AI scripts drive battles through these.
