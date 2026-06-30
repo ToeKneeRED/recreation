@@ -114,25 +114,29 @@ void PapyrusGuest::AdvanceUpdates(f64 dt) {
 }
 
 void PapyrusGuest::BindEngineNatives() {
-  // Timer natives live on Form in Skyrim; an instance reaches them through its
-  // inheritance chain. They schedule against this guest's clock.
-  natives_.Register("Form", "RegisterForSingleUpdate",
-                    [this](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
-                      f64 secs = args.empty() ? 0 : args[0].ToFloat();
-                      ScheduleUpdate(self, clock_ + secs, 0);
-                      return Value();
-                    });
-  natives_.Register("Form", "RegisterForUpdate",
-                    [this](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
-                      f64 secs = args.empty() ? 0 : args[0].ToFloat();
-                      ScheduleUpdate(self, clock_ + secs, secs > 0 ? secs : 0);
-                      return Value();
-                    });
-  natives_.Register("Form", "UnregisterForUpdate",
-                    [this](VirtualMachine&, ObjectRef self, std::vector<Value>&) {
-                      CancelUpdate(self);
-                      return Value();
-                    });
+  // Timer natives. Skyrim declares them separately on Form, Alias and
+  // ActiveMagicEffect (they are distinct base classes), so register under each:
+  // a ReferenceAlias-derived script (the Civil War per-soldier behavior layer)
+  // reaches them through Alias, not Form. They schedule against this guest's clock.
+  auto reg_single = [this](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
+    f64 secs = args.empty() ? 0 : args[0].ToFloat();
+    ScheduleUpdate(self, clock_ + secs, 0);
+    return Value();
+  };
+  auto reg_update = [this](VirtualMachine&, ObjectRef self, std::vector<Value>& args) {
+    f64 secs = args.empty() ? 0 : args[0].ToFloat();
+    ScheduleUpdate(self, clock_ + secs, secs > 0 ? secs : 0);
+    return Value();
+  };
+  auto unreg = [this](VirtualMachine&, ObjectRef self, std::vector<Value>&) {
+    CancelUpdate(self);
+    return Value();
+  };
+  for (const char* type : {"Form", "Alias", "ActiveMagicEffect"}) {
+    natives_.Register(type, "RegisterForSingleUpdate", reg_single);
+    natives_.Register(type, "RegisterForUpdate", reg_update);
+    natives_.Register(type, "UnregisterForUpdate", unreg);
+  }
 
   // Debug output: the most common engine-independent Papyrus natives.
   auto trace = [](VirtualMachine&, ObjectRef, std::vector<Value>& args) {

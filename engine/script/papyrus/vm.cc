@@ -175,6 +175,20 @@ Value VirtualMachine::Invoke(const Resolved& target, ObjectRef self, std::vector
                              const std::string& method_name) {
   if (target.fn->is_native) {
     if (natives_) {
+      // Walk the instance's script chain (most-derived first) so a native bound on
+      // a base class resolves for a derived script even when the method happens to
+      // be *declared* on a different ancestor. A CWReinforcementAliasScript
+      // (extends ReferenceAlias extends Alias) thus reaches the ReferenceAlias.*
+      // engine bindings; without the walk the lookup only tried the declaring type
+      // and silently returned None for the whole per-actor Civil War layer.
+      if (Instance* inst = FindInstance(self)) {
+        for (LoadedScript* s = FindScript(inst->primary_type()); s; s = FindScript(s->parent)) {
+          if (const NativeFunction* nf = natives_->Find(s->name, method_name)) {
+            RecordNative(s->name, method_name);
+            return (*nf)(*this, self, args);
+          }
+        }
+      }
       if (const NativeFunction* nf = natives_->Find(target.defining_type, method_name)) {
         RecordNative(target.defining_type, method_name);
         return (*nf)(*this, self, args);
