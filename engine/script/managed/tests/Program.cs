@@ -12,6 +12,7 @@ internal static class Program
 
         ValueTests.Run(check);
         SdkApiTests.Run(check);
+        InventoryTests.Run(check);
         EventBusTests.Run(check);
         EngineEventsTests.Run(check);
         ModHostTests.Run(check);

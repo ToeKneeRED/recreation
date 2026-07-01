@@ -19,6 +19,18 @@ public sealed class FakeBackend : IEngineBackend
     private readonly HashSet<ulong> _essential = new();
     private readonly HashSet<(ulong, ulong)> _keywords = new();
     private readonly Dictionary<ulong, (float X, float Y, float Z)> _positions = new();
+    private readonly Dictionary<ulong, List<ulong>> _inventory = new();  // container -> item handles
+
+    // Adds a distinct item form to a container's inventory, for enumeration.
+    public void AddInventoryItem(ulong container, ulong item)
+    {
+        if (!_inventory.TryGetValue(container, out var list))
+        {
+            list = new List<ulong>();
+            _inventory[container] = list;
+        }
+        if (!list.Contains(item)) list.Add(item);
+    }
 
     // Marks `item` as carrying `keyword`, for HasKeyword.
     public void SetHasKeyword(ulong item, ulong keyword) => _keywords.Add((item, keyword));
@@ -129,6 +141,15 @@ public sealed class FakeBackend : IEngineBackend
             case "SetPosition":
                 _positions[self] = (args[0].AsFloat(), args[1].AsFloat(), args[2].AsFloat());
                 return Value.None;
+            case "GetNumItems":
+                return Value.Int(_inventory.TryGetValue(self, out var items) ? items.Count : 0);
+            case "GetNthForm":
+            {
+                int idx = args[0].AsInt();
+                return _inventory.TryGetValue(self, out var inv) && idx >= 0 && idx < inv.Count
+                    ? Value.Object(inv[idx])
+                    : Value.Object(0);
+            }
             default:
                 return Value.None;
         }
