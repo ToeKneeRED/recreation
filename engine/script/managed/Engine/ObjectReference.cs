@@ -55,6 +55,18 @@ public class ObjectReference : Form
     public void AddItem(Form item, int count = 1) => Call("AddItem", item, count);
     public void RemoveItem(Form item, int count = 1) => Call("RemoveItem", item, count);
 
+    // The number of distinct item forms held.
+    public int ItemCount => Call("GetNumItems").AsInt();
+
+    // Enumerates the distinct item forms held. The listing is stable only while
+    // the inventory is unchanged, so do not add or remove items while iterating.
+    public System.Collections.Generic.IEnumerable<Form> Items()
+    {
+        int count = ItemCount;
+        for (int i = 0; i < count; i++)
+            yield return Form.From(Call("GetNthForm", i).AsHandle());
+    }
+
     // --- world ----------------------------------------------------------------
     public void Activate(ObjectReference activator) => Call("Activate", activator);
     public void Delete() => Call("Delete");
