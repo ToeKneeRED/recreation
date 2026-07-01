@@ -458,6 +458,16 @@ bool NpcDirector::BattleStrength(int* team_a, int* team_b, int* fallen) const {
 }
 
 bool NpcDirector::BattleGauges(f32* team1_frac, f32* team2_frac) const {
+  // When the clash is tied to the siege's reinforcement pool, the bars read the
+  // live CWReinforcementPool globals, the OG quest mechanic, depleting as the
+  // soldiers on screen fall, instead of a plain head-count.
+  if (cw_siege_pool_seeded_) {
+    *team1_frac =
+        cw_pool_atk_start_ > 0 ? std::clamp(cw_pool_atk_cur_ / cw_pool_atk_start_, 0.0f, 1.0f) : 0.0f;
+    *team2_frac =
+        cw_pool_def_start_ > 0 ? std::clamp(cw_pool_def_cur_ / cw_pool_def_start_, 0.0f, 1.0f) : 0.0f;
+    return true;
+  }
   int a, b, d;
   if (!BattleStrength(&a, &b, &d)) return false;
   *team1_frac = cw_start1_ > 0 ? static_cast<f32>(a) / static_cast<f32>(cw_start1_) : 0.0f;
@@ -613,6 +623,91 @@ u64 NpcDirector::SpawnSoldier(const Vec3& pos, i32 team) {
   return handle;
 }
 
+void NpcDirector::SeedSiegeReinforcementPools() {
+  if (cw_siege_quest_ == 0 || cw_siege_master_ == 0 || !ctx_.scripts || !ctx_.bindings) return;
+  // The pool starts at this clash's strength: one point per soldier on each side.
+  // Team 1 (the player's line) assaults, team 2 holds.
+  int atk = 0, def = 0;
+  for (u64 h : cw_field_soldiers_) {
+    ecs::Entity e = ctx_.quest_world ? ctx_.quest_world->Find(h) : ecs::kInvalidEntity;
+    const world::CombatTeam* ct = world_.Get<world::CombatTeam>(e);
+    if (ct && ct->team == 1)
+      ++atk;
+    else
+      ++def;
+  }
+  const u64 siege = cw_siege_quest_, master = cw_siege_master_;
+  auto* binds = ctx_.bindings;
+  // Seed on the script thread (the only place the siege instance is safe to
+  // touch) and hand back the two pool globals the controller writes through.
+  const std::pair<u64, u64> globals =
+      ctx_.scripts->guest()
+          .SubmitFor([siege, master, atk, def, binds](rec::script::papyrus::VirtualMachine& vm) {
+            using rec::script::papyrus::ObjectRef;
+            using rec::script::papyrus::Value;
+            using rec::script::papyrus::ValueType;
+            auto set_member = [&](const char* name, Value v) {
+              if (Value* m = vm.MemberVar(ObjectRef{siege}, name)) *m = std::move(v);
+            };
+            // Wire the controller to the CW master (whose properties carry the
+            // reinforcement-pool globals) and make the pools finite so a death
+            // actually spends one (an infinite pool no-ops by design).
+            set_member("::CWs_var", Value::Object(ObjectRef{master}));
+            set_member("::InfiniteRespawnAttacker_var", Value::Bool(false));
+            set_member("::InfiniteRespawnDefender_var", Value::Bool(false));
+            set_member("::PoolAttacker_var", Value::Float(static_cast<f32>(atk)));
+            set_member("::StartingPoolAttacker_var", Value::Float(static_cast<f32>(atk)));
+            set_member("::PoolDefender_var", Value::Float(static_cast<f32>(def)));
+            set_member("::StartingPoolDefender_var", Value::Float(static_cast<f32>(def)));
+            auto global_handle = [&](const char* prop) -> u64 {
+              Value g = vm.GetProperty(ObjectRef{master}, prop);
+              return g.type() == ValueType::kObject ? g.as_object().handle : 0;
+            };
+            const u64 atk_g = global_handle("CWReinforcementPoolAttacker");
+            const u64 def_g = global_handle("CWReinforcementPoolDefender");
+            if (atk_g) binds->SetGlobalValue(ObjectRef{atk_g}, static_cast<f32>(atk));
+            if (def_g) binds->SetGlobalValue(ObjectRef{def_g}, static_cast<f32>(def));
+            return std::pair<u64, u64>{atk_g, def_g};
+          })
+          .get();
+  cw_pool_atk_start_ = cw_pool_atk_cur_ = static_cast<f32>(atk);
+  cw_pool_def_start_ = cw_pool_def_cur_ = static_cast<f32>(def);
+  cw_siege_pool_seeded_ = true;
+  REC_INFO("cw siege: reinforcement pool seeded (attackers {}, defenders {}); globals 0x{:x}/0x{:x}",
+           atk, def, globals.first, globals.second);
+}
+
+void NpcDirector::ChargeSiegeReinforcementDeaths() {
+  if (!cw_siege_pool_seeded_ || !ctx_.scripts) return;
+  // Each soldier that newly fell spends one point of its side's pool through the
+  // siege's own ModifyPool, so the on-screen losses drive the authored mechanic.
+  std::vector<bool> attacker_died;
+  for (u64 h : cw_field_soldiers_) {
+    if (cw_pool_counted_.count(h)) continue;
+    ecs::Entity e = ctx_.quest_world ? ctx_.quest_world->Find(h) : ecs::kInvalidEntity;
+    if (!world_.IsAlive(e) || !world_.Has<world::Dead>(e)) continue;
+    const world::CombatTeam* ct = world_.Get<world::CombatTeam>(e);
+    cw_pool_counted_.insert(h);
+    const bool attacker = ct && ct->team == 1;
+    attacker_died.push_back(attacker);
+    // Mirror the spend on the main thread so the HUD bars never read the live
+    // global the script thread is writing.
+    if (attacker)
+      cw_pool_atk_cur_ = std::max(0.0f, cw_pool_atk_cur_ - 1.0f);
+    else
+      cw_pool_def_cur_ = std::max(0.0f, cw_pool_def_cur_ - 1.0f);
+  }
+  if (attacker_died.empty()) return;
+  const u64 siege = cw_siege_quest_;
+  ctx_.scripts->guest().Submit(
+      [siege, attacker_died](rec::script::papyrus::VirtualMachine& vm) {
+        using rec::script::papyrus::ObjectRef;
+        using rec::script::papyrus::Value;
+        for (bool attacker : attacker_died)
+          vm.Call(ObjectRef{siege}, "ModifyPool", {Value::Bool(attacker), Value::Int(-1)});
+      });
+}
+
 void NpcDirector::CwFieldBattleTick(f32 dt) {
   if (!cw_field_pending_ || !actors_->HasPlayer()) return;
   if (!cw_field_active_) {
@@ -685,12 +780,19 @@ void NpcDirector::CwFieldBattleTick(f32 dt) {
     auto* binds = ctx_.bindings;
     if (binds && ctx_.scripts)
       ctx_.scripts->guest().Submit([binds, handles](rec::script::papyrus::VirtualMachine&) {
-        for (u64 h : handles) binds->SetActorValue(script::papyrus::ObjectRef{h}, "health", 140.0f);
+        // The soldiers are pushed team1, team2, team1, ... so even indices are the
+        // player's assaulting line. Give it the edge so the siege resolves as a
+        // win (the fort is taken) rather than dragging to the grace timeout; the
+        // garrison still fights hard and both sides spend their reinforcements.
+        for (size_t i = 0; i < handles.size(); ++i)
+          binds->SetActorValue(script::papyrus::ObjectRef{handles[i]}, "health",
+                               (i % 2 == 0) ? 220.0f : 120.0f);
       });
     cw_field_active_ = true;
     cw_start1_ = cw_start2_ = kPerSide;  // for the reinforcement bars
     player_team_ = 1;  // the player fights on the near line; team 2 targets it too
     REC_INFO("cw field battle: spawned {} soldiers in two lines", cw_field_soldiers_.size());
+    SeedSiegeReinforcementPools();
   }
 
   int a = 0, b = 0, d = 0;
@@ -708,8 +810,16 @@ void NpcDirector::CwFieldBattleTick(f32 dt) {
   cw_battle_log_timer_ -= dt;
   if (cw_battle_log_timer_ <= 0.0f) {
     cw_battle_log_timer_ = 1.0f;
-    REC_INFO("cw field battle: team1={} team2={} fallen={} engaged={}", a, b, d, combatant_count());
+    if (cw_siege_pool_seeded_) {
+      REC_INFO("cw field battle: team1={} team2={} fallen={} | reinforcement pool atk={} def={}", a,
+               b, d, cw_pool_atk_cur_, cw_pool_def_cur_);
+    } else {
+      REC_INFO("cw field battle: team1={} team2={} fallen={} engaged={}", a, b, d,
+               combatant_count());
+    }
   }
+
+  ChargeSiegeReinforcementDeaths();
 
   // Periodically re-queue the living soldiers' spawns so a client that joined
   // after the opening broadcast still builds them (the client apply is idempotent

@@ -145,7 +145,7 @@ bool LoadGameData(Engine& engine) {
     // The open-field battle demo anchors the player on its staged dry venue, so a
     // background quest (a follower/pet setup, an auto-started scene) must not warp
     // the player off it mid-demo.
-    if (std::getenv("REC_CW_FIELD_BATTLE")) return;
+    if (std::getenv("REC_CW_FIELD_BATTLE") || std::getenv("REC_CW_SIEGE_DEMO")) return;
     // When a quest warps the player to a reference inside an interior cell (the
     // Helgen keep, say), stream that cell first so the player lands in a loaded
     // world rather than at interior-local coordinates floating in the exterior.

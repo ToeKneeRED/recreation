@@ -294,6 +294,10 @@ void QuestDirector::AttachQuestScripts() {
       });
       npc_->ArmCwFieldBattle();
       npc_->set_battle_quest(siege, 9000);  // victory -> "succeeded in taking the fort"
+      // Drive the siege's authored reinforcement pool from the on-screen losses:
+      // the HUD bars become the live CWReinforcementPool globals, depleting as
+      // soldiers fall through the quest's own ModifyPool (CW = the master quest).
+      npc_->set_battle_siege_pool(siege, FindQuestHandle("CW"));
       REC_INFO("debug: CW fort siege demo armed (win the battle to take the fort)");
     }
   }

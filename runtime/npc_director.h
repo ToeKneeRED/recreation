@@ -4,6 +4,7 @@
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include <unordered_set>
 #include <vector>
 
 #include "core/math.h"
@@ -118,6 +119,16 @@ class NpcDirector {
     cw_battle_quest_ = quest;
     cw_battle_win_stage_ = win_stage;
   }
+  // Ties a staged siege to the Civil War's authored reinforcement pool: each
+  // soldier that falls spends a point of its side's pool through the siege
+  // quest's real ModifyPool, and the HUD bars read the live CWReinforcementPool
+  // globals (so the on-screen losses drive the OG quest mechanic, not just an
+  // engine tally). Pass the siege quest and the CW master that carries the pool
+  // globals; either 0 leaves the battle on the plain engine tally.
+  void set_battle_siege_pool(u64 siege_quest, u64 cw_master) {
+    cw_siege_quest_ = siege_quest;
+    cw_siege_master_ = cw_master;
+  }
   // An elevated spectator framing of the staged field battle (eye behind one
   // line looking down the clash), so the camera shows the soldiers regardless of
   // where the player wedged on the terrain. False when no field battle is staged.
@@ -130,6 +141,12 @@ class NpcDirector {
   bool BattleGauges(f32* team1_frac, f32* team2_frac) const;
 
  private:
+  // Civil War reinforcement-pool integration: seed the siege's pools from the
+  // staged clash's strength, and spend a point per fallen soldier through the
+  // siege's own ModifyPool (see set_battle_siege_pool).
+  void SeedSiegeReinforcementPools();
+  void ChargeSiegeReinforcementDeaths();
+
   // SceneSink over the running engine: a scene guides NPCs, runs INFO fragments,
   // advances quest stages, and answers proximity queries.
   struct Mq101Sink : public quest::SceneSink {
@@ -207,6 +224,16 @@ class NpcDirector {
   f32 cw_field_resync_ = 0;  // periodic re-broadcast so a late client gets the soldiers
   u64 cw_battle_quest_ = 0;     // quest the battle outcome advances (0 = none)
   i32 cw_battle_win_stage_ = -1;
+  // Civil War authored-reinforcement-pool integration (set_battle_siege_pool).
+  u64 cw_siege_quest_ = 0;      // the fort-siege quest (carries ModifyPool); 0 = off
+  u64 cw_siege_master_ = 0;     // CW master quest (carries the pool globals)
+  bool cw_siege_pool_seeded_ = false;
+  f32 cw_pool_atk_start_ = 0, cw_pool_def_start_ = 0;    // starting strengths, for the bars
+  // Main-thread mirror of each pool, decremented as the engine charges a death.
+  // The bars read this (not the live global, which the script thread writes) so
+  // the HUD never races the guest's reinforcement writes.
+  f32 cw_pool_atk_cur_ = 0, cw_pool_def_cur_ = 0;
+  std::unordered_set<u64> cw_pool_counted_;  // soldiers already charged to the pool
   bool cw_battle_resolved_ = false;
   f32 cw_battle_grace_ = 0;     // elapsed battle time, for the resolve timeout
   u64 ambient_rng_ = 0x243f6a8885a308d3ull;
