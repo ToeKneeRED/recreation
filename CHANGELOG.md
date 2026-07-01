@@ -31,6 +31,14 @@ shows the most recent entries (the first bullet of each release is its headline)
   their own `skyrim_natives_*.cc` files behind a shared keyed state store, with
   the computed and stateful paths covered by `nativesexttest`.
 
+### Fixed
+- The optional default gamemodes (the per-game rulesets, each its own assembly)
+  failed to load: mods were loaded into the wrong assembly load context, so a
+  gamemode could not bind the SDK already in memory and its systems never
+  installed. Mods now load into the SDK's own context and share its types, so the
+  Skyrim, Fallout, and Starfield rulesets (attribute regeneration and the rest)
+  come online as intended, verified end to end by `papyrus_managed_hosttest`.
+
 ### Experimental
 - Papyrus to C# decompiler (`tools/papyrus/pex2cs`). It pulls a shipped quest
   script out of the game archives and recompiles its bytecode into recreation-SDK
