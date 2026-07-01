@@ -793,6 +793,18 @@ void NpcDirector::CwFieldBattleTick(f32 dt) {
     player_team_ = 1;  // the player fights on the near line; team 2 targets it too
     REC_INFO("cw field battle: spawned {} soldiers in two lines", cw_field_soldiers_.size());
     SeedSiegeReinforcementPools();
+    // Deferred REC_CW_SIDE enlistment: advance the intro quest now (the managed
+    // allegiance tracker is up by the time the battle stages), so the won siege
+    // captures the fort for the player's chosen side.
+    if (cw_enlist_quest_ != 0 && ctx_.scripts && ctx_.bindings) {
+      const u64 join = cw_enlist_quest_;
+      cw_enlist_quest_ = 0;
+      auto* binds = ctx_.bindings;
+      ctx_.scripts->guest().Submit([binds, join](rec::script::papyrus::VirtualMachine&) {
+        binds->StartQuest(script::papyrus::ObjectRef{join});
+        binds->SetStage(script::papyrus::ObjectRef{join}, 10);
+      });
+    }
   }
 
   int a = 0, b = 0, d = 0;

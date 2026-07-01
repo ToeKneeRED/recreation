@@ -99,6 +99,7 @@ internal static class Program
         StandingStonesTests.Run(check);
         CivilWarCampaignTests.Run(check);
         CivilWarRankTests.Run(check);
+        CivilWarEnlistmentTests.Run(check);
         DiseasesTests.Run(check);
         ShrinesTests.Run(check);
         VampirismTests.Run(check);

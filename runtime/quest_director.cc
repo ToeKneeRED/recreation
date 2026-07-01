@@ -288,6 +288,16 @@ void QuestDirector::AttachQuestScripts() {
     if (siege != 0) {
       quest_panel_.selected = siege;
       auto* binds = ctx_.bindings;
+      // REC_CW_SIDE enlists the player first (imperial|stormcloak) by advancing
+      // that side's intro quest; the C# allegiance tracker reads the side, so the
+      // won siege captures the fort for the player's chosen banner. This is the
+      // engine-side mirror of the in-game F1/F2 enlistment prompt, both just
+      // commit the join quest. Unset leaves the player unaligned (the campaign
+      // treats that as the Legion).
+      if (const char* side = std::getenv("REC_CW_SIDE")) {
+        const bool stormcloak = std::string(side) == "stormcloak";
+        npc_->set_enlist_quest(FindQuestHandle(stormcloak ? "CW00B" : "CW00A"));
+      }
       ctx_.scripts->guest().Submit([binds, siege](rec::script::papyrus::VirtualMachine&) {
         binds->StartQuest(rec::script::papyrus::ObjectRef{siege});
         binds->SetStage(rec::script::papyrus::ObjectRef{siege}, 10);  // "assist in taking the fort"

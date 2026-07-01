@@ -269,6 +269,9 @@ public sealed class FakeBackend : IEngineBackend
         LastMethodArg0 = args.Length > 0 ? args[0] : Value.None;
         switch (function)
         {
+            case "GetFormID":
+                // The form id is the handle's low 32 bits, mirroring Game.GetForm.
+                return Value.Int((int)(self & 0xFFFFFFFF));
             case "GetActorValue":
                 return Value.Float(GetCurrent(self, args[0].AsString()));
             case "GetBaseActorValue":

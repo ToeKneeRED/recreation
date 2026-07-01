@@ -129,6 +129,10 @@ class NpcDirector {
     cw_siege_quest_ = siege_quest;
     cw_siege_master_ = cw_master;
   }
+  // Enlists the player with a side by advancing its intro quest, deferred until
+  // the battle actually stages so the managed allegiance tracker (which boots
+  // after content load) is subscribed when the join fires. 0 = stay unaligned.
+  void set_enlist_quest(u64 join_quest) { cw_enlist_quest_ = join_quest; }
   // An elevated spectator framing of the staged field battle (eye behind one
   // line looking down the clash), so the camera shows the soldiers regardless of
   // where the player wedged on the terrain. False when no field battle is staged.
@@ -227,6 +231,7 @@ class NpcDirector {
   // Civil War authored-reinforcement-pool integration (set_battle_siege_pool).
   u64 cw_siege_quest_ = 0;      // the fort-siege quest (carries ModifyPool); 0 = off
   u64 cw_siege_master_ = 0;     // CW master quest (carries the pool globals)
+  u64 cw_enlist_quest_ = 0;     // intro quest to advance once the battle stages; 0 = off
   bool cw_siege_pool_seeded_ = false;
   f32 cw_pool_atk_start_ = 0, cw_pool_def_start_ = 0;    // starting strengths, for the bars
   // Main-thread mirror of each pool, decremented as the engine charges a death.

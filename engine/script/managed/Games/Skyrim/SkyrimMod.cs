@@ -55,6 +55,7 @@ public sealed class SkyrimMod : IMod
         // hold-ownership campaign board with its capture toasts and war-progress bar,
         // and the player's rank progression that climbs as the campaign advances.
         ModHost.Register(new CivilWarAllegianceTracker());
+        ModHost.Register(new CivilWarEnlistment());
         ModHost.Register(new CivilWarJournal());
         ModHost.Register(new BattleReinforcementHud());
         ModHost.Register(new CivilWarCampaignTracker());
