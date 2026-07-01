@@ -30,6 +30,14 @@ add_executable(daycycletest daycycletest.cc)
 target_link_libraries(daycycletest PRIVATE recreation::script recreation::core)
 recreation_set_warnings(daycycletest)
 
+add_executable(featuretest featuretest.cc)
+target_link_libraries(featuretest PRIVATE recreation::core)
+recreation_set_warnings(featuretest)
+
+add_executable(optiontest optiontest.cc)
+target_link_libraries(optiontest PRIVATE equilibrium::base)
+recreation_set_warnings(optiontest)
+
 add_executable(skytest skytest.cc)
 recreation_set_warnings(skytest)
 
@@ -259,6 +267,8 @@ add_test(NAME combattest COMMAND combattest)
 add_test(NAME alias_handletest COMMAND alias_handletest)
 add_test(NAME proximitytest COMMAND proximitytest)
 add_test(NAME daycycletest COMMAND daycycletest)
+add_test(NAME featuretest COMMAND featuretest)
+add_test(NAME optiontest COMMAND optiontest)
 add_test(NAME skytest COMMAND skytest)
 add_test(NAME weathertest COMMAND weathertest)
 add_test(NAME quest_aliastest COMMAND quest_aliastest)

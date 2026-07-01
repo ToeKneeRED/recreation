@@ -5,6 +5,7 @@ recreation_add_module(core
   world_clock.cc
   window.cc
   input_bindings.cc
+  feature_registry.cc
 )
 
 # equilibrium's base library; linking it here makes base:: containers and

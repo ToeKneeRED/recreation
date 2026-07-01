@@ -4,7 +4,10 @@
 #include <cstring>
 #include <utility>
 
+#include <base/option.h>
+
 #include "asset/primitives.h"
+#include "core/feature_registry.h"
 #include "core/log.h"
 #include "world/components.h"
 
@@ -15,23 +18,39 @@
 // engine translation units (see frame_loop.cc, networking.cc, content_load.cc,
 // main_menu.cc, managed_scripting.cc, camera_input.cc).
 namespace rec {
+namespace {
+// Engine-startup options. Namespace scope, so they register before
+// InitOptionsFromEnv() runs. WinW/WinH=0 keep the WindowDesc default
+// (1920x1080); they shrink the window for fast headless capture (e.g. the
+// software-rendered swrun path).
+base::Option<int> WinW{"win.width", 0, "REC_WIN_W"};
+base::Option<int> WinH{"win.height", 0, "REC_WIN_H"};
+// SunDir pins a fixed sun for headless lighting/shadow tests (its presence
+// disables the world clock driving the sun); the renderer parses the value.
+base::Option<const char*> SunDir{"sun.dir", nullptr, "REC_SUN_DIR"};
+base::Option<bool> NoOcclusion{"no.occlusion", false, "REC_NO_OCCLUSION"};
+// Timescale (0 freezes time) overrides the game's timescale; GameHour overrides
+// the mid-morning start the world boots lit at.
+base::Option<float> Timescale{"timescale", 0.0f, "REC_TIMESCALE"};
+base::Option<float> GameHour{"game.hour", 11.0f, "REC_GAME_HOUR"};
+}  // namespace
 
 bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> window) {
   config_ = config;
+  InitFeatures();              // apply REC_FEATURES overrides before any flag read
+  base::InitOptionsFromEnv();  // populate every base::Option from the environment
   jobs_ = std::make_unique<JobSystem>();
-  // REC_SUN_DIR pins a fixed sun for headless lighting/shadow tests; otherwise
-  // the world clock drives the day/night cycle. Seed the clock now so the demo
-  // and glTF scenes (which never load game data) still get a lit time of day;
-  // LoadGameData reseeds it with the game's authored timescale.
-  drive_sun_from_clock_ = std::getenv("REC_SUN_DIR") == nullptr;
+  // When SunDir is set the world clock stops driving the day/night cycle.
+  // Seed the clock now so the demo and glTF scenes (which never load game data)
+  // still get a lit time of day; LoadGameData reseeds it with the game's
+  // authored timescale.
+  drive_sun_from_clock_ = SunDir.get() == nullptr;
   ConfigureClock(20.0f);
 
   if (!config_.headless) {
-    // REC_WIN_W/REC_WIN_H shrink the window for fast headless capture (e.g. the
-    // software-rendered swrun path); default 1920x1080.
     WindowDesc desc;
-    if (const char* w = std::getenv("REC_WIN_W")) { if (int v = std::atoi(w); v > 0) desc.width = static_cast<u32>(v); }
-    if (const char* h = std::getenv("REC_WIN_H")) { if (int v = std::atoi(h); v > 0) desc.height = static_cast<u32>(v); }
+    if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
+    if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
     window_ = window ? std::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
@@ -202,7 +221,7 @@ void Engine::ApplyRenderPreset() {
   tuned.precipitation = env.precipitation;
   tuned.precip_snow = env.precip_snow;
   tuned.aurora = env.aurora;
-  if (std::getenv("REC_NO_OCCLUSION")) tuned.gpu_occlusion = false;  // a/b baseline
+  if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
   renderer_.settings() = tuned;
   REC_INFO("render preset: {} ({})", render::PresetName(resolved),
@@ -210,15 +229,9 @@ void Engine::ApplyRenderPreset() {
 }
 
 void Engine::ConfigureClock(f32 base_timescale) {
-  // REC_TIMESCALE (0 freezes time) overrides the game's timescale; REC_GAME_HOUR
-  // overrides the mid-morning start the world boots lit at.
   f32 timescale = base_timescale > 0 ? base_timescale : 20.0f;
-  if (const char* e = std::getenv("REC_TIMESCALE")) {
-    const f32 v = static_cast<f32>(std::atof(e));
-    if (v >= 0) timescale = v;
-  }
-  f32 start_hour = 11.0f;
-  if (const char* e = std::getenv("REC_GAME_HOUR")) start_hour = static_cast<f32>(std::atof(e));
+  if (Timescale.overridden() && Timescale.get() >= 0) timescale = Timescale.get();
+  const f32 start_hour = GameHour.get();
   clock_.Configure(start_hour, timescale);
   REC_INFO("day/night clock: start hour {:.1f}, timescale {:.0f}", start_hour, timescale);
 }
