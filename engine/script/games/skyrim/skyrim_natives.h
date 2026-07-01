@@ -278,6 +278,9 @@ class SkyrimBindings {
   // target) or stop (ClearKeepOffsetFromActor). Drives the NPC follow behaviour.
   virtual void SetActorFollowing(papyrus::ObjectRef actor, bool follow) {}
   virtual void EquipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) {}
+  virtual void UnequipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) {}
+  // Whether the item form is currently equipped on the actor.
+  virtual bool IsEquipped(papyrus::ObjectRef actor, papyrus::ObjectRef item) { return false; }
   virtual void AddSpell(papyrus::ObjectRef actor, papyrus::ObjectRef spell) {}
 
   // Enumerates an actor's authored faction memberships (its NPC_ record's SNAM

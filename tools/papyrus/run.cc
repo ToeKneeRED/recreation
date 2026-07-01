@@ -516,6 +516,106 @@ int SelfTest() {
           st && st->ToInt() == 0 && cl && cl->ToInt() == 4);
   }
 
+  // End-to-end equip events: EquipItem/UnequipItem flip IsEquipped and fire
+  // OnObjectEquipped/OnObjectUnequipped on the actor plus OnEquipped/OnUnequipped
+  // on the item. A "wear the guard armor" objective relies on these.
+  {
+    NativeRegistry eq_natives;
+    VirtualMachine eq_vm(&eq_natives);
+    // Actor script: records the equipped base form and counts equip/unequip fires.
+    Builder ab;
+    ab.obj.name = ab.S("EquipActor");
+    ab.obj.parent_class = ab.S("");
+    auto int_var = [](Builder& b, const char* name) {
+      MemberVariable v;
+      v.name = b.S(name);
+      v.type = b.S("Int");
+      v.initial_value = b.IntV(0);
+      return v;
+    };
+    MemberVariable worn;
+    worn.name = ab.S("::Worn_var");
+    worn.type = ab.S("Form");
+    worn.initial_value = ab.IntV(0);
+    ab.obj.variables.push_back(worn);
+    ab.obj.variables.push_back(int_var(ab, "::EqCount_var"));
+    ab.obj.variables.push_back(int_var(ab, "::UneqCount_var"));
+    Function on_eq;
+    on_eq.return_type = ab.S("");
+    on_eq.params.push_back({ab.S("akBaseObject"), ab.S("Form")});
+    on_eq.params.push_back({ab.S("akReference"), ab.S("ObjectReference")});
+    on_eq.code = {
+        Make(Op::kAssign, {ab.Id("::Worn_var"), ab.Id("akBaseObject")}),
+        Make(Op::kIAdd, {ab.Id("::EqCount_var"), ab.Id("::EqCount_var"), ab.IntV(1)}),
+        Make(Op::kReturn, {}),
+    };
+    Function on_uneq;
+    on_uneq.return_type = ab.S("");
+    on_uneq.params.push_back({ab.S("akBaseObject"), ab.S("Form")});
+    on_uneq.params.push_back({ab.S("akReference"), ab.S("ObjectReference")});
+    on_uneq.code = {
+        Make(Op::kIAdd, {ab.Id("::UneqCount_var"), ab.Id("::UneqCount_var"), ab.IntV(1)}),
+        Make(Op::kReturn, {}),
+    };
+    State adef;
+    adef.name = ab.S("");
+    adef.functions.push_back({ab.S("OnObjectEquipped"), std::move(on_eq)});
+    adef.functions.push_back({ab.S("OnObjectUnequipped"), std::move(on_uneq)});
+    ab.obj.states.push_back(std::move(adef));
+    ab.pex.objects.push_back(ab.obj);
+    eq_vm.AddScript(std::move(ab.pex));
+    ObjectRef actor = eq_vm.CreateInstance("EquipActor");
+
+    // Item script: flips a flag on OnEquipped/OnUnequipped.
+    Builder ib;
+    ib.obj.name = ib.S("EquipItemScr");
+    ib.obj.parent_class = ib.S("");
+    ib.obj.variables.push_back(int_var(ib, "::On_var"));
+    Function ion;
+    ion.return_type = ib.S("");
+    ion.params.push_back({ib.S("akActor"), ib.S("Actor")});
+    ion.code = {Make(Op::kAssign, {ib.Id("::On_var"), ib.IntV(1)}), Make(Op::kReturn, {})};
+    Function ioff;
+    ioff.return_type = ib.S("");
+    ioff.params.push_back({ib.S("akActor"), ib.S("Actor")});
+    ioff.code = {Make(Op::kAssign, {ib.Id("::On_var"), ib.IntV(0)}), Make(Op::kReturn, {})};
+    State idef;
+    idef.name = ib.S("");
+    idef.functions.push_back({ib.S("OnEquipped"), std::move(ion)});
+    idef.functions.push_back({ib.S("OnUnequipped"), std::move(ioff)});
+    ib.obj.states.push_back(std::move(idef));
+    ib.pex.objects.push_back(ib.obj);
+    eq_vm.AddScript(std::move(ib.pex));
+    ObjectRef item = eq_vm.CreateInstance("EquipItemScr");
+
+    rec::script::skyrim::RecordBackedSkyrimBindings bindings;
+    bindings.set_vm(&eq_vm);
+
+    bindings.EquipItem(actor, item);
+    Value* worn_m = eq_vm.MemberVar(actor, "::Worn_var");
+    Value* eqc = eq_vm.MemberVar(actor, "::EqCount_var");
+    Value* on_m = eq_vm.MemberVar(item, "::On_var");
+    check("EquipItem fires OnObjectEquipped (item delivered)",
+          worn_m && worn_m->as_object().handle == item.handle && eqc && eqc->ToInt() == 1);
+    check("EquipItem fires OnEquipped on the item", on_m && on_m->ToInt() == 1);
+    check("IsEquipped true after equip", bindings.IsEquipped(actor, item));
+
+    bindings.EquipItem(actor, item);  // already equipped: no second fire
+    eqc = eq_vm.MemberVar(actor, "::EqCount_var");
+    check("re-equip does not re-fire", eqc && eqc->ToInt() == 1);
+
+    bindings.UnequipItem(actor, item);
+    Value* uneqc = eq_vm.MemberVar(actor, "::UneqCount_var");
+    on_m = eq_vm.MemberVar(item, "::On_var");
+    check("UnequipItem fires OnObjectUnequipped", uneqc && uneqc->ToInt() == 1);
+    check("UnequipItem fires OnUnequipped on the item", on_m && on_m->ToInt() == 0);
+    check("IsEquipped false after unequip", !bindings.IsEquipped(actor, item));
+
+    bindings.UnequipItem(actor, item);  // not equipped: no second fire
+    uneqc = eq_vm.MemberVar(actor, "::UneqCount_var");
+    check("re-unequip does not re-fire", uneqc && uneqc->ToInt() == 1);
+  }
+
   // Alias death dispatch: an actor that fills a quest alias should deliver its
   // death to the alias's OnDeath script. This is the Civil War reinforcement
   // path, a soldier dies and its CWReinforcementAliasScript.OnDeath runs.

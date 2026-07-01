@@ -286,8 +286,9 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
   reg.Register("Actor", "IsDetectedBy",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
-  reg.Register("Actor", "IsEquipped",
-               [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
+  reg.Register("Actor", "IsEquipped", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    return Value::Bool(Resolve(bindings).IsEquipped(self, ArgO(a, 0)));
+  });
   reg.Register("Actor", "IsFlying",
                [](VirtualMachine&, ObjectRef, Args&) { return Value::Bool(false); });
   reg.Register("Actor", "IsGuard",
@@ -375,7 +376,10 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
   reg.Register("Actor", "StartDeferredKill", noop);
   reg.Register("Actor", "StartVampireFeed", noop);
   reg.Register("Actor", "UnequipAll", noop);
-  reg.Register("Actor", "UnequipItem", noop);
+  reg.Register("Actor", "UnequipItem", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
+    Resolve(bindings).UnequipItem(self, ArgO(a, 0));
+    return Value();
+  });
   reg.Register("Actor", "UnequipItemSlot", noop);
   reg.Register("Actor", "UnLockOwnedDoorsInCell", noop);
 }

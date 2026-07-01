@@ -362,6 +362,12 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   i32 GetItemCount(papyrus::ObjectRef container, papyrus::ObjectRef item) override;
   void AddItem(papyrus::ObjectRef container, papyrus::ObjectRef item, i32 count) override;
   void RemoveItem(papyrus::ObjectRef container, papyrus::ObjectRef item, i32 count) override;
+  // Equip (new system): tracks which item forms each actor has equipped and fires
+  // the equip events. EquipItem raises OnObjectEquipped on the actor and OnEquipped
+  // on the item; UnequipItem the Unequipped pair. Both dispatch to filled aliases.
+  void EquipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) override;
+  void UnequipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) override;
+  bool IsEquipped(papyrus::ObjectRef actor, papyrus::ObjectRef item) override;
   i32 GetNumItems(papyrus::ObjectRef container) override;
   papyrus::ObjectRef GetNthForm(papyrus::ObjectRef container, i32 index) override;
   papyrus::ObjectRef GetLinkedRef(papyrus::ObjectRef ref, papyrus::ObjectRef keyword) override;
@@ -459,6 +465,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   papyrus::ObjectRef player_;
   std::unordered_map<u64, std::unordered_map<std::string, ActorValue>> actor_values_;
   std::unordered_map<u64, std::unordered_map<u64, i32>> inventory_;
+  std::unordered_map<u64, std::unordered_set<u64>> equipped_;  // actor -> equipped item forms
   std::unordered_map<u64, std::array<f32, 3>> positions_;  // SetPosition/MoveTo overrides
   std::unordered_map<u64, f32> scales_;                    // SetScale overrides (default 1.0)
   struct LockState {

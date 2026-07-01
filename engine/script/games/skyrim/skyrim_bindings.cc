@@ -1044,6 +1044,32 @@ void RecordBackedSkyrimBindings::RemoveItem(ObjectRef container, ObjectRef item,
   EmitManagedEvent(host::ManagedEventId::kItemRemoved, container.handle, item.handle, removed);
 }
 
+void RecordBackedSkyrimBindings::EquipItem(ObjectRef actor, ObjectRef item) {
+  if (actor.handle == 0 || item.handle == 0) return;
+  if (!equipped_[actor.handle].insert(item.handle).second) return;  // already equipped
+  // OnObjectEquipped(akBaseObject, akReference) on the actor and any alias it
+  // fills; akReference is None since we equip base forms, not placed refs. The
+  // item's own script hears OnEquipped(akActor).
+  const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
+  RaiseFormAndAliasEvent(actor.handle, "OnObjectEquipped", {papyrus::Value::Object(item), none});
+  RaiseFormEvent(item.handle, "OnEquipped", {papyrus::Value::Object(actor)});
+}
+
+void RecordBackedSkyrimBindings::UnequipItem(ObjectRef actor, ObjectRef item) {
+  if (actor.handle == 0 || item.handle == 0) return;
+  auto it = equipped_.find(actor.handle);
+  if (it == equipped_.end() || it->second.erase(item.handle) == 0) return;  // was not equipped
+  if (it->second.empty()) equipped_.erase(it);
+  const papyrus::Value none = papyrus::Value::Object(ObjectRef{0});
+  RaiseFormAndAliasEvent(actor.handle, "OnObjectUnequipped", {papyrus::Value::Object(item), none});
+  RaiseFormEvent(item.handle, "OnUnequipped", {papyrus::Value::Object(actor)});
+}
+
+bool RecordBackedSkyrimBindings::IsEquipped(ObjectRef actor, ObjectRef item) {
+  auto it = equipped_.find(actor.handle);
+  return it != equipped_.end() && it->second.count(item.handle) != 0;
+}
+
 i32 RecordBackedSkyrimBindings::GetStage(ObjectRef quest) {
   return quest_system_.GetStage(quest.handle);
 }
