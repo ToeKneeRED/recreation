@@ -144,6 +144,17 @@ jobs:
           repository: Force67/libultragui
           path: libultragui
           submodules: recursive
+      # Put cl/link on PATH so the Ninja generator (used below instead of the
+      # slower MSBuild generator) can find the compiler.
+      - name: msvc dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      # Real-time scanning of every .obj/.lib/.exe dominates Windows build time on
+      # the hosted runner; exclude the workspace for the duration of the job.
+      - name: exclude workspace from Defender
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
       - name: deps (dxc, glslang, freetype, harfbuzz, pkg-config)
         shell: pwsh
         run: |
@@ -158,20 +169,20 @@ jobs:
           bash tools/get_jolt.sh
       - name: configure
         run: >
-          cmake -B build -DRECREATION_FETCH_SDL3=ON -DRECREATION_MIMALLOC=ON
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_MIMALLOC=ON
           -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
           -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
           -DRECREATION_DLSS=OFF
       - name: build
-        run: cmake --build build --config Release
+        run: cmake --build build
       - uses: actions/upload-artifact@v4
         with:
           name: recreation-windows-x64
           path: |
-            build/runtime/Release/recreation.exe
-            build/runtime/Release/mimalloc.dll
-            build/runtime/Release/mimalloc-redirect.dll
-            build/tools/esminfo/Release/esminfo.exe
+            build/runtime/recreation.exe
+            build/runtime/mimalloc.dll
+            build/runtime/mimalloc-redirect.dll
+            build/tools/esminfo/esminfo.exe
 
   macos:
     runs-on: macos-latest
