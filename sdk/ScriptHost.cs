@@ -92,6 +92,31 @@ public static unsafe class ScriptHost
         return SdkSelfTest.Run();
     }
 
+    // Reports the effective GC configuration back to the native gcprofiletest
+    // harness, so a test can confirm the per-platform runtime properties ClrHost
+    // set actually took effect (a heap hard limit shows up as a bounded
+    // TotalAvailableMemoryBytes; server GC flips IsServerGC).
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GcInfo
+    {
+        public long TotalAvailableBytes;  // GC's memory ceiling (the heap hard limit, if set)
+        public long HeapSizeBytes;        // currently allocated managed heap
+        public int IsServerGc;            // 0 workstation, 1 server
+        public int LatencyMode;           // System.Runtime.GCLatencyMode
+    }
+
+    [UnmanagedCallersOnly]
+    public static int GcReport(void* infoPtr)
+    {
+        var g = (GcInfo*)infoPtr;
+        GCMemoryInfo info = GC.GetGCMemoryInfo();
+        g->TotalAvailableBytes = info.TotalAvailableMemoryBytes;
+        g->HeapSizeBytes = GC.GetTotalMemory(forceFullCollection: false);
+        g->IsServerGc = System.Runtime.GCSettings.IsServerGC ? 1 : 0;
+        g->LatencyMode = (int)System.Runtime.GCSettings.LatencyMode;
+        return 0;
+    }
+
     // Correctness check for the engine boundary, driven by the native bridgetest
     // harness both cross-thread (host thread -> guest hop) and on the guest thread
     // (Dispatch fast path). Runs a battery of calls through NativeBackend and

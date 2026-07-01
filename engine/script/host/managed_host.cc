@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "core/log.h"
+#include "script/host/managed_gc_profile.h"
 #include "script/papyrus_guest.h"
 
 namespace rec::script::host {
@@ -38,8 +39,14 @@ bool ManagedHost::Boot(const std::string& dotnet_root, const std::string& runtim
   handshake_.rpc = rpc_bridge_;  // emit/on null when networking is off
   handshake_.realm = realm_;     // server / client / standalone
 
+  // Apply the per-platform / per-role GC and heap profile to the runtime before
+  // it starts. Keyed by realm (dedicated server vs client vs standalone) and the
+  // build platform; RECREATION_MANAGED_GC* env vars override.
+  const std::string gc_profile = ResolveGcProfileName(realm_);
+  REC_INFO("managed: GC profile '{}'", gc_profile);
   if (!clr_.Initialize(dotnet_root, runtime_config, assembly,
-                       "Recreation.ScriptHost, Recreation.Scripting", "Main")) {
+                       "Recreation.ScriptHost, Recreation.Scripting", "Main",
+                       ManagedGcProfile(gc_profile))) {
     REC_INFO("managed: .NET host unavailable, scripting disabled");
     return false;
   }

@@ -60,6 +60,7 @@ const char_t* const kUnmanagedCallersOnly = reinterpret_cast<const char_t*>(-1);
 
 using init_for_runtime_config_fn = int (*)(const char_t*, const void*, hostfxr_handle*);
 using get_runtime_delegate_fn = int (*)(hostfxr_handle, int, void**);
+using set_runtime_property_fn = int (*)(hostfxr_handle, const char_t*, const char_t*);
 using close_fn = int (*)(hostfxr_handle);
 using load_assembly_and_get_function_pointer_fn = int (*)(const char_t*, const char_t*,
                                                           const char_t*, const char_t*, void*,
@@ -90,7 +91,8 @@ ClrHost::~ClrHost() { Shutdown(); }
 
 bool ClrHost::Initialize(const std::string& dotnet_root, const std::string& runtime_config_path,
                          const std::string& assembly_path, const std::string& type_name,
-                         const std::string& method_name) {
+                         const std::string& method_name,
+                         const std::vector<std::pair<std::string, std::string>>& properties) {
   std::string root = dotnet_root;
   if (root.empty()) {
     if (const char* env = std::getenv("DOTNET_ROOT")) root = env;
@@ -128,6 +130,29 @@ bool ClrHost::Initialize(const std::string& dotnet_root, const std::string& runt
     return false;
   }
   host_handle_ = handle;
+
+  // Apply the runtime configuration properties (the per-platform GC/heap profile)
+  // now, after initialize but before get_runtime_delegate starts the runtime:
+  // GC mode and heap-limit knobs are read once at startup, so this is the only
+  // window in which they take effect.
+  if (!properties.empty()) {
+    auto set_prop = reinterpret_cast<set_runtime_property_fn>(
+        OsGetSymbol(library_, "hostfxr_set_runtime_property_value"));
+    if (!set_prop) {
+      REC_WARN("clr: hostfxr_set_runtime_property_value unavailable; GC profile not applied");
+    } else {
+      for (const auto& kv : properties) {
+        const auto name = ToCharT(kv.first);
+        const auto value = ToCharT(kv.second);
+        const int prc = set_prop(handle, name.c_str(), value.c_str());
+        if (prc != 0)
+          REC_WARN("clr: runtime property {}={} rejected: 0x{:x}", kv.first, kv.second,
+                   static_cast<unsigned>(prc));
+        else
+          REC_INFO("clr: runtime property {}={}", kv.first, kv.second);
+      }
+    }
+  }
 
   void* load_ptr = nullptr;
   rc = get_delegate(handle, kHdtLoadAssemblyAndGetFunctionPointer, &load_ptr);

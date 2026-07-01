@@ -371,6 +371,12 @@ if(DOTNET_EXE)
   # must report identical, correct results (correctness only, no timing).
   add_test(NAME papyrus_bridgetest COMMAND pexrun bridgetest ${MANAGED_CFG} ${MANAGED_DLL})
   set_tests_properties(papyrus_bridgetest PROPERTIES FIXTURES_REQUIRED managed_fx)
+
+  # Confirms the per-platform GC profile actually reaches the runtime: applies a
+  # heap hard limit and reads back the effective GC config through the managed
+  # GcReport probe (a bounded memory ceiling proves the property took effect).
+  add_test(NAME papyrus_gcprofiletest COMMAND pexrun gcprofiletest ${MANAGED_CFG} ${MANAGED_DLL})
+  set_tests_properties(papyrus_gcprofiletest PROPERTIES FIXTURES_REQUIRED managed_fx)
 else()
   message(STATUS "dotnet not found: managed scripting tests disabled")
 endif()

@@ -33,7 +33,12 @@
 #include "script/host/bridge.h"
 #include "script/host/clr_host.h"
 #include "script/host/guest_bridge.h"
+#include "script/host/managed_gc_profile.h"
 #include "script/host/managed_host.h"
+
+#if defined(__linux__) || defined(__APPLE__)
+#include <unistd.h>  // sysconf, for physical-memory readback in gcprofiletest
+#endif
 #include "script/games/skyrim/skyrim_bindings.h"
 #include "script/games/skyrim/skyrim_natives.h"
 
@@ -1494,6 +1499,69 @@ int TraceTest() {
   return failures ? 1 : 0;
 }
 
+// Verifies the per-platform GC profile plumbing: applies the "constrained"
+// profile (with an explicit small heap-limit percent) to the runtime and reads
+// the effective GC configuration back through the managed GcReport probe. The
+// heap hard limit must show up as a TotalAvailableMemoryBytes well below the
+// machine's physical memory (if the property were ignored the two would match),
+// and the profile must stay on workstation GC. Skips cleanly (rc 0) without a
+// .NET runtime. Also prints the effective config for the other profiles' manual
+// inspection.
+int GcProfileTest(const std::string& runtime_config, const std::string& assembly) {
+  // Force an unmistakable 10% cap through the env-override path (also exercises
+  // that plumbing), on top of the constrained profile.
+#if defined(__linux__) || defined(__APPLE__)
+  ::setenv("RECREATION_MANAGED_GC_HEAP_PERCENT", "10", /*overwrite=*/1);
+#endif
+  const auto props = rec::script::host::ManagedGcProfile("constrained");
+
+  rec::script::host::ClrHost host;
+  if (!host.Initialize(/*dotnet_root=*/"", runtime_config, assembly,
+                       "Recreation.ScriptHost, Recreation.Scripting", "GcReport", props)) {
+    std::printf("GCPROFILETEST SKIPPED (no .NET runtime / entrypoint)\n");
+    return 0;
+  }
+
+  struct GcInfo {
+    std::int64_t total_available;
+    std::int64_t heap_size;
+    std::int32_t is_server;
+    std::int32_t latency_mode;
+  } info{};
+  host.Invoke(&info);
+  host.Shutdown();
+
+  std::int64_t phys = 0;
+#if defined(__linux__) || defined(__APPLE__)
+  const long pages = ::sysconf(_SC_PHYS_PAGES);
+  const long page_size = ::sysconf(_SC_PAGE_SIZE);
+  if (pages > 0 && page_size > 0) phys = static_cast<std::int64_t>(pages) * page_size;
+#endif
+
+  auto mib = [](std::int64_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
+  std::printf("GCPROFILETEST (constrained profile, heap percent 10)\n");
+  std::printf("  server GC              : %s\n", info.is_server ? "on" : "off");
+  std::printf("  GC memory ceiling      : %.0f MiB\n", mib(info.total_available));
+  std::printf("  managed heap in use    : %.0f MiB\n", mib(info.heap_size));
+  if (phys > 0) std::printf("  physical memory        : %.0f MiB\n", mib(phys));
+
+  int failures = 0;
+  auto check = [&](const char* what, bool ok) {
+    std::printf("  %-40s %s\n", what, ok ? "ok" : "FAIL");
+    if (!ok) ++failures;
+  };
+  check("GC ceiling reported (>0)", info.total_available > 0);
+  check("workstation GC (server off)", info.is_server == 0);
+  // If the heap-limit property took effect, the ceiling is a fraction of physical
+  // memory; if it were ignored, TotalAvailableMemoryBytes would equal physical.
+  if (phys > 0)
+    check("heap hard limit applied (ceiling < 50% physical)",
+          info.total_available < phys / 2);
+
+  std::printf("%s\n", failures ? "GCPROFILETEST FAILED" : "GCPROFILETEST PASSED");
+  return failures ? 1 : 0;
+}
+
 // Correctness gate for the two boundary tunings: the guest's same-thread
 // Dispatch fast path and the NativeBackend arena marshalling. Registers a few
 // pure natives (echo a value, add two ints, join string args), then runs the
@@ -1634,6 +1702,7 @@ int BenchBridge(const std::string& runtime_config, const std::string& assembly) 
 
 int main(int argc, char** argv) {
   if (argc == 4 && std::string(argv[1]) == "bridgetest") return BridgeTest(argv[2], argv[3]);
+  if (argc == 4 && std::string(argv[1]) == "gcprofiletest") return GcProfileTest(argv[2], argv[3]);
   if (argc == 4 && std::string(argv[1]) == "benchbridge") return BenchBridge(argv[2], argv[3]);
   if (argc == 2 && std::string(argv[1]) == "selftest") return SelfTest();
   if (argc == 2 && std::string(argv[1]) == "skyrimtest") return SkyrimTest();

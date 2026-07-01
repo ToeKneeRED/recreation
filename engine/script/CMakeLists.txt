@@ -13,6 +13,7 @@ recreation_add_module(script
   script_system.cc
   host/clr_host.cc
   host/guest_bridge.cc
+  host/managed_gc_profile.cc
   host/managed_host.cc
   games/skyrim/skyrim_natives.cc
   games/skyrim/skyrim_native_state.cc

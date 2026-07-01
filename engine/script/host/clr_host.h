@@ -2,6 +2,8 @@
 #define RECREATION_SCRIPT_HOST_CLR_HOST_H_
 
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace rec::script::host {
 
@@ -28,11 +30,18 @@ class ClrHost {
   //                  falls back to the DOTNET_ROOT environment variable.
   //   type_name    : assembly-qualified, e.g. "Recreation.ScriptHost, Recreation.Scripting".
   //   method_name  : the [UnmanagedCallersOnly] static method.
+  //   properties   : runtime configuration properties (name/value) applied to the
+  //                  runtime before it starts, e.g. the per-platform GC/heap
+  //                  profile ("System.GC.Server", "System.GC.HeapHardLimitPercent",
+  //                  ...). Must be set before the runtime is started, which is why
+  //                  they go through here rather than after Invoke. A property the
+  //                  runtime rejects is logged and skipped, not fatal.
   // Returns false (and leaves available() false) if .NET is not present or the
   // entrypoint cannot be resolved.
   bool Initialize(const std::string& dotnet_root, const std::string& runtime_config_path,
                   const std::string& assembly_path, const std::string& type_name,
-                  const std::string& method_name);
+                  const std::string& method_name,
+                  const std::vector<std::pair<std::string, std::string>>& properties = {});
 
   bool available() const { return entry_ != nullptr; }
 
