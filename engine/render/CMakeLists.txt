@@ -36,15 +36,42 @@ recreation_add_module(render
   geometry/fur.cc
   geometry/wboit.cc
   geometry/gaussian.cc
-  util/shader_util.cc
   util/exr_write.cc
   util/gpu_profiler.cc
   util/stb_impl.cc
-  vulkan/vk_device.cc
-  vulkan/vk_swapchain.cc
-  vulkan/vk_resources.cc
-  vulkan/vma_impl.cc
+  rhi/rhi.cc
+  null/null_device.cc
 )
+
+# Graphics backends. Vulkan is the default everywhere it can run; d3d12 is the
+# native windows/xbox path (skeleton). The null backend is always built.
+option(RECREATION_RHI_VULKAN "Build the Vulkan render backend" ON)
+if(WIN32)
+  option(RECREATION_RHI_D3D12 "Build the D3D12 render backend" ON)
+else()
+  option(RECREATION_RHI_D3D12 "Build the D3D12 render backend" OFF)
+endif()
+
+if(RECREATION_RHI_VULKAN)
+  target_sources(recreation_render PRIVATE
+    vulkan/vk_device.cc
+    vulkan/vk_swapchain.cc
+    vulkan/vk_command_list.cc
+    vulkan/vk_convert.cc
+    vulkan/vk_interop.cc
+    vulkan/vma_impl.cc
+    util/shader_util.cc
+  )
+  # PUBLIC: interop consumers (gui backend, thumbnailer, upscalers) gate their
+  # Vulkan paths on this define.
+  target_compile_definitions(recreation_render PUBLIC RECREATION_RHI_VULKAN)
+endif()
+
+if(RECREATION_RHI_D3D12)
+  target_sources(recreation_render PRIVATE d3d12/d3d12_device.cc)
+  target_compile_definitions(recreation_render PUBLIC RECREATION_RHI_D3D12)
+  target_link_libraries(recreation_render PRIVATE d3d12 dxgi)
+endif()
 
 target_link_libraries(recreation_render
   PUBLIC recreation::core recreation::asset volk GPUOpen::VulkanMemoryAllocator)
