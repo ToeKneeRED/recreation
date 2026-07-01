@@ -312,7 +312,10 @@ void VulkanCommandList::BuildTlas(AccelStructHandle tlas, const GpuBuffer& insta
   info.geometryCount = 1;
   info.pGeometries = &geometry;
   info.dstAccelerationStructure = record->accel;
-  info.scratchData.deviceAddress = scratch.address;
+  // The caller sizes the scratch buffer with alignment slack; align here so
+  // every backend gets a correctly aligned scratch base.
+  u64 alignment = device_.caps().accel_scratch_alignment;
+  info.scratchData.deviceAddress = (scratch.address + alignment - 1) & ~(alignment - 1);
 
   VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = instance_count};
   const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;

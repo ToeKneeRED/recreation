@@ -38,24 +38,24 @@ class ReconPathTracer {
     u32 debug_mode = 0;              // 0 final, 1 lighting, 2 history, 3 variance, 4 motion, 5 normal, 6 albedo
   };
 
-  bool Initialize(Device& device, VkDescriptorSetLayout bindless_layout);
-  void Resize(Device& device, VkExtent2D extent);
+  bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
+  void Resize(Device& device, Extent2D extent);
   void Destroy(Device& device);
 
   // Reconstructs the path-traced image into output (scene_color, an hdr storage
   // image), in place of the raster path.
   void AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
-                  VkDescriptorSet bindless_set, VkImageView sky_view, VkSampler sky_sampler,
+                  BindingSetHandle bindless_set, TextureView sky_view, SamplerHandle sky_sampler,
                   ResourceHandle output, const Frame& frame);
 
  private:
   struct PingPong {
     GpuImage image[2];
-    VkImageLayout layout[2] = {VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_UNDEFINED};
+    ResourceState state[2] = {ResourceState::kUndefined, ResourceState::kUndefined};
   };
 
-  bool CreatePipelines(Device& device, VkDescriptorSetLayout bindless_layout);
-  void CreateBuffers(Device& device, VkExtent2D extent);
+  bool CreatePipelines(Device& device, BindingLayoutHandle bindless_layout);
+  void CreateBuffers(Device& device, Extent2D extent);
   void DestroyBuffers(Device& device);
 
   // Reusable per-signal reconstruction (diffuse irradiance and specular both run
@@ -69,26 +69,15 @@ class ReconPathTracer {
                            ResourceHandle mo_c, u32 passes, bool spec);
 
   Device* device_ = nullptr;
-  VkExtent2D extent_{};
+  Extent2D extent_{};
   u32 spp_ = 1;
   u32 bounces_ = 2;
 
   // gbuffer (set 0: 7 storage + tlas + sky; set 1: bindless)
-  VkDescriptorSetLayout gbuffer_set_ = VK_NULL_HANDLE;
-  VkPipelineLayout gbuffer_layout_ = VK_NULL_HANDLE;
-  VkPipeline gbuffer_pipeline_ = VK_NULL_HANDLE;
-  // temporal
-  VkDescriptorSetLayout temporal_set_ = VK_NULL_HANDLE;
-  VkPipelineLayout temporal_layout_ = VK_NULL_HANDLE;
-  VkPipeline temporal_pipeline_ = VK_NULL_HANDLE;
-  // atrous
-  VkDescriptorSetLayout atrous_set_ = VK_NULL_HANDLE;
-  VkPipelineLayout atrous_layout_ = VK_NULL_HANDLE;
-  VkPipeline atrous_pipeline_ = VK_NULL_HANDLE;
-  // composite
-  VkDescriptorSetLayout composite_set_ = VK_NULL_HANDLE;
-  VkPipelineLayout composite_layout_ = VK_NULL_HANDLE;
-  VkPipeline composite_pipeline_ = VK_NULL_HANDLE;
+  PipelineHandle gbuffer_pipeline_;
+  PipelineHandle temporal_pipeline_;
+  PipelineHandle atrous_pipeline_;
+  PipelineHandle composite_pipeline_;
 
   // Cross-frame ping-pong buffers (indexed by frame_index & 1).
   PingPong accum_;        // rgba16f accumulated diffuse irradiance + variance
