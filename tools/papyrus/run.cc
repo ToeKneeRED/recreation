@@ -500,6 +500,20 @@ int SelfTest() {
     bindings.StopCombat(fighter);
     cl = cs_vm.MemberVar(fighter, "::Calls_var");
     check("redundant StopCombat does not re-fire", cl && cl->ToInt() == 2);
+
+    // A target dying pulls its attacker out of combat with an OnCombatStateChanged(0),
+    // not a silent erase: the fighter re-engages a foe, the foe dies, and the
+    // fighter's handler must see the leaving-combat transition.
+    bindings.SetActorValue(fighter, "health", 100.0f);
+    const ObjectRef doomed{0xF0E03};
+    bindings.SetActorValue(doomed, "health", 10.0f);
+    bindings.StartCombat(fighter, doomed);  // call 3: state 1
+    bindings.ApplyMeleeHit(fighter, doomed, 999.0f);  // doomed dies -> fighter disengages
+    check("target death disengages the attacker", !bindings.IsInCombat(fighter));
+    st = cs_vm.MemberVar(fighter, "::State_var");
+    cl = cs_vm.MemberVar(fighter, "::Calls_var");
+    check("target death fires OnCombatStateChanged(0) on the survivor",
+          st && st->ToInt() == 0 && cl && cl->ToInt() == 4);
   }
 
   // Alias death dispatch: an actor that fills a quest alias should deliver its

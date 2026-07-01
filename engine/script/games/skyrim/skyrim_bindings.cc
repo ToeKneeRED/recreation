@@ -782,15 +782,17 @@ void RecordBackedSkyrimBindings::MaybeNotifyDeath(ObjectRef actor) {
   // script runs, the Civil War reinforcement soldiers decrement their pool this way.
   RaiseFormAndAliasEvent(actor.handle, "OnDeath", {killer});
   EmitManagedEvent(host::ManagedEventId::kActorDied, actor.handle, last_attacker_.handle, 0);
-  // Drop the dead actor from combat (its own target, and anyone fighting it) and
-  // tell the main-thread driver, so soldiers stop swinging at a corpse.
+  // Drop the dead actor from combat and tell the main-thread driver, so soldiers
+  // stop swinging at a corpse. The corpse leaves combat silently (it is dead, no
+  // OnCombatStateChanged). Everyone who was fighting it transitions out of combat
+  // through StopCombat instead, so their OnCombatStateChanged(0) fires. Collect
+  // the survivors first: StopCombat erases from combat_target_ and its handler may
+  // mutate it, so we must not hold an iterator across the call.
   combat_target_.erase(actor.handle);
-  for (auto it = combat_target_.begin(); it != combat_target_.end();) {
-    if (it->second == actor.handle)
-      it = combat_target_.erase(it);
-    else
-      ++it;
-  }
+  std::vector<u64> disengaging;
+  for (const auto& [fighter, target] : combat_target_)
+    if (target == actor.handle) disengaging.push_back(fighter);
+  for (u64 fighter : disengaging) StopCombat(ObjectRef{fighter});
   if (world_sink_) world_sink_->ActorDied(active_quest_, actor.handle);
 }
 
