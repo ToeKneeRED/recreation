@@ -62,6 +62,7 @@ void ServerSession::Tick(ecs::World& world, f32 dt) {
     BroadcastSnapshot(world);
     BroadcastQuests();
     BroadcastActors();
+    BroadcastWarMap();
   }
   // Heartbeat for dedicated server logs.
   if (tick_ % (static_cast<u64>(config_.tick_rate) * 30) == 0) {
@@ -291,6 +292,18 @@ void ServerSession::BroadcastQuests() {
                           tx::network::PacketPriority::Medium));
 }
 
+void ServerSession::BroadcastWarMap() {
+  if (!war_map_source_ || clients_.size() == 0) return;
+  std::vector<u8> blob = EncodeWarMap(war_map_source_());
+  // Skip unchanged ticks, but always re-send when a new client joins so a late
+  // joiner gets the current front rather than waiting for the next capture.
+  if (blob == last_war_map_blob_ && clients_.size() == last_war_map_clients_) return;
+  last_war_map_blob_ = blob;
+  last_war_map_clients_ = clients_.size();
+  server_.Push(MakePacket(tx::network::ZPeerId::to_all, MessageType::kWarMap, std::move(blob),
+                          /*reliable=*/true, tx::network::PacketPriority::Low));
+}
+
 void ServerSession::BroadcastActors() {
   if (!actor_source_ || clients_.size() == 0) return;
   std::vector<ActorState> changed = actor_replicator_.Build(actor_source_());
@@ -514,6 +527,17 @@ void ClientSession::PollMessages(ecs::World& world) {
           objective_marker_sink_(*marker);
         } else {
           REC_WARN("net: dropped corrupt objective marker");
+        }
+        break;
+      }
+      case MessageType::kWarMap: {
+        if (!war_map_sink_) break;
+        const ByteSpan blob(reinterpret_cast<const u8*>(packet.data.data()),
+                            packet.data.size());
+        if (auto board = DecodeWarMap(blob)) {
+          war_map_sink_(*board);
+        } else {
+          REC_WARN("net: dropped corrupt war map");
         }
         break;
       }

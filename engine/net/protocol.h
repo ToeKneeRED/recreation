@@ -40,6 +40,7 @@ enum class MessageType : u16 {
   kAssetRequest = 114,    // client -> server: content hashes the client wants streamed
   kRpcCall = 115,         // either direction: an encoded scripting RPC (rpc::EncodeCall)
   kAssetReady = 116,      // client -> server: the client finished streaming the mods
+  kWarMap = 117,          // server -> clients: the Civil War campaign board
 };
 
 inline tx::network::PacketType ToPacketType(MessageType type) {

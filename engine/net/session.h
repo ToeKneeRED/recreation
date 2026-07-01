@@ -14,6 +14,7 @@
 #include "ecs/world.h"
 #include "net/actor_sync.h"
 #include "net/objective_marker_net.h"
+#include "net/war_map_net.h"
 #include "net/protocol.h"
 #include "net/quest_replication.h"
 #include "net/replication.h"
@@ -90,6 +91,11 @@ class ServerSession final : public Session {
   // the clients' pip), not every tick.
   void SendObjectiveMarker(const ObjectiveMarkerState& m);
 
+  // The Civil War campaign board to replicate. The authoritative campaign C#
+  // runs only on the host, so the session ships the board to clients (on change
+  // or when a client joins) for their war-map panel. When unset, none ships.
+  void SetWarMapSource(std::function<WarMapState()> source) { war_map_source_ = std::move(source); }
+
   // Broadcasts a batch of quest-driven world commands (already drained and
   // applied locally by the host) to every client on the reliable channel. A
   // no-op when there are no clients or the list is empty.
@@ -156,6 +162,7 @@ class ServerSession final : public Session {
   void BroadcastSnapshot(ecs::World& world);
   void BroadcastQuests();
   void BroadcastActors();
+  void BroadcastWarMap();
 
   SessionConfig config_;
   tx::network::ZServer server_;
@@ -164,6 +171,9 @@ class ServerSession final : public Session {
   base::UnorderedMap<u32, RemoteClient> clients_;
   base::Vector<u32> scratch_dropped_;
   std::function<std::vector<DomainQuestStatus>()> quest_source_;
+  std::function<WarMapState()> war_map_source_;
+  std::vector<u8> last_war_map_blob_;   // last board sent, to skip unchanged ticks
+  size_t last_war_map_clients_ = 0;     // re-send the board when a new client joins
   std::function<void(const StageRequest&)> stage_request_sink_;
   std::function<void(u64)> activate_sink_;
   std::function<void(u64)> dialogue_sink_;
@@ -227,6 +237,13 @@ class ClientSession final : public Session {
     objective_marker_sink_ = std::move(sink);
   }
 
+  // Sink invoked once per kWarMap received. The engine wires this to mirror the
+  // host's Civil War board onto the client's war-map panel. When unset, the
+  // board is decoded and dropped.
+  void SetWarMapSink(std::function<void(const WarMapState&)> sink) {
+    war_map_sink_ = std::move(sink);
+  }
+
   // The client's scripting RPC channel. Always present once Start succeeds; the
   // engine registers handlers and emits server-bound calls through it.
   RpcClientChannel* rpc() { return rpc_.get(); }
@@ -250,6 +267,7 @@ class ClientSession final : public Session {
   std::unique_ptr<RpcClientChannel> rpc_;
   std::function<void(u8 domain, const quest::QuestStatus&)> quest_sink_;
   std::function<void(const ObjectiveMarkerState&)> objective_marker_sink_;
+  std::function<void(const WarMapState&)> war_map_sink_;
   std::function<void(const std::vector<world::WorldCommand>&)> world_command_sink_;
   std::function<void(const std::vector<ActorState>&)> actor_sink_;
   PlayerInput input_;

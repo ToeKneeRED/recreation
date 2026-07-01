@@ -7,6 +7,7 @@ recreation_add_module(net
   rpc_channel.cc
   session.cc
   stage_request.cc
+  war_map_net.cc
   world_replication.cc
 )
 

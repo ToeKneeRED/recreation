@@ -95,6 +95,18 @@ bool StartNetworking(Engine& engine) {
         }
         return all;
       });
+      // The Civil War campaign board is C# state on the host only, so replicate
+      // it: the session ships it to clients whenever it changes (or one joins).
+      self->server_session_->SetWarMapSource([self]() -> net::WarMapState {
+        net::WarMapState board;
+        std::vector<script::skyrim::RecordBackedSkyrimBindings::WarHold> holds;
+        f32 fraction = 0.0f;
+        self->script_bindings_->SnapshotWarMap(holds, fraction);
+        board.imperial_fraction = fraction;
+        board.holds.reserve(holds.size());
+        for (const auto& h : holds) board.holds.push_back({h.name, h.owner});
+        return board;
+      });
       // A client activating a reference runs OnActivate authoritatively here; the
       // resulting quest/world changes replicate back through the usual channels.
       self->server_session_->SetActivateSink([self](u64 handle) { self->interaction_->RaiseActivate(handle); });
@@ -212,6 +224,16 @@ bool StartNetworking(Engine& engine) {
       // world position; UpdateObjectiveMarkers turns it into a local bearing.
       self->client_session_->SetObjectiveMarkerSink([self](const net::ObjectiveMarkerState& m) {
         self->quest_->SetRemoteMarker(m.active, Vec3{m.x, m.y, m.z});
+      });
+      // Mirror the host's Civil War board onto our war-map panel (the campaign C#
+      // runs only on the host). SetWarHold/SetWarProgress lock the binding's
+      // war-map mutex, so applying from the net sim thread is safe.
+      self->client_session_->SetWarMapSink([self](const net::WarMapState& board) {
+        if (!self->script_bindings_) return;
+        for (size_t i = 0; i < board.holds.size(); ++i)
+          self->script_bindings_->SetWarHold(static_cast<i32>(i), board.holds[i].name,
+                                             board.holds[i].owner);
+        self->script_bindings_->SetWarProgress(board.imperial_fraction);
       });
     }
   } else {
