@@ -132,9 +132,23 @@ else()
   message(STATUS "sdl3 not found, runtime is headless")
 endif()
 
-# Zetanet (devel branch checkout) supplies the UDP transport and reliability
-# layer. Built in the equilibrium configuration so base:: containers, strings
+# equilibrium::base is vendored directly here (third_party/equilibrium, a
+# submodule) and is its single source of truth, so base:: containers, strings
 # and atomics are shared between the engine and the network stack.
+# EQ_USE_STD_ATOMIC matches the std::memory_order_* zetanet hands to base::Atomic.
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium/CMakeLists.txt")
+  message(FATAL_ERROR
+    "equilibrium submodule missing; run: git submodule update --init third_party/equilibrium")
+endif()
+set(EQ_USE_STD_ATOMIC ON CACHE BOOL "" FORCE)
+set(EQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/equilibrium equilibrium EXCLUDE_FROM_ALL)
+
+# Zetanet (devel branch checkout) supplies the UDP transport and reliability
+# layer, built in equilibrium mode (ZNET_USE_STL=OFF). It hard-codes
+# add_subdirectory(vendor/equilibrium); rather than patch upstream zetanet, we
+# locally override add_subdirectory so that one call reuses the equilibrium::base
+# vendored above instead of compiling a second, conflicting copy.
 set(RECREATION_ZETANET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../zetanet" CACHE PATH
   "Path to a zetanet checkout (devel branch)")
 if(RECREATION_NET)
@@ -144,18 +158,14 @@ if(RECREATION_NET)
   endif()
   set(ZNET_USE_STL OFF CACHE BOOL "" FORCE)
   set(ZNET_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+  function(add_subdirectory _dir)
+    get_filename_component(_leaf "${_dir}" NAME)
+    if(_leaf STREQUAL "equilibrium" AND TARGET equilibrium::base)
+      return()  # zetanet's vendored copy: reuse the one recreation vendors
+    endif()
+    _add_subdirectory("${_dir}" ${ARGN})
+  endfunction()
   add_subdirectory(${RECREATION_ZETANET_DIR} zetanet EXCLUDE_FROM_ALL)
-else()
-  # Networking is off (Android), but the whole engine depends on
-  # equilibrium::base for its containers and strings. Pull in just that from
-  # the zetanet checkout's vendored copy, skipping the crypto-backed transport.
-  if(NOT EXISTS "${RECREATION_ZETANET_DIR}/vendor/equilibrium/CMakeLists.txt")
-    message(FATAL_ERROR
-      "equilibrium not found at ${RECREATION_ZETANET_DIR}/vendor/equilibrium")
-  endif()
-  set(EQ_USE_STD_ATOMIC ON CACHE BOOL "" FORCE)
-  set(EQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  add_subdirectory(${RECREATION_ZETANET_DIR}/vendor/equilibrium equilibrium EXCLUDE_FROM_ALL)
 endif()
 
 # Nanobuf carries every message that crosses the wire. Recreation's schemas
