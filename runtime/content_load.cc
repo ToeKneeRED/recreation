@@ -290,6 +290,15 @@ bool LoadGameData(Engine& engine) {
     self->config_.start_cell_x = 0;
     self->config_.start_cell_y = -3;
   }
+  // The Civil War battle showcases stage two armies in the open, so without an
+  // explicit --cell drop them onto a flat, dry patch of the Whiterun tundra
+  // (cell 4,1 probed at 1.4 m max-drop, fully dry) rather than the default 5,-3
+  // clifftop where the fight slides 48 m down onto the lake below.
+  if (!self->config_.start_cell_explicit && self->game_ == bethesda::Game::kSkyrimSe &&
+      (std::getenv("REC_CW_SIEGE_DEMO") || std::getenv("REC_CW_FIELD_BATTLE"))) {
+    self->config_.start_cell_x = 4;
+    self->config_.start_cell_y = 1;
+  }
 
   // Drop the camera a bit above the terrain at the middle of the start cell.
   constexpr f32 kUnitsToMeters = 0.01428f;
