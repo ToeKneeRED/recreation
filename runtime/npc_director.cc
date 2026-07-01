@@ -638,15 +638,23 @@ void NpcDirector::CwFieldBattleTick(f32 dt) {
       const f32 a = ctx_.cam_yaw + static_cast<f32>(i) * 30.0f * 0.0174533f;
       const Vec3 d{std::sin(a), 0.0f, -std::cos(a)};
       const Vec3 c = ppos + d * kReach;
-      const f32 drop = std::abs(GroundY(c.x, c.z, player_ground) - player_ground);
+      const f32 cg = GroundY(c.x, c.z, player_ground);
+      const f32 drop = std::abs(cg - player_ground);
       f32 open = kReach;
       if (physics_.initialized()) {
         physics::PhysicsWorld::RayHit hit;
         if (physics_.Raycast(Vec3{ppos.x, ppos.y + 1.5f, ppos.z}, d, kReach, &hit))
           open = hit.distance;
       }
+      // A lake reads as perfectly flat, so pure flatness would stage the clash out
+      // over the water (soldiers on the lakebed, camera facing the sheet). Reject
+      // any direction whose ground sits under the local water surface.
+      f32 wh = 0;
+      Vec3 flow;
+      const bool wet = ctx_.streamer &&
+                       ctx_.streamer->WaterHeightAt(Vec3{c.x, cg, c.z}, &wh, &flow) && wh > cg + 0.5f;
       // Flatness dominates (metres of drop), with a small open-ground bonus.
-      const f32 score = -drop + open * 0.1f;
+      const f32 score = -drop + open * 0.1f - (wet ? 1000.0f : 0.0f);
       if (score > best_score) {
         best_score = score;
         yaw = a;
