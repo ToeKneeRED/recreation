@@ -126,6 +126,51 @@ int main(int argc, char** argv) {
     check("Game.GetForm of a missing id is None", bindings.GetForm(0x00FFFFFE).handle == 0);
   }
 
+  // Equip bridge: equipping a real WEAP surfaces it through GetEquippedWeapon
+  // (classified by record signature), and unequipping clears it.
+  if (weapon) {
+    const ObjectRef actor{0xACC01};
+    ObjectRef w{Handle(*weapon)};
+    check("no equipped weapon before equipping",
+          bindings.GetEquippedWeapon(actor).handle == 0);
+    bindings.EquipItem(actor, w);
+    check("GetEquippedWeapon returns the equipped WEAP",
+          bindings.GetEquippedWeapon(actor).handle == w.handle);
+    check("IsEquipped true for the worn weapon", bindings.IsEquipped(actor, w));
+    bindings.UnequipItem(actor, w);
+    check("GetEquippedWeapon clears on unequip",
+          bindings.GetEquippedWeapon(actor).handle == 0);
+  }
+
+  // Shield bridge: find a real ARMO whose biped template carries the shield slot
+  // (39 -> bit 9 of the BOD2/BODT first u32) and confirm GetEquippedShield surfaces
+  // it. Also validates that bit against real data.
+  std::optional<GlobalFormId> shield;
+  records.EachOfType(FourCc('A', 'R', 'M', 'O'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    if (shield) return;
+    Record rec;
+    if (!records.Parse(id, &rec)) return;
+    const Subrecord* bod = rec.Find(FourCc('B', 'O', 'D', '2'));
+    if (!bod) bod = rec.Find(FourCc('B', 'O', 'D', 'T'));
+    if (!bod || bod->data.size() < 4) return;
+    u32 flags;
+    std::memcpy(&flags, bod->data.data(), 4);
+    if (flags & (1u << 9)) shield = id;
+  });
+  if (shield) {
+    const ObjectRef actor{0xACC02};
+    ObjectRef s{Handle(*shield)};
+    bindings.EquipItem(actor, s);
+    check("GetEquippedShield returns the equipped shield ARMO",
+          bindings.GetEquippedShield(actor).handle == s.handle);
+    bindings.UnequipItem(actor, s);
+    check("GetEquippedShield clears on unequip",
+          bindings.GetEquippedShield(actor).handle == 0);
+    std::printf("  (shield %04x:%06x)\n", shield->plugin, shield->local_id);
+  } else {
+    std::printf("  (no shield ARMO found; biped shield-bit unverified)\n");
+  }
+
   // ActorBase data from a real NPC_ record.
   std::optional<GlobalFormId> npc_base;
   records.EachOfType(FourCc('N', 'P', 'C', '_'), [&](GlobalFormId id, const RecordStore::StoredRecord&) {

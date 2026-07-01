@@ -1070,6 +1070,39 @@ bool RecordBackedSkyrimBindings::IsEquipped(ObjectRef actor, ObjectRef item) {
   return it != equipped_.end() && it->second.count(item.handle) != 0;
 }
 
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetEquippedWeapon(ObjectRef actor) {
+  if (!records_) return {};
+  auto it = equipped_.find(actor.handle);
+  if (it == equipped_.end()) return {};
+  for (u64 item : it->second) {
+    const bethesda::RecordStore::StoredRecord* stored = records_->Find(ToFormId(ObjectRef{item}));
+    if (stored && stored->header.type == FourCc('W', 'E', 'A', 'P')) return ObjectRef{item};
+  }
+  return {};
+}
+
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetEquippedShield(ObjectRef actor) {
+  if (!records_) return {};
+  auto it = equipped_.find(actor.handle);
+  if (it == equipped_.end()) return {};
+  for (u64 item : it->second) {
+    const bethesda::GlobalFormId id = ToFormId(ObjectRef{item});
+    const bethesda::RecordStore::StoredRecord* stored = records_->Find(id);
+    if (!stored || stored->header.type != FourCc('A', 'R', 'M', 'O')) continue;
+    bethesda::Record rec;
+    if (!records_->Parse(id, &rec)) continue;
+    // BOD2 (or the older BODT) opens with a u32 of first-person biped-slot flags;
+    // the shield slot (39) is bit 39-30 = 9. An ARMO carrying it is the shield.
+    const bethesda::Subrecord* bod = rec.Find(FourCc('B', 'O', 'D', '2'));
+    if (!bod) bod = rec.Find(FourCc('B', 'O', 'D', 'T'));
+    if (!bod || bod->data.size() < 4) continue;
+    u32 flags;
+    std::memcpy(&flags, bod->data.data(), 4);
+    if (flags & (1u << 9)) return ObjectRef{item};
+  }
+  return {};
+}
+
 i32 RecordBackedSkyrimBindings::GetStage(ObjectRef quest) {
   return quest_system_.GetStage(quest.handle);
 }

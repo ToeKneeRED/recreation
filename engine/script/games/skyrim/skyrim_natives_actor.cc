@@ -172,11 +172,13 @@ void RegisterActorExtra(papyrus::NativeRegistry& reg, SkyrimBindings* bindings) 
   // Equipped-slot refs: the equip/unequip natives write the slot key the matching
   // getter reads. Source 0 is the left hand, anything else the right.
   auto spell_key = [](i32 source) { return source == 0 ? "spellLeft" : "spellRight"; };
-  reg.Register("Actor", "GetEquippedWeapon", [](VirtualMachine&, ObjectRef self, Args& a) {
-    return Value::Object(st::GetRef(self, ArgB(a, 0, false) ? "weaponLeft" : "weaponRight"));
+  // Weapon and shield come from the bindings' equipped set (classified by record);
+  // the hand argument is ignored, dual-wield hands are not distinguished yet.
+  reg.Register("Actor", "GetEquippedWeapon", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Object(Resolve(bindings).GetEquippedWeapon(self));
   });
-  reg.Register("Actor", "GetEquippedShield", [](VirtualMachine&, ObjectRef self, Args&) {
-    return Value::Object(st::GetRef(self, "shield"));
+  reg.Register("Actor", "GetEquippedShield", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Object(Resolve(bindings).GetEquippedShield(self));
   });
   reg.Register("Actor", "GetEquippedShout", [](VirtualMachine&, ObjectRef self, Args&) {
     return Value::Object(st::GetRef(self, "shout"));

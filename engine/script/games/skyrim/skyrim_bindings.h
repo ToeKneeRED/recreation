@@ -368,6 +368,12 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   void EquipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) override;
   void UnequipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) override;
   bool IsEquipped(papyrus::ObjectRef actor, papyrus::ObjectRef item) override;
+  // The equipped weapon / shield form (None if none), backing GetEquippedWeapon /
+  // GetEquippedShield. Scans equipped_ and classifies by record signature: a WEAP
+  // is the weapon; an ARMO whose biped template occupies the shield slot (39) is
+  // the shield. Hands are not distinguished, so both report the one weapon.
+  papyrus::ObjectRef GetEquippedWeapon(papyrus::ObjectRef actor) override;
+  papyrus::ObjectRef GetEquippedShield(papyrus::ObjectRef actor) override;
   i32 GetNumItems(papyrus::ObjectRef container) override;
   papyrus::ObjectRef GetNthForm(papyrus::ObjectRef container, i32 index) override;
   papyrus::ObjectRef GetLinkedRef(papyrus::ObjectRef ref, papyrus::ObjectRef keyword) override;

@@ -281,6 +281,10 @@ class SkyrimBindings {
   virtual void UnequipItem(papyrus::ObjectRef actor, papyrus::ObjectRef item) {}
   // Whether the item form is currently equipped on the actor.
   virtual bool IsEquipped(papyrus::ObjectRef actor, papyrus::ObjectRef item) { return false; }
+  // The equipped weapon / shield form (None if none), for GetEquippedWeapon /
+  // GetEquippedShield.
+  virtual papyrus::ObjectRef GetEquippedWeapon(papyrus::ObjectRef actor) { return {}; }
+  virtual papyrus::ObjectRef GetEquippedShield(papyrus::ObjectRef actor) { return {}; }
   virtual void AddSpell(papyrus::ObjectRef actor, papyrus::ObjectRef spell) {}
 
   // Enumerates an actor's authored faction memberships (its NPC_ record's SNAM
