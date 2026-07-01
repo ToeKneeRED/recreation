@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Route compiles through sccache, backed by the GitHub Actions cache, so object
+  # files persist across runs (see the per-job sccache steps + the
+  # CMAKE_*_COMPILER_LAUNCHER flags on each configure).
+  SCCACHE_GHA_ENABLED: "true"
+
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -26,6 +32,8 @@ jobs:
           repository: Force67/libultragui
           path: libultragui
           submodules: recursive
+      - name: sccache
+        uses: mozilla/sccache-action@v0.0.6
       - name: deps
         run: |
           scripts/setup-linux.sh --system
@@ -40,6 +48,7 @@ jobs:
       - name: configure
         run: >
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_MIMALLOC=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
           -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
       - name: build
@@ -74,6 +83,8 @@ jobs:
           repository: Force67/libultragui
           path: libultragui
           submodules: recursive
+      - name: sccache
+        uses: mozilla/sccache-action@v0.0.6
       - name: deps
         run: scripts/setup-linux.sh --system
       - name: dxc cache
@@ -113,6 +124,7 @@ jobs:
       - name: configure
         run: >
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_MIMALLOC=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
           -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
           -DRECREATION_DLSS=OFF
@@ -144,14 +156,28 @@ jobs:
           repository: Force67/libultragui
           path: libultragui
           submodules: recursive
+      - name: sccache
+        uses: mozilla/sccache-action@v0.0.6
       # Real-time scanning of every .obj/.lib/.exe dominates Windows build time on
       # the hosted runner; exclude the workspace for the duration of the job.
       - name: exclude workspace from Defender
         shell: pwsh
         run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+      # Persist vcpkg's built binary packages (freetype + harfbuzz) across runs, so
+      # `vcpkg install` restores them instead of compiling from source (~7 min).
+      # Bump the key suffix if the runner's vcpkg baseline changes and the archives
+      # go stale.
+      - name: vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg-cache
+          key: vcpkg-x64-windows-freetype-harfbuzz-v1
       - name: deps (dxc, glslang, freetype, harfbuzz, pkg-config)
         shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
         run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
           ./scripts/setup-windows.ps1 -Dxc
           ./scripts/setup-windows.ps1 -System
       - name: third-party deps
@@ -178,6 +204,7 @@ jobs:
       - name: configure
         run: >
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_MIMALLOC=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
           -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
           -DRECREATION_DLSS=OFF
@@ -216,6 +243,8 @@ jobs:
           repository: Force67/libultragui
           path: libultragui
           submodules: recursive
+      - name: sccache
+        uses: mozilla/sccache-action@v0.0.6
       - name: deps
         run: scripts/setup-macos.sh --system
       - name: dxc cache restore
@@ -260,6 +289,7 @@ jobs:
       - name: configure
         run: >
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRECREATION_FETCH_SDL3=ON -DRECREATION_MIMALLOC=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_PREFIX_PATH=$(brew --prefix)
           -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
           -DRECREATION_LIBULTRAGUI_DIR=${{ github.workspace }}/libultragui
@@ -285,6 +315,8 @@ jobs:
           ref: develop
           path: zetanet
           submodules: recursive
+      - name: sccache
+        uses: mozilla/sccache-action@v0.0.6
       - name: deps
         run: |
           scripts/setup-linux.sh --system --minimal
@@ -297,6 +329,7 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake
           -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29
           -DCMAKE_BUILD_TYPE=Release -DRECREATION_BUILD_TOOLS=OFF -DRECREATION_MIMALLOC=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DRECREATION_ZETANET_DIR=${{ github.workspace }}/zetanet
       - name: build
         run: cmake --build build-android
