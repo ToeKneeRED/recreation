@@ -404,6 +404,10 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
   for (unsigned i = 0; i < ngx_device_ext_count; ++i) {
     const char* name = ngx_device_exts[i];
     if (!HasExtension(available, name)) continue;
+    // Core-1.2 bufferDeviceAddress is enabled; the EXT variant NGX asks for
+    // conflicts with it at device creation (VUID 04748). NGX works with the
+    // core feature.
+    if (!std::strcmp(name, "VK_EXT_buffer_device_address")) continue;
     if (std::ranges::any_of(device_extensions,
                             [name](const char* e) { return std::strcmp(e, name) == 0; })) {
       continue;

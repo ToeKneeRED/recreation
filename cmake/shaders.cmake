@@ -45,7 +45,13 @@ function(recreation_embed_shaders target)
       COMMENT "hlsl ${name}")
     set(embed_args)
     set(embed_deps ${spv})
-    if(RECREATION_RHI_D3D12)
+    # Shaders on the RECREATION_SHADER_NO_DXIL list cannot target DXIL (they
+    # use SPIR-V-only constructs, chiefly vk::RawBufferLoad buffer-device-
+    # address reads). Their sidecar embeds as a null pointer, which the d3d12
+    # device reports as "pipeline unavailable" instead of failing the build.
+    if(RECREATION_RHI_D3D12 AND name IN_LIST RECREATION_SHADER_NO_DXIL)
+      list(APPEND embed_args -DDXIL_MISSING=1)
+    elseif(RECREATION_RHI_D3D12)
       set(dxil_profile ${stage}_6_5)
       set(dxil ${CMAKE_CURRENT_BINARY_DIR}/shaders/${name}.dxil)
       add_custom_command(OUTPUT ${dxil}

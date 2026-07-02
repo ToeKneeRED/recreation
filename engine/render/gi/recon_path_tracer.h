@@ -67,7 +67,8 @@ class ReconPathTracer {
   void RunTemporal(RenderGraph& graph, ResourceHandle noisy, ResourceHandle ac_c,
                    ResourceHandle ac_p, ResourceHandle mo_c, ResourceHandle mo_p, ResourceHandle nr_c,
                    ResourceHandle nr_p, ResourceHandle vz_c, ResourceHandle vz_p, ResourceHandle id_c,
-                   ResourceHandle id_p, ResourceHandle motion, const Frame& frame);
+                   ResourceHandle id_p, ResourceHandle motion, ResourceHandle primary_pos, bool spec,
+                   const Frame& frame);
   ResourceHandle RunAtrous(RenderGraph& graph, ResourceHandle in, ResourceHandle ping,
                            ResourceHandle pong, ResourceHandle nr_c, ResourceHandle vz_c,
                            ResourceHandle mo_c, u32 passes, bool spec);

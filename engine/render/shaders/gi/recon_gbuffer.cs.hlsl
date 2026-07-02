@@ -87,6 +87,9 @@ static const float kDenoisingRange = 1.0e6;
 static const float kNearPlane = 0.1;
 static const float kSecondarySpread = 0.03;
 static const float kFireflyClamp = 12.0;
+// Reflection hit distance for the temporal pass's virtual-point reprojection;
+// stored in specular_out.a (fp16, so capped well below its max).
+static const float kSpecSkyDist = 3.0e4;
 
 uint Pcg(inout uint state) {
   state = state * 747796405u + 2891336453u;
@@ -352,7 +355,8 @@ float3 SunSpecular(float3 pos, float3 N, float3 V, float3 albedo, float rough, f
 // the denoiser barely blurs it -> sharp reflection); rough surfaces spread out and
 // get smoothed. Replaces the prefiltered-sky approximation.
 float3 SpecularReflection(float3 pos, float3 N, float3 V, float3 base_color, float rough,
-                          float metal, inout uint rng) {
+                          float metal, inout uint rng, out float hit_dist) {
+  hit_dist = kSpecSkyDist;  // miss/sky: far, so virtual reprojection ~ direction reuse
   float NoV = saturate(dot(N, V));
   if (NoV <= 0.0) return 0.0.xxx;
   float a = max(rough * rough, 1e-3);
@@ -370,6 +374,7 @@ float3 SpecularReflection(float3 pos, float3 N, float3 V, float3 base_color, flo
   if (NoL <= 0.0) return 0.0.xxx;
 
   Hit h = TraceClosest(pos + N * 0.002, L, kSecondarySpread, false);
+  if (h.hit) hit_dist = min(length(h.position - pos), kSpecSkyDist);
   float3 Li = h.hit ? (h.emissive + h.albedo * kInvPi * DirectIrradiance(h.position, h.normal, rng))
                     : SampleSky(L);
 
@@ -420,8 +425,8 @@ void main(uint3 id : SV_DispatchThreadID) {
       sample_pos_out[id.xy] = 0.0.xxxx;
       sample_nrm_out[id.xy] = 0.0.xxxx;
       sample_rad_out[id.xy] = 0.0.xxxx;
-      primary_pos_out[id.xy] = 0.0.xxxx;  // .w 0 = no visible surface
     }
+    primary_pos_out[id.xy] = 0.0.xxxx;  // .w 0 = no visible surface
     return;
   }
 
@@ -474,7 +479,6 @@ void main(uint3 id : SV_DispatchThreadID) {
       sample_nrm_out[id.xy] = float4(h.normal * 0.5 + 0.5, 0.0);
       sample_rad_out[id.xy] = float4(radiance, 1.0);
     }
-    primary_pos_out[id.xy] = float4(prim.position, 1.0);
   } else {
     // Average spp samples of (primary direct + multi-bounce indirect) irradiance,
     // no primary albedo. Cosine sampling cancels the pdf, leaving throughput that
@@ -535,14 +539,19 @@ void main(uint3 id : SV_DispatchThreadID) {
   // at ~0.4-0.6 roughness, terrain at 1.0) otherwise pick up a bright denoised sky
   // reflection and read as glossy; their sky lighting is already in the diffuse GI.
   float refl_gate = 1.0 - smoothstep(0.3, 0.6, prim.roughness);
+  float spec_hit_dist = kSpecSkyDist;
   float3 reflection = refl_gate > 0.0
       ? SpecularReflection(prim.position, prim.normal, V, prim.albedo, prim.roughness,
-                           prim.metallic, rng) * refl_gate
+                           prim.metallic, rng, spec_hit_dist) * refl_gate
       : 0.0.xxx;
   reflection.x = reflection.x >= 0.0 ? reflection.x : 0.0;
   reflection.y = reflection.y >= 0.0 ? reflection.y : 0.0;
   reflection.z = reflection.z >= 0.0 ? reflection.z : 0.0;
   reflection = min(reflection, 1.0e4.xxx);
+
+  // Written in both modes: the temporal pass reprojects the specular signal
+  // through the virtual reflected point, which needs the primary position.
+  primary_pos_out[id.xy] = float4(prim.position, 1.0);
 
   irradiance_out[id.xy] = float4(irradiance, 1.0);
   normal_rough_out[id.xy] = float4(prim.normal * 0.5 + 0.5, prim.roughness);
@@ -553,5 +562,6 @@ void main(uint3 id : SV_DispatchThreadID) {
   // is all in the specular lobe), dielectrics keep theirs.
   albedo_out[id.xy] = float4(prim.albedo * (1.0 - prim.metallic), 1.0);
   emissive_out[id.xy] = float4(prim.emissive + sun_glint, 1.0);
-  specular_out[id.xy] = float4(reflection, 1.0);
+  // .a carries the reflection hit distance for virtual-point reprojection.
+  specular_out[id.xy] = float4(reflection, spec_hit_dist);
 }

@@ -44,12 +44,23 @@ recreation_add_module(render
 )
 
 # Graphics backends. Vulkan is the default everywhere it can run; d3d12 is the
-# native windows/xbox path (skeleton). The null backend is always built.
+# native windows/xbox path, and on Linux it runs natively over vkd3d
+# (D3D12-on-Vulkan) for cross-backend validation. The null backend is always
+# built.
 option(RECREATION_RHI_VULKAN "Build the Vulkan render backend" ON)
 if(WIN32)
   option(RECREATION_RHI_D3D12 "Build the D3D12 render backend" ON)
 else()
-  option(RECREATION_RHI_D3D12 "Build the D3D12 render backend" OFF)
+  # Default to ON when vkd3d is available (the nix dev shell provides it).
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(VKD3D_PROBE QUIET libvkd3d libvkd3d-utils)
+  endif()
+  if(VKD3D_PROBE_FOUND)
+    option(RECREATION_RHI_D3D12 "Build the D3D12 render backend" ON)
+  else()
+    option(RECREATION_RHI_D3D12 "Build the D3D12 render backend" OFF)
+  endif()
 endif()
 
 if(RECREATION_RHI_VULKAN)
@@ -68,9 +79,22 @@ if(RECREATION_RHI_VULKAN)
 endif()
 
 if(RECREATION_RHI_D3D12)
-  target_sources(recreation_render PRIVATE d3d12/d3d12_device.cc)
+  target_sources(recreation_render PRIVATE
+    d3d12/d3d12_device.cc
+    d3d12/d3d12_command_list.cc
+    d3d12/d3d12_swapchain.cc
+    d3d12/d3d12_convert.cc
+  )
+  # PUBLIC: REC_SHADER grows the DXIL sidecar reference under this define, so
+  # every consumer of the embed headers must agree.
   target_compile_definitions(recreation_render PUBLIC RECREATION_RHI_D3D12)
-  target_link_libraries(recreation_render PRIVATE d3d12 dxgi)
+  if(WIN32)
+    target_link_libraries(recreation_render PRIVATE d3d12 dxgi)
+  else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(VKD3D REQUIRED IMPORTED_TARGET libvkd3d libvkd3d-utils)
+    target_link_libraries(recreation_render PRIVATE PkgConfig::VKD3D)
+  endif()
 endif()
 
 target_link_libraries(recreation_render
@@ -122,6 +146,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/pipeline/mesh.ps.hlsl
   shaders/pipeline/mesh_rt.ps.hlsl
   shaders/util/fullscreen.vs.hlsl
+  shaders/util/blit.ps.hlsl
   shaders/post/tonemap.ps.hlsl
   shaders/post/taa.cs.hlsl
   shaders/atmosphere/transmittance_lut.cs.hlsl
@@ -188,5 +213,25 @@ if(RECREATION_NRD)
   list(APPEND RECREATION_RENDER_SHADERS shaders/gi/nrd_pack.cs.hlsl shaders/gi/shadow_trace.cs.hlsl
        shaders/gi/pathtrace_gbuffer.cs.hlsl shaders/gi/pathtrace_composite.cs.hlsl)
 endif()
+
+# SPIR-V-only shaders: everything reading GPU memory through buffer device
+# addresses (vk::RawBufferLoad), which has no DXIL equivalent. The skinned
+# vertex permutations, the meshlet path and the ray-hit shading readers need a
+# descriptor-based port before they can run on d3d12 (see RHI.md); the d3d12
+# device reports their pipelines unavailable and the engine's caps/feature
+# gating keeps them unreached (mesh shaders and ray query are off under vkd3d).
+set(RECREATION_SHADER_NO_DXIL
+  mesh_skin.vs.hlsl
+  shadow_skin.vs.hlsl
+  mesh_scene.as.hlsl
+  mesh_scene.ms.hlsl
+  meshlet.ms.hlsl
+  mesh_rt.ps.hlsl
+  water.ps.hlsl
+  pathtrace.cs.hlsl
+  pathtrace_gbuffer.cs.hlsl
+  ddgi_rays.cs.hlsl
+  recon_gbuffer.cs.hlsl
+)
 
 recreation_embed_shaders(recreation_render ${RECREATION_RENDER_SHADERS})

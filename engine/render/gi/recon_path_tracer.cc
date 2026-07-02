@@ -39,12 +39,14 @@ struct GbufferPush {
   u32 bounces;
 };
 struct TemporalPush {
+  Mat4 prev_view_proj;  // spec: virtual-point reprojection
+  f32 camera_pos[4];
   u32 size[2];
   f32 inv_size[2];
   f32 current_weight_min;
   f32 max_history;
   f32 reset;
-  f32 pad;
+  u32 spec_mode;
 };
 struct AtrousPush {
   u32 size[2];
@@ -163,7 +165,8 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {8, BindingType::kSampledImage},
                           {9, BindingType::kSampledImage},
                           {10, BindingType::kSampledImage},
-                          {11, BindingType::kSampledImage}}}},
+                          {11, BindingType::kSampledImage},
+                          {12, BindingType::kSampledImage}}}},
       .push_constant_size = sizeof(TemporalPush),
       .debug_name = "recon_temporal",
   });
@@ -264,31 +267,39 @@ void ReconPathTracer::RunTemporal(RenderGraph& graph, ResourceHandle noisy, Reso
                                   ResourceHandle ac_p, ResourceHandle mo_c, ResourceHandle mo_p,
                                   ResourceHandle nr_c, ResourceHandle nr_p, ResourceHandle vz_c,
                                   ResourceHandle vz_p, ResourceHandle id_c, ResourceHandle id_p,
-                                  ResourceHandle motion, const Frame& frame) {
+                                  ResourceHandle motion, ResourceHandle primary_pos, bool spec,
+                                  const Frame& frame) {
   graph.AddPass(
       "recon_temporal",
       [&](RenderGraph::PassBuilder& b) {
         b.Write(ac_c, ResourceUsage::kStorageWrite);
         b.Write(mo_c, ResourceUsage::kStorageWrite);
-        for (ResourceHandle h : {noisy, ac_p, nr_c, nr_p, vz_c, vz_p, motion, id_c, id_p, mo_p})
+        for (ResourceHandle h :
+             {noisy, ac_p, nr_c, nr_p, vz_c, vz_p, motion, id_c, id_p, mo_p, primary_pos})
           b.Read(h, ResourceUsage::kSampledCompute);
       },
       [this, ac_c, mo_c, noisy, ac_p, nr_c, nr_p, vz_c, vz_p, motion, id_c, id_p, mo_p,
-       frame](PassContext& ctx) {
-        ResourceHandle reads[10] = {noisy, ac_p, nr_c, nr_p, vz_c, vz_p, motion, id_c, id_p, mo_p};
+       primary_pos, spec, frame](PassContext& ctx) {
+        ResourceHandle reads[11] = {noisy, ac_p, nr_c,  nr_p, vz_c,       vz_p,
+                                    motion, id_c, id_p, mo_p, primary_pos};
         base::Vector<BindingItem> items;
         items.push_back(Bind::Storage(0, ctx.graph->image(ac_c)));
         items.push_back(Bind::Storage(1, ctx.graph->image(mo_c)));
-        for (u32 i = 0; i < 10; ++i) {
+        for (u32 i = 0; i < 11; ++i) {
           items.push_back(Bind::Sampled(i + 2, ctx.graph->image(reads[i])));
         }
 
         TemporalPush p{};
+        p.prev_view_proj = frame.prev_view_proj;
+        p.camera_pos[0] = frame.camera_pos.x;
+        p.camera_pos[1] = frame.camera_pos.y;
+        p.camera_pos[2] = frame.camera_pos.z;
         p.size[0] = extent_.width; p.size[1] = extent_.height;
         p.inv_size[0] = 1.0f / extent_.width; p.inv_size[1] = 1.0f / extent_.height;
         p.current_weight_min = frame.current_weight_min;
         p.max_history = static_cast<f32>(frame.max_history);
         p.reset = frame.reset ? 1.0f : 0.0f;
+        p.spec_mode = spec ? 1u : 0u;
         ctx.cmd->BindPipeline(temporal_pipeline_);
         ctx.cmd->BindTransient(0, {items.data(), items.size()});
         ctx.cmd->Push(p);
@@ -525,9 +536,9 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
 
   // --- 2. temporal accumulation (diffuse + specular share the gbuffer history) ---
   RunTemporal(graph, noisy, ac_c, ac_p, mo_c, mo_p, nr_c, nr_p, vz_c, vz_p, id_c, id_p, motion,
-              frame);
+              p_pos, /*spec=*/false, frame);
   RunTemporal(graph, spec_noisy, sac_c, sac_p, smo_c, smo_p, nr_c, nr_p, vz_c, vz_p, id_c, id_p,
-              motion, frame);
+              motion, p_pos, /*spec=*/true, frame);
 
   // --- 3. a-trous (N passes, ping-pong) for each signal ---
   u32 passes = frame.atrous_passes == 0 ? 1u : frame.atrous_passes;
