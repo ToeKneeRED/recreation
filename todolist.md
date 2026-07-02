@@ -93,7 +93,13 @@ streaming.
       proxy (half side r*sqrt(pi)/2), replacing the representative-point
       hack - soft wide diffuse + correct area specular in both mesh.ps
       variants. Golden lights ref regenerated (intentional change).
-- [ ] FFT ocean (Tessendorf) to replace Gerstner; shoreline flow maps.
+- [x] FFT ocean (Tessendorf) (landed): Phillips-spectrum height field evolved
+      in frequency space and inverse-FFT'd on the GPU (shared-memory radix-2
+      per line) into tiling displacement + normal/foam maps (64m patch, 256^2),
+      sampled by mesh.vs/water.ps via env slots 28/29 (env set now
+      vertex-visible; prepass binds a dummies+ocean env set since mesh.vs
+      statically uses set 2). Default on, REC_FFT_OCEAN=0 = Gerstner. Water
+      golden regenerated. Shoreline flow maps still open.
 - [ ] Foliage imposters at distance; hierarchical pivot wind.
 - [ ] XeSS (enum exists, unimplemented).
 - [ ] D3D12 Windows runtime validation (vkd3d parity holds on Linux).

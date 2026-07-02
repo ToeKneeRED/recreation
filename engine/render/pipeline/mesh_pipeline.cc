@@ -268,9 +268,13 @@ void MeshPipeline::BindBlend(CommandList& cmd, BindingSetHandle globals,
   }
 }
 
-void MeshPipeline::BindPrepass(CommandList& cmd, BindingSetHandle globals) {
+void MeshPipeline::BindPrepass(CommandList& cmd, BindingSetHandle globals,
+                               BindingSetHandle environment) {
   cmd.BindPipeline(prepass_pipeline_);
   cmd.BindSet(0, globals);
+  // mesh.vs statically uses the env set (fft-ocean displacement sample), so
+  // every draw path through it must have set 2 bound, prepass included.
+  if (environment) cmd.BindSet(2, environment);
 }
 
 void MeshPipeline::BindMaterial(CommandList& cmd, BindingSetHandle material) {

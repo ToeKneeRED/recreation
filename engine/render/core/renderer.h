@@ -39,6 +39,7 @@
 #include "render/texturing/virtual_texture.h"
 #include "render/pipeline/virtual_geometry.h"
 #include "render/geometry/hair_strands.h"
+#include "render/geometry/ocean_fft.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -278,6 +279,7 @@ class Renderer {
   BindingSetHandle globals_sets_[kFramesInFlight];
   BindingSetHandle env_scene_sets_[kFramesInFlight];
   BindingSetHandle env_transparent_sets_[kFramesInFlight];
+  BindingSetHandle env_prepass_sets_[kFramesInFlight];  // dummies + ocean maps
   std::unique_ptr<Upscaler> upscaler_;
   // FSR3 frame generation (REC_FRAMEGEN): lazily created when the FSR3
   // upscaler is active (its dilated guides are reused); the present-rate
@@ -349,6 +351,8 @@ class Renderer {
   MeshletPass meshlet_;
   VirtualGeometryPass vgeo_;
   HairStrands hair_;
+  OceanFft ocean_;
+  bool fft_ocean_active_ = false;  // maps valid + flag set this frame
   GpuImage ms_dummy_hiz_;  // 1x1 fallback bound to the mesh-shader cull when occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation

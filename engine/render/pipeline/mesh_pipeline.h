@@ -84,6 +84,7 @@ inline constexpr u32 kFrameFlagSigmaShadow = 1u << 7;  // sample the SIGMA-denoi
 inline constexpr u32 kFrameFlagAurora = 1u << 8;       // draw the night-sky aurora (sky.ps)
 inline constexpr u32 kFrameFlagSpecReflTex = 1u << 9;  // sample the denoised reflection target
 inline constexpr u32 kFrameFlagRestirDi = 1u << 10;     // point/spot lights come from the ReSTIR DI textures
+inline constexpr u32 kFrameFlagFftOcean = 1u << 11;     // water displaces/shades from the FFT ocean maps
 
 // model + prev_model are 128 bytes; skinned draws append the bone palette's
 // buffer device address and this mesh's offset into it (needs a 144 byte push
@@ -142,7 +143,7 @@ class MeshPipeline {
   // bindless is bound as set 3 when the pipeline was built with it.
   void Bind(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment,
             BindingSetHandle bindless, bool use_rt, bool wireframe);
-  void BindPrepass(CommandList& cmd, BindingSetHandle globals);
+  void BindPrepass(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment);
   // Transparent variant: alpha blend over the opaque result, depth tested
   // against the prepass without writing. Set state mirrors Bind.
   void BindBlend(CommandList& cmd, BindingSetHandle globals, BindingSetHandle environment,

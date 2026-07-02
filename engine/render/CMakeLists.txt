@@ -39,6 +39,7 @@ recreation_add_module(render
   texturing/virtual_texture.cc
   pipeline/virtual_geometry.cc
   geometry/hair_strands.cc
+  geometry/ocean_fft.cc
   post/depth_of_field.cc
   post/upscaler.cc
   geometry/water.cc
@@ -212,6 +213,10 @@ set(RECREATION_RENDER_SHADERS
   shaders/geometry/hair_sim.cs.hlsl
   shaders/geometry/hair.vs.hlsl
   shaders/geometry/hair.ps.hlsl
+  shaders/geometry/ocean_spectrum.cs.hlsl
+  shaders/geometry/ocean_fft.cs.hlsl
+  shaders/geometry/ocean_finalize.cs.hlsl
+  shaders/geometry/ocean_normals.cs.hlsl
   shaders/gi/ddgi_rays.cs.hlsl
   shaders/gi/ddgi_blend.cs.hlsl
   shaders/gi/ddgi_border.cs.hlsl

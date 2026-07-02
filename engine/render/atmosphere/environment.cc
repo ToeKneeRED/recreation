@@ -54,6 +54,10 @@ std::unique_ptr<EnvironmentSystem> EnvironmentSystem::Create(Device& device) {
                                            .mip_filter = Filter::kNearest,
                                            .address_u = AddressMode::kClampToEdge,
                                            .address_v = AddressMode::kClampToEdge});
+  env->wrap_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                          .mag_filter = Filter::kLinear,
+                                          .address_u = AddressMode::kRepeat,
+                                          .address_v = AddressMode::kRepeat});
   if (!env->sampler_) return nullptr;
 
   // Comparison sampler for the cascade shadow atlas: hardware pcf, depth-less-or
@@ -223,7 +227,8 @@ bool EnvironmentSystem::CreatePipelines() {
   // sampled by transmissive materials for refraction), and the SIGMA-denoised
   // sun shadow (10, screen-space R8 sampled by the rt lighting variant).
   BindingLayoutDesc env_desc;
-  env_desc.stages = kShaderStageFragment;
+  // Vertex included for the FFT-ocean displacement sample in mesh.vs.
+  env_desc.stages = kShaderStageVertex | kShaderStageFragment;
   for (u32 i = 0; i < 6; ++i) {
     env_desc.slots.push_back({i, BindingType::kCombinedTextureSampler});
   }
@@ -261,6 +266,9 @@ bool EnvironmentSystem::CreatePipelines() {
   env_desc.slots.push_back({25, BindingType::kStorageBuffer});
   env_desc.slots.push_back({26, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({27, BindingType::kCombinedTextureSampler});
+  // 28/29: FFT ocean displacement + normal/foam maps (wrap-sampled tiles).
+  env_desc.slots.push_back({28, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({29, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -431,7 +439,8 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView decal_normal_atlas,
                                     TextureView restir_diffuse, TextureView restir_spec,
                                     const GpuBuffer& vt_feedback, TextureView vt_indirection,
-                                    TextureView vt_atlas) const {
+                                    TextureView vt_atlas, TextureView ocean_displacement,
+                                    TextureView ocean_normal) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -478,7 +487,13 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        Bind::StorageBuffer(25, vt_feedback ? vt_feedback : dummy_storage_, 0,
                            vt_feedback ? vt_feedback.size : 256),
        Bind::Combined(26, vt_indirection ? vt_indirection : black_.view, point_sampler_),
-       Bind::Combined(27, vt_atlas ? vt_atlas : black_.view, sampler_)});
+       Bind::Combined(27, vt_atlas ? vt_atlas : black_.view, sampler_),
+       // The live ocean maps are storage images the compute chain keeps in
+       // GENERAL; the black dummy is shader-read.
+       ocean_displacement ? InGeneral(Bind::Combined(28, ocean_displacement, wrap_sampler_))
+                          : Bind::Combined(28, black_.view, wrap_sampler_),
+       ocean_normal ? InGeneral(Bind::Combined(29, ocean_normal, wrap_sampler_))
+                    : Bind::Combined(29, black_.view, wrap_sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

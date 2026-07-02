@@ -138,12 +138,17 @@ VsOut main(VsIn input) {
       world.xyz += offset;
     }
   }
-  // Gerstner displacement for water surfaces; water.ps re-evaluates the same
-  // field for the shading normal and foam.
+  // Water displacement: the FFT ocean maps when the frame flag is set,
+  // otherwise the legacy Gerstner field. water.ps re-evaluates the same
+  // source for the shading normal and foam.
   if ((material_vs.flags & kVsFlagWater) != 0u) {
     float3 wave_n;
     float wave_crest;
-    world.xyz += GerstnerWave(world.xz, frame.time, wave_n, wave_crest);
+    if ((frame.flags & 2048u) != 0u) {  // kFrameFftOcean
+      world.xyz += OceanDisplace(world.xz, wave_n, wave_crest);
+    } else {
+      world.xyz += GerstnerWave(world.xz, frame.time, wave_n, wave_crest);
+    }
   }
   float4 clip = mul(frame.view_proj, world);
   output.world_pos = world.xyz;

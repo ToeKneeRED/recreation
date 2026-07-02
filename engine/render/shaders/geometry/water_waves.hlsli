@@ -49,4 +49,23 @@ float3 GerstnerWave(float2 xz, float t, out float3 normal, out float crest) {
   return offset;
 }
 
+// FFT ocean maps (env slots 28/29, kPatchSize world-space tiling), used
+// instead of the Gerstner field when the frame flag kFrameFftOcean (1 << 11)
+// is set. Both maps are storage images kept in GENERAL layout by the compute
+// chain; SampleLevel keeps them vertex-shader friendly.
+[[vk::combinedImageSampler]] [[vk::binding(28, 2)]] Texture2D<float4> ocean_displacement_map : register(t28, space2);
+[[vk::combinedImageSampler]] [[vk::binding(28, 2)]] SamplerState ocean_displacement_sampler : register(s28, space2);
+[[vk::combinedImageSampler]] [[vk::binding(29, 2)]] Texture2D<float4> ocean_normal_map : register(t29, space2);
+[[vk::combinedImageSampler]] [[vk::binding(29, 2)]] SamplerState ocean_normal_sampler : register(s29, space2);
+
+static const float kOceanPatchSize = 64.0;  // mirrors OceanFft::kPatchSize
+
+float3 OceanDisplace(float2 xz, out float3 normal, out float crest) {
+  float2 uv = xz / kOceanPatchSize;
+  float4 nf = ocean_normal_map.SampleLevel(ocean_normal_sampler, uv, 0.0);
+  normal = normalize(nf.xyz);
+  crest = nf.w;
+  return ocean_displacement_map.SampleLevel(ocean_displacement_sampler, uv, 0.0).xyz;
+}
+
 #endif  // RECREATION_WATER_WAVES_HLSLI_

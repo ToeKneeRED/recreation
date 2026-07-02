@@ -47,6 +47,7 @@ base::Option<bool> VrsOpt{"vrs", true, "REC_VRS"};
 base::Option<double> VrsThreshold{"vrs.threshold", 0.06, "REC_VRS_THRESHOLD"};
 base::Option<bool> RestirDiOpt{"restir.di", false, "REC_RESTIR_DI"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "REC_VGEO_ERROR"};
+base::Option<bool> FftOceanOpt{"fft.ocean", true, "REC_FFT_OCEAN"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -321,7 +322,11 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     globals_sets_[i] = device_->CreateBindingSet(mesh_pipeline_->set_layout());
     env_scene_sets_[i] = device_->CreateBindingSet(environment_->env_set_layout());
     env_transparent_sets_[i] = device_->CreateBindingSet(environment_->env_set_layout());
-    if (!globals_sets_[i] || !env_scene_sets_[i] || !env_transparent_sets_[i]) return false;
+    env_prepass_sets_[i] = device_->CreateBindingSet(environment_->env_set_layout());
+    if (!globals_sets_[i] || !env_scene_sets_[i] || !env_transparent_sets_[i] ||
+        !env_prepass_sets_[i]) {
+      return false;
+    }
   }
 
   // Linear-hdr export: a compute copy from the resolved scene into a host buffer.
@@ -350,6 +355,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!meshlet_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
   if (!vgeo_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
   if (!hair_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
+  if (!ocean_.Initialize(*device_)) {
+    REC_WARN("fft ocean unavailable");  // non-fatal: gerstner fallback
+  }
   if (device_->caps().mesh_shaders) {
     // 1x1 fallback hi-z so the mesh-shader cull descriptor is always valid; bound
     // (with occlusion disabled) on frames where no real hi-z was built.
@@ -504,6 +512,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsOpt.overridden()) settings_.vrs = VrsOpt;
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
+  if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -1337,7 +1346,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               frame.decals, decal_cluster_indices_, decal_atlas_view_,
               local_shadows_active_ ? local_shadows_.face_buffer(frame_slot) : GpuBuffer{},
               local_shadows_active_ ? local_shadows_.atlas().view : TextureView{},
-              decal_normal_atlas_view_);
+              decal_normal_atlas_view_, TextureView{}, TextureView{}, GpuBuffer{}, TextureView{},
+              TextureView{},
+              fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
+              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
 
           ColorAttachment colors[2];
           colors[0] = {.view = ctx.graph->image(composite).view, .load = LoadOp::kLoad};
@@ -1484,6 +1496,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     std::memcpy(frame.decals.mapped, view.decals.data(), decal_count * sizeof(Decal));
   }
   globals.light_count = light_count;
+  fft_ocean_active_ = settings_.fft_ocean && ocean_.available() && !path_trace;
+  const bool fft_ocean_active = fft_ocean_active_;
+  if (fft_ocean_active) globals.flags |= kFrameFlagFftOcean;
   // Hybrid ReSTIR DI decision happens before the globals upload below; the
   // graph passes record later under the same flag.
   bool restir_active = settings_.restir_di && rt_available_ && restir_di_.available() &&
@@ -1555,6 +1570,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Virtual texturing: drain last frame's page requests, stream pages, and
   // record this frame's atlas/indirection uploads + the feedback copy/reset.
   if (!path_trace) virtual_texture_.AddToGraph(graph_, frame_index_);
+
+  // FFT ocean: evolve the spectrum and rebuild the displacement/normal maps
+  // the water shaders sample this frame.
+  if (fft_ocean_active) ocean_.AddToGraph(graph_, static_cast<f32>(time_seconds_));
 
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
@@ -2042,7 +2061,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
       [this, normals, motion, depth_export, depth, cull_commands, &frame, &view, ms_active,
-       ms_occlude, cull_hiz, globals_set, update_globals_set,
+       ms_occlude, cull_hiz, globals_set, update_globals_set, frame_slot,
        draw_meshlet_instances](PassContext& ctx) {
         // First globals-set user this frame: write uniform + tlas + hi-z once.
         update_globals_set(ctx, ms_occlude ? cull_hiz : kInvalidResource, ms_active,
@@ -2069,7 +2088,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         // Raster sub-pass: skinned / non-meshlet meshes via gpu-culled indirect
         // draws. Meshes already drawn by the mesh shader are skipped but still
         // advance the cull index so it stays aligned with the cull build order.
-        mesh_pipeline_->BindPrepass(*ctx.cmd, globals_set);
+        environment_->WriteEnvSet(
+            env_prepass_sets_[frame_slot], TextureView{}, nullptr, TextureView{}, GpuBuffer{}, 0,
+            TextureView{}, TextureView{}, GpuBuffer{}, 0, TextureView{}, GpuBuffer{}, GpuBuffer{},
+            GpuBuffer{}, GpuBuffer{}, TextureView{}, GpuBuffer{}, TextureView{}, TextureView{},
+            TextureView{}, TextureView{}, GpuBuffer{}, TextureView{}, TextureView{},
+            fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
+            fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
+        mesh_pipeline_->BindPrepass(*ctx.cmd, globals_set, env_prepass_sets_[frame_slot]);
         BindingSetHandle bound_material{};
         bool skinned_bound = false;
         u32 cull_cmd_index = 0;  // matches the cull build order
@@ -2387,7 +2413,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             restir_active ? ctx.graph->image(restir_out.spec).view : TextureView{},
             virtual_texture_.available() ? virtual_texture_.feedback_buffer() : GpuBuffer{},
             virtual_texture_.available() ? virtual_texture_.indirection_view() : TextureView{},
-            virtual_texture_.available() ? virtual_texture_.atlas_view() : TextureView{});
+            virtual_texture_.available() ? virtual_texture_.atlas_view() : TextureView{},
+            fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
+            fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(scene_color).view,
@@ -2857,7 +2885,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           builder.Write(pt_depth, ResourceUsage::kDepthAttachment);
         },
         [this, pt_normals, pt_motion, pt_depth_export, pt_depth, globals_set, update_globals_set,
-         &frame, &view](PassContext& ctx) {
+         frame_slot, &frame, &view](PassContext& ctx) {
           // First globals-set user on the path-traced frame: uniform + tlas (the
           // transparent pass right after wants the tlas for water reflections).
           update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
@@ -2872,7 +2900,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                                    .colors = {colors, 3},
                                    .depth = &depth_attachment});
 
-          mesh_pipeline_->BindPrepass(*ctx.cmd, globals_set);
+          environment_->WriteEnvSet(
+            env_prepass_sets_[frame_slot], TextureView{}, nullptr, TextureView{}, GpuBuffer{}, 0,
+            TextureView{}, TextureView{}, GpuBuffer{}, 0, TextureView{}, GpuBuffer{}, GpuBuffer{},
+            GpuBuffer{}, GpuBuffer{}, TextureView{}, GpuBuffer{}, TextureView{}, TextureView{},
+            TextureView{}, TextureView{}, GpuBuffer{}, TextureView{}, TextureView{},
+            fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
+            fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
+        mesh_pipeline_->BindPrepass(*ctx.cmd, globals_set, env_prepass_sets_[frame_slot]);
           BindingSetHandle bound_material{};
           bool skinned_bound = false;
           for (const DrawItem& item : view.draws) {
@@ -3148,6 +3183,7 @@ void Renderer::DestroyFrameResources() {
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     device_->DestroyBindingSet(globals_sets_[i]);
     device_->DestroyBindingSet(env_scene_sets_[i]);
+    device_->DestroyBindingSet(env_prepass_sets_[i]);
     device_->DestroyBindingSet(env_transparent_sets_[i]);
     globals_sets_[i] = {};
     env_scene_sets_[i] = {};
@@ -3270,6 +3306,7 @@ void Renderer::Shutdown() {
     virtual_texture_.Destroy(*device_);
     vgeo_.Destroy(*device_);
     hair_.Destroy(*device_);
+    ocean_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
     recon_path_tracer_.Destroy(*device_);

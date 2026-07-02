@@ -258,6 +258,7 @@ void Engine::ApplyRenderPreset() {
   tuned.froxel_density = env.froxel_density;
   tuned.vrs = env.vrs;  // honor REC_VRS
   tuned.restir_di = env.restir_di;  // honor REC_RESTIR_DI
+  tuned.fft_ocean = env.fft_ocean;  // honor REC_FFT_OCEAN
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;

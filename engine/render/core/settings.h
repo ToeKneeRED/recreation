@@ -189,6 +189,10 @@ struct RenderSettings {
   // fragment path keeps its exact per-light rays).
   bool local_shadows = true;
 
+  // FFT ocean (Tessendorf): frequency-space wave field inverse-FFT'd into
+  // tiling displacement/normal/foam maps, replacing the four Gerstner waves.
+  bool fft_ocean = true;
+
   // Hybrid ReSTIR DI: reservoir-resampled point/spot lighting with one
   // ray-traced shadow ray per pixel, replacing the analytic cluster loop and
   // the local shadow atlas for those lights on opaque surfaces. Needs ray

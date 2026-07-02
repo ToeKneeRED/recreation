@@ -91,7 +91,8 @@ class EnvironmentSystem {
                    TextureView decal_normal_atlas = {},
                    TextureView restir_diffuse = {}, TextureView restir_spec = {},
                    const GpuBuffer& vt_feedback = {}, TextureView vt_indirection = {},
-                   TextureView vt_atlas = {}) const;
+                   TextureView vt_atlas = {}, TextureView ocean_displacement = {},
+                   TextureView ocean_normal = {}) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}
@@ -123,6 +124,7 @@ class EnvironmentSystem {
   GpuImage flat_normal_;   // 1x1 (0.5, 0.5, 1) for the decal channel atlas
   GpuImage black_;         // 1x1 zero, restir-di / vt dummies
   SamplerHandle point_sampler_;  // nearest+mips, virtual-texture indirection
+  SamplerHandle wrap_sampler_;   // repeat, fft-ocean tiles
   // LTC fit tables for GGX area lights (64x64 RGBA16F, uploaded once).
   GpuImage ltc_matrix_;
   GpuImage ltc_amplitude_;

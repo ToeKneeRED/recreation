@@ -258,7 +258,11 @@ PsOut main(PsIn input) {
   // faded with distance so far water stays calm under taa.
   float3 gerstner_n;
   float crest;
-  GerstnerWave(input.world_pos.xz, frame.time, gerstner_n, crest);
+  if ((frame.flags & 2048u) != 0u) {  // kFrameFftOcean
+    OceanDisplace(input.world_pos.xz, gerstner_n, crest);
+  } else {
+    GerstnerWave(input.world_pos.xz, frame.time, gerstner_n, crest);
+  }
   float strength = lerp(0.045, 0.008, saturate(view_dist / 250.0)) *
                    saturate(material.roughness_factor * 16.0);
   float3 detail = WaveNormal(input.world_pos.xz * float2(2.6, 1.4), frame.time * 0.7, strength);
