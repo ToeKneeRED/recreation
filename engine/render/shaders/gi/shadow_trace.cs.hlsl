@@ -45,8 +45,13 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 world_pos = world.xyz / world.w;
 
   float3 to_light = float3(push.to_light_x, push.to_light_y, push.to_light_z);
+  // Self-intersection offset scaled with view depth: the reconstructed
+  // world position's error (depth quantization + fp32) grows with distance,
+  // and a fixed 2cm starts striping large flat triangles past ~40m. The
+  // scaled offset keeps a constant projected size, so it stays invisible.
+  float view_z = push.near_plane / max(depth, 1e-7);
   RayDesc ray;
-  ray.Origin = world_pos + to_light * 0.02;
+  ray.Origin = world_pos + to_light * max(0.02, view_z * 0.004);
   ray.TMin = 0.001;
   ray.Direction = to_light;
   ray.TMax = push.max_distance;

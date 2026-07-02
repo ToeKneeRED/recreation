@@ -495,6 +495,120 @@ void DemoScenes::CreateGpuParticleDemoScene() {
   REC_INFO("gpu particle demo: {} compute-simulated embers", gpu_particle_count_);
 }
 
+void DemoScenes::CreateImposterDemoScene() {
+  // Octahedral imposters: a procedural conifer baked into a 4x4 view atlas;
+  // a few real instances stand close to the camera, and four thousand
+  // billboard imposters carry the treeline to the horizon.
+  asset::Mesh tree;
+  tree.id = asset::MakeAssetId("builtin/imposters/tree");
+  tree.lods.resize(1);
+  asset::MeshLod& lod = tree.lods[0];
+  auto push_vertex = [&](f32 x, f32 y, f32 z, f32 nx, f32 ny, f32 nz, u32 color) {
+    asset::Vertex v{};
+    v.position[0] = x; v.position[1] = y; v.position[2] = z;
+    f32 len = std::sqrt(nx * nx + ny * ny + nz * nz);
+    v.normal[0] = nx / len; v.normal[1] = ny / len; v.normal[2] = nz / len;
+    v.tangent[3] = 1.0f;
+    v.color = color;
+    lod.vertices.push_back(v);
+    return static_cast<u32>(lod.vertices.size() - 1);
+  };
+  // Trunk: a slim box.
+  const u32 kBrown = 0xff1e3a58;  // abgr: warm brown
+  const u32 kGreen = 0xff2a6a2e;
+  const u32 kGreenDark = 0xff1e4a20;
+  auto add_quad = [&](u32 a, u32 b, u32 c, u32 d) {
+    lod.indices.push_back(a); lod.indices.push_back(b); lod.indices.push_back(c);
+    lod.indices.push_back(a); lod.indices.push_back(c); lod.indices.push_back(d);
+  };
+  const f32 tw = 0.14f, th = 1.1f;
+  for (int s = 0; s < 4; ++s) {
+    f32 a0 = s * 1.5708f, a1 = a0 + 1.5708f;
+    f32 x0 = std::cos(a0) * tw, z0 = std::sin(a0) * tw;
+    f32 x1 = std::cos(a1) * tw, z1 = std::sin(a1) * tw;
+    f32 nx = std::cos(a0 + 0.7854f), nz = std::sin(a0 + 0.7854f);
+    u32 v0 = push_vertex(x0, 0.0f, z0, nx, 0, nz, kBrown);
+    u32 v1 = push_vertex(x1, 0.0f, z1, nx, 0, nz, kBrown);
+    u32 v2 = push_vertex(x1, th, z1, nx, 0, nz, kBrown);
+    u32 v3 = push_vertex(x0, th, z0, nx, 0, nz, kBrown);
+    add_quad(v0, v1, v2, v3);
+  }
+  // Canopy: three stacked cones of triangle fans.
+  const f32 tiers[3][3] = {{1.0f, 1.35f, 2.6f}, {0.75f, 2.2f, 3.5f}, {0.5f, 3.0f, 4.2f}};
+  for (const auto& tier : tiers) {
+    f32 radius = tier[0], base = tier[1], tip = tier[2];
+    const int kSegs = 10;
+    for (int s = 0; s < kSegs; ++s) {
+      f32 a0 = s * 6.2831853f / kSegs, a1 = (s + 1) * 6.2831853f / kSegs;
+      f32 x0 = std::cos(a0) * radius, z0 = std::sin(a0) * radius;
+      f32 x1 = std::cos(a1) * radius, z1 = std::sin(a1) * radius;
+      f32 am = (a0 + a1) * 0.5f;
+      u32 color = (s & 1) ? kGreen : kGreenDark;
+      u32 v0 = push_vertex(x0, base, z0, x0, radius * 0.6f, z0, color);
+      u32 v1 = push_vertex(x1, base, z1, x1, radius * 0.6f, z1, color);
+      u32 v2 = push_vertex(0.0f, tip, 0.0f, std::cos(am), 0.8f, std::sin(am), color);
+      lod.indices.push_back(v0);
+      lod.indices.push_back(v2);
+      lod.indices.push_back(v1);
+    }
+  }
+  lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), asset::AssetId{}});
+
+  // Ground plane.
+  asset::Material grass;
+  grass.id = asset::MakeAssetId("builtin/imposters/grass");
+  grass.base_color_factor[0] = 0.22f;
+  grass.base_color_factor[1] = 0.32f;
+  grass.base_color_factor[2] = 0.16f;
+  grass.roughness_factor = 1.0f;
+  if (!config_.headless) renderer_.UploadMaterial(grass);
+  asset::Mesh ground =
+      asset::MakeBox(400.0f, 0.1f, 400.0f, asset::MakeAssetId("builtin/imposters/ground"));
+  ground.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(ground.lods[0].indices.size()), grass.id});
+  if (!config_.headless) {
+    renderer_.UploadMesh(ground);
+    renderer_.UploadMesh(tree);
+  }
+  ecs::Entity gnd = world_.Create();
+  world_.Add(gnd, world::Transform{.position = {0.0f, -0.1f, 0.0f}});
+  world_.Add(gnd, world::Renderable{ground.id});
+
+  // Near ring: real meshes. Far field: imposters.
+  u32 seed = 12345u;
+  auto next_rand = [&seed]() {
+    seed = seed * 1664525u + 1013904223u;
+    return static_cast<f32>(seed >> 8) / 16777216.0f;
+  };
+  std::vector<render::ImposterPass::Instance> instances;
+  for (int i = 0; i < 4000; ++i) {
+    f32 ang = next_rand() * 6.2831853f;
+    f32 dist = 22.0f + next_rand() * 170.0f;
+    render::ImposterPass::Instance inst;
+    inst.position[0] = std::cos(ang) * dist;
+    inst.position[1] = 0.0f;
+    inst.position[2] = std::sin(ang) * dist;
+    inst.scale = 0.8f + next_rand() * 0.7f;
+    instances.push_back(inst);
+  }
+  for (int i = 0; i < 12; ++i) {
+    f32 ang = next_rand() * 6.2831853f;
+    f32 dist = 6.0f + next_rand() * 12.0f;
+    ecs::Entity t = world_.Create();
+    world_.Add(t, world::Transform{.position = {std::cos(ang) * dist, 0.0f,
+                                                std::sin(ang) * dist}});
+    world_.Add(t, world::Renderable{tree.id});
+  }
+  if (!config_.headless) renderer_.BakeImposter(tree, instances);
+
+  ctx_.scene_owns_sun = true;
+  renderer_.settings().sun_direction = {-0.6f, -0.5f, -0.62f};
+  renderer_.settings().sun_intensity = 3.0f;
+  camera_.set_position({0.0f, 2.2f, 16.0f});
+  camera_.set_yaw_pitch(0.0f, -0.04f);
+  camera_.speed = 15.0f;
+}
+
 void DemoScenes::CreateStrandHairDemoScene() {
   // Strand-based hair: a head sphere with a few thousand simulated guide
   // strands seeded on the crown, swaying in the wind with Kajiya-Kay
@@ -1537,6 +1651,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "strands") {
     CreateStrandHairDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "imposters") {
+    CreateImposterDemoScene();
     return;
   }
   if (config_.demo_scene == "sss") {

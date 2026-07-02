@@ -355,6 +355,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!meshlet_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
   if (!vgeo_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
   if (!hair_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
+  if (!imposters_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
   if (!ocean_.Initialize(*device_)) {
     REC_WARN("fft ocean unavailable");  // non-fatal: gerstner fallback
   }
@@ -791,6 +792,13 @@ void Renderer::SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 str
                                f32 length) {
   if (!device_ || device_->is_stub()) return;
   hair_.SeedCap(*device_, head_center, head_radius, strands, length);
+}
+
+void Renderer::BakeImposter(const asset::Mesh& mesh,
+                            std::span<const ImposterPass::Instance> instances) {
+  if (!device_ || device_->is_stub()) return;
+  imposters_.Bake(*device_, mesh);
+  imposters_.SetInstances(*device_, instances);
 }
 
 bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
@@ -2799,6 +2807,18 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     ExtractFrustumPlanes(view_proj, planes);
     meshlet_.AddToGraph(graph_, lit, depth, view_proj, planes, view.camera.eye, frame_index_);
   }
+  // Distant foliage imposters: instanced octahedral billboards with depth.
+  const char* imposters_env = std::getenv("REC_IMPOSTERS");
+  if (imposters_.active() && (!imposters_env || imposters_env[0] != '0')) {
+    ImposterPass::Frame imf;
+    imf.view_proj = view_proj;
+    imf.camera_pos = view.camera.eye;
+    imf.sun_direction = applied_sun_direction_;
+    imf.sun_intensity = applied_sun_intensity_;
+    imf.sun_color = applied_sun_color_;
+    imposters_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, imf);
+  }
+
   // Strand hair: verlet sim + ribbon draw over the lit scene with depth.
   if (hair_.active()) {
     HairStrands::Frame hf;
@@ -3307,6 +3327,7 @@ void Renderer::Shutdown() {
     vgeo_.Destroy(*device_);
     hair_.Destroy(*device_);
     ocean_.Destroy(*device_);
+    imposters_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
     recon_path_tracer_.Destroy(*device_);

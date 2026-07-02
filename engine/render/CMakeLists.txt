@@ -40,6 +40,7 @@ recreation_add_module(render
   pipeline/virtual_geometry.cc
   geometry/hair_strands.cc
   geometry/ocean_fft.cc
+  geometry/imposters.cc
   post/depth_of_field.cc
   post/upscaler.cc
   geometry/water.cc
@@ -217,6 +218,10 @@ set(RECREATION_RENDER_SHADERS
   shaders/geometry/ocean_fft.cs.hlsl
   shaders/geometry/ocean_finalize.cs.hlsl
   shaders/geometry/ocean_normals.cs.hlsl
+  shaders/geometry/imposter_bake.vs.hlsl
+  shaders/geometry/imposter_bake.ps.hlsl
+  shaders/geometry/imposter.vs.hlsl
+  shaders/geometry/imposter.ps.hlsl
   shaders/gi/ddgi_rays.cs.hlsl
   shaders/gi/ddgi_blend.cs.hlsl
   shaders/gi/ddgi_border.cs.hlsl

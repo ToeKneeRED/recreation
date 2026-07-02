@@ -100,7 +100,13 @@ streaming.
       vertex-visible; prepass binds a dummies+ocean env set since mesh.vs
       statically uses set 2). Default on, REC_FFT_OCEAN=0 = Gerstner. Water
       golden regenerated. Shoreline flow maps still open.
-- [ ] Foliage imposters at distance; hierarchical pivot wind.
+- [x] Foliage imposters at distance (landed - core): hemi-octahedral imposter
+      bake (4x4 views, albedo+coverage & normal atlases with mips) + instanced
+      cylindrical-billboard draw picking the nearest view cell
+      (engine/render/geometry/imposters.{h,cc}); --demo imposters draws a
+      4000-tree line for two triangles each. Also fixed en route: RT sun
+      shadow self-intersection striping on large flat triangles (the trace
+      offset now scales with view depth). Hierarchical pivot wind still open.
 - [ ] XeSS (enum exists, unimplemented).
 - [ ] D3D12 Windows runtime validation (vkd3d parity holds on Linux).
 - [ ] DLSS-RR pending NVIDIA aarch64 snippets.
