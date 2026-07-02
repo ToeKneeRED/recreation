@@ -25,6 +25,10 @@ namespace {
 base::Option<const char*> Screenshot{"screenshot", nullptr, "REC_SCREENSHOT"};
 base::Option<const char*> Hdr{"hdr", nullptr, "REC_HDR"};
 base::Option<bool> HdrOutput{"hdr.output", false, "REC_HDR_OUTPUT"};
+base::Option<bool> MotionBlurOpt{"motion.blur", true, "REC_MOTION_BLUR"};
+// Debug: horizontal fake velocity in pixels, to exercise the blur from a
+// static camera (screenshot testing).
+base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
 base::Option<double> HdrPaperWhite{"hdr.paper.white", 200.0, "REC_HDR_PAPER_WHITE"};
 // Debug: force the tonemap's output transfer (1 pq, 2 scrgb) on an SDR
 // swapchain, so the encode math is testable on displays with no HDR path.
@@ -169,6 +173,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       !reflection_trace_.Initialize(*device_, bindless_->set_layout())) {
     return false;
   }
+  if (!motion_blur_.Initialize(*device_)) return false;
   if (!ssao_.Initialize(*device_)) return false;  // raster ao fallback, no rt needed
   if (!ssr_.Initialize(*device_)) return false;   // raster reflection fallback
   if (!ssgi_.Initialize(*device_)) return false;  // raster diffuse-gi fallback
@@ -336,6 +341,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   }
   if (Pathtrace.overridden()) settings_.path_trace = Pathtrace;
   if (PathtraceReference.overridden()) settings_.path_trace_reference = PathtraceReference;
+  if (MotionBlurOpt.overridden()) settings_.motion_blur = MotionBlurOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -2123,6 +2129,20 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   u32 post_width = upscaled ? output_width_ : render_width_;
   u32 post_height = upscaled ? output_height_ : render_height_;
 
+  // Motion blur right after the AA resolve (before precipitation streaks and
+  // the linear-hdr export). Uses the render-res prepass velocity; uv-space
+  // velocities are resolution independent so the upscaled path works too.
+  if (settings_.motion_blur && !path_trace && motion != kInvalidResource) {
+    MotionBlurPass::Frame mb;
+    mb.shutter = settings_.motion_blur_shutter;
+    mb.frame_index = frame_index_;
+    if (MotionBlurDebugVel.overridden()) {
+      mb.debug_velocity[0] = static_cast<f32>(double(MotionBlurDebugVel));
+    }
+    post_input = motion_blur_.AddToGraph(graph_, post_input, motion,
+                                         {post_width, post_height}, mb);
+  }
+
   // Screen-space precipitation streaks, composited at output resolution after the
   // AA resolve so they stay crisp (TAA would otherwise smear them) and tonemap
   // with the scene. Driven by weather; surface wetness was applied pre-resolve.
@@ -2357,6 +2377,7 @@ void Renderer::Shutdown() {
     if (ms_dummy_hiz_) device_->DestroyImage(ms_dummy_hiz_);
     if (rt_available_) rtao_.Destroy(*device_);
     if (rt_available_) reflection_trace_.Destroy(*device_);
+    motion_blur_.Destroy(*device_);
 #if defined(RECREATION_HAS_NRD)
     if (rt_available_) nrd_.Destroy(*device_);
     if (rt_available_) shadow_trace_.Destroy(*device_);

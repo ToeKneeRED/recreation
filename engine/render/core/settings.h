@@ -157,6 +157,10 @@ struct RenderSettings {
   // during thunderstorms. Boosts the per-frame direct light + clouds.
   f32 lightning = 0.0f;
 
+  // Per-object + camera motion blur (tile-max gather on the prepass velocity).
+  bool motion_blur = true;
+  f32 motion_blur_shutter = 0.5f;  // 180-degree shutter
+
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)
   f32 fog_density = 0.03f;
   f32 fog_height_falloff = 0.15f;

@@ -31,6 +31,7 @@ recreation_add_module(render
   post/taa.cc
   post/overdraw.cc
   post/ui_blur.cc
+  post/motion_blur.cc
   post/upscaler.cc
   geometry/water.cc
   geometry/particles.cc
@@ -204,6 +205,8 @@ set(RECREATION_RENDER_SHADERS
   shaders/gi/recon_composite.cs.hlsl
   shaders/atmosphere/fog.cs.hlsl
   shaders/post/ui_blur.ps.hlsl
+  shaders/post/motion_tilemax.cs.hlsl
+  shaders/post/motion_blur.cs.hlsl
 )
 
 # rtao.cs.hlsl and the nrd_* shaders pull in NRD.hlsli. The include dir is added

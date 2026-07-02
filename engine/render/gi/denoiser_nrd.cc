@@ -510,7 +510,10 @@ void NrdDenoiser::SetFrame(const FrameSettings& settings) {
   // residual sky-hit sparkle on foliage.
   nrd::ReblurSettings specular = reblur;
   specular.maxAccumulatedFrameNum = 24;
-  specular.maxStabilizedFrameNum = 8;
+  // No stabilization pass: it binds IN_MV as a storage image (writes a
+  // modified mv), which the engine's transient motion target is not; the
+  // engine-side TAA covers the anti-flicker duty anyway.
+  specular.maxStabilizedFrameNum = 0;
   specular.historyFixFrameNum = 4;
   specular.enableAntiFirefly = true;
   nrd::SetDenoiserSettings(*instance_, kSpecularIdentifier, &specular);

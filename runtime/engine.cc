@@ -245,6 +245,7 @@ void Engine::ApplyRenderPreset() {
   // REC_PRECIP / REC_SNOW), so they survive the preset. A loaded game's weather
   // re-drives these per frame; this keeps them working in the demo/glTF scenes.
   tuned.fog = env.fog;  // honor REC_FOG over the preset (fog params are defaults)
+  tuned.motion_blur = env.motion_blur;  // honor REC_MOTION_BLUR over the preset
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
   tuned.cloud_coverage = env.cloud_coverage;

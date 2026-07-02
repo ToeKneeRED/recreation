@@ -12,6 +12,7 @@
 #include "core/math.h"
 #include "core/window.h"
 #include "render/screenspace/ambient_occlusion.h"
+#include "render/post/motion_blur.h"
 #include "render/screenspace/reflection_trace.h"
 #include "render/post/antialiasing.h"
 #include "render/core/bindless.h"
@@ -261,6 +262,7 @@ class Renderer {
   TaaPass taa_;
   RtaoPass rtao_;
   ReflectionTrace reflection_trace_;
+  MotionBlurPass motion_blur_;
   SsaoPass ssao_;
   SsrPass ssr_;
   SsgiPass ssgi_;

@@ -564,6 +564,7 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
           settings.color_grade = static_cast<render::ColorGrade>(grade);
         }
         ImGui::Checkbox("Bloom", &settings.bloom);
+        ImGui::Checkbox("Motion blur", &settings.motion_blur);
         if (settings.bloom) {
           ImGui::SliderFloat("Bloom intensity", &settings.bloom_intensity, 0.0f, 0.2f, "%.3f");
         }
