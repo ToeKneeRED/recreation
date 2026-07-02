@@ -107,10 +107,17 @@ streaming.
       4000-tree line for two triangles each. Also fixed en route: RT sun
       shadow self-intersection striping on large flat triangles (the trace
       offset now scales with view depth). Hierarchical pivot wind still open.
-- [ ] XeSS (enum exists, unimplemented).
+- [ ] XeSS (enum exists, unimplemented). BLOCKED on this machine: the Intel
+      XeSS SDK ships x86-64 binaries only; nothing to build against on the
+      aarch64 GB10. Revisit on x86 hardware.
 - [ ] D3D12 Windows runtime validation (vkd3d parity holds on Linux).
-- [ ] DLSS-RR pending NVIDIA aarch64 snippets.
-- [ ] Skinned decals (wounds) once characters land.
+      BLOCKED: needs a Windows machine; the CI Windows job builds but has no
+      GPU runner.
+- [ ] DLSS-RR pending NVIDIA aarch64 snippets. BLOCKED on NVIDIA shipping
+      the aarch64 snippet libraries.
+- [ ] Skinned decals (wounds) once characters land. GATED on real character
+      assets; the decal channel system (albedo/normal/rough/emissive) is
+      ready to receive them.
 - [x] Shutdown leak (fixed): re-uploading a mesh under an existing key (the
       builtin biped: test spawn + npc template) overwrote the map entry
       without freeing the old vertex/index/skinning buffers. UploadMesh now
