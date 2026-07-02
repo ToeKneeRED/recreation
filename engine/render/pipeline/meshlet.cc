@@ -37,7 +37,7 @@ u32 Morton3(u32 x, u32 y, u32 z) { return Part1By2(x) | (Part1By2(y) << 1) | (Pa
 // exceed the vertex or triangle budget, then start a new one. Per meshlet a
 // bounding sphere and a backface normal cone are computed for cluster culling.
 MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u32* indices,
-                          u32 index_count) {
+                          u32 index_count, bool cone_split) {
   MeshletGeometry out;
   auto P = [&](u32 gi) {
     return Vec3{verts[gi].position[0], verts[gi].position[1], verts[gi].position[2]};
@@ -151,7 +151,7 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
     // Bound the cone half-angle (~45deg from the running mean) so backface cone
     // culling stays effective; finalize early when a triangle would widen it.
     bool cone_break = false;
-    if (local_count > 0) {
+    if (cone_split && local_count > 0) {
       f32 slen = std::sqrt(cone_sum.x * cone_sum.x + cone_sum.y * cone_sum.y + cone_sum.z * cone_sum.z);
       if (slen > 1e-6f && (n.x * cone_sum.x + n.y * cone_sum.y + n.z * cone_sum.z) / slen < 0.85f) {
         cone_break = true;
@@ -189,8 +189,8 @@ ByteSpan Span(const void* data, size_t bytes) {
 }  // namespace
 
 MeshletGeometry BuildMeshletGeometry(const asset::Vertex* vertices, u32 vertex_count,
-                                     const u32* indices, u32 index_count) {
-  return BuildImpl(vertices, vertex_count, indices, index_count);
+                                     const u32* indices, u32 index_count, bool cone_split) {
+  return BuildImpl(vertices, vertex_count, indices, index_count, cone_split);
 }
 
 bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_format) {

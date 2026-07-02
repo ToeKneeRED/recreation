@@ -43,6 +43,7 @@ class DemoScenes {
   void CreateFireDemoScene();
   void CreateBrickDemoScene();
   void CreateVirtualTextureDemoScene();
+  void CreateVirtualGeometryDemoScene();
   void CreateSssDemoScene();
 
   struct DemoParticle {

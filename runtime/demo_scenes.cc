@@ -495,6 +495,68 @@ void DemoScenes::CreateGpuParticleDemoScene() {
   REC_INFO("gpu particle demo: {} compute-simulated embers", gpu_particle_count_);
 }
 
+void DemoScenes::CreateVirtualGeometryDemoScene() {
+  // Virtual geometry showcase: a ~800k-triangle displaced terrain tile pushed
+  // through the cluster-DAG LOD path. Clusters tint by id (meshlet.ps), so
+  // the per-cluster LOD cut is directly visible: cluster density stays
+  // roughly constant in screen space as the camera moves.
+  constexpr u32 kGrid = 640;
+  constexpr f32 kSize = 300.0f;
+  asset::Mesh terrain;
+  terrain.id = asset::MakeAssetId("builtin/vgeo/terrain");
+  terrain.lods.resize(1);
+  asset::MeshLod& lod = terrain.lods[0];
+  lod.vertices.reserve(static_cast<size_t>(kGrid + 1) * (kGrid + 1));
+  auto height = [](f32 x, f32 z) {
+    return 3.0f * std::sin(x * 0.05f) * std::cos(z * 0.045f) +
+           0.8f * std::sin(x * 0.31f + 1.7f) * std::sin(z * 0.27f) +
+           0.15f * std::sin(x * 1.7f) * std::cos(z * 1.9f);
+  };
+  for (u32 z = 0; z <= kGrid; ++z) {
+    for (u32 x = 0; x <= kGrid; ++x) {
+      f32 wx = (static_cast<f32>(x) / kGrid - 0.5f) * kSize;
+      f32 wz = (static_cast<f32>(z) / kGrid - 0.5f) * kSize;
+      asset::Vertex v{};
+      v.position[0] = wx;
+      v.position[1] = height(wx, wz);
+      v.position[2] = wz;
+      f32 e = 0.25f;
+      f32 hx = height(wx + e, wz) - height(wx - e, wz);
+      f32 hz = height(wx, wz + e) - height(wx, wz - e);
+      f32 nx = -hx / (2.0f * e), nz = -hz / (2.0f * e);
+      f32 len = std::sqrt(nx * nx + 1.0f + nz * nz);
+      v.normal[0] = nx / len;
+      v.normal[1] = 1.0f / len;
+      v.normal[2] = nz / len;
+      lod.vertices.push_back(v);
+    }
+  }
+  lod.indices.reserve(static_cast<size_t>(kGrid) * kGrid * 6);
+  for (u32 z = 0; z < kGrid; ++z) {
+    for (u32 x = 0; x < kGrid; ++x) {
+      u32 i0 = z * (kGrid + 1) + x;
+      u32 i1 = i0 + 1;
+      u32 i2 = i0 + (kGrid + 1);
+      u32 i3 = i2 + 1;
+      lod.indices.push_back(i0);
+      lod.indices.push_back(i2);
+      lod.indices.push_back(i1);
+      lod.indices.push_back(i1);
+      lod.indices.push_back(i2);
+      lod.indices.push_back(i3);
+    }
+  }
+  if (!config_.headless) renderer_.UploadVirtualGeometryMesh(terrain);
+  REC_INFO("vgeo demo: {} tris in the source terrain", lod.indices.size() / 3);
+
+  ctx_.scene_owns_sun = true;
+  renderer_.settings().sun_direction = {-0.55f, -0.55f, -0.63f};
+  renderer_.settings().sun_intensity = 3.0f;
+  camera_.set_position({0.0f, 6.0f, 40.0f});
+  camera_.set_yaw_pitch(0.0f, -0.12f);
+  camera_.speed = 20.0f;
+}
+
 void DemoScenes::CreateVirtualTextureDemoScene() {
   // Virtual texturing showcase: one huge ground plane whose albedo streams
   // from the feedback-driven page atlas (the megatexture is procedural - a
@@ -1405,6 +1467,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "vt") {
     CreateVirtualTextureDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "vgeo") {
+    CreateVirtualGeometryDemoScene();
     return;
   }
   if (config_.demo_scene == "sss") {

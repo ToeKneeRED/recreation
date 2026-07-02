@@ -2,6 +2,7 @@ recreation_add_module(asset
   vfs.cc
   asset_database.cc
   primitives.cc
+  simplify.cc
   gltf_loader.cc
   materialx.cc
 )

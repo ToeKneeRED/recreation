@@ -37,6 +37,7 @@
 #include "render/post/vrs_rate.h"
 #include "render/gi/restir_di.h"
 #include "render/texturing/virtual_texture.h"
+#include "render/pipeline/virtual_geometry.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -175,6 +176,9 @@ class Renderer {
   // Builds + uploads a mesh for the mesh-shader meshlet path (the --demo meshlet
   // scene draws it instead of the normal raster geometry).
   void UploadMeshletMesh(const asset::Mesh& mesh);
+  // Builds the cluster-DAG LOD hierarchy and activates the virtual-geometry
+  // demo pass (--demo vgeo).
+  void UploadVirtualGeometryMesh(const asset::Mesh& mesh);
 
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
@@ -340,6 +344,7 @@ class Renderer {
   OverdrawPass overdraw_;
   GpuCull gpu_cull_;
   MeshletPass meshlet_;
+  VirtualGeometryPass vgeo_;
   GpuImage ms_dummy_hiz_;  // 1x1 fallback bound to the mesh-shader cull when occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation

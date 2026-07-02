@@ -46,6 +46,7 @@ base::Option<double> FroxelDensity{"froxel.density", 0.005, "REC_FROXEL_DENSITY"
 base::Option<bool> VrsOpt{"vrs", true, "REC_VRS"};
 base::Option<double> VrsThreshold{"vrs.threshold", 0.06, "REC_VRS_THRESHOLD"};
 base::Option<bool> RestirDiOpt{"restir.di", false, "REC_RESTIR_DI"};
+base::Option<float> VgeoError{"vgeo.error", 1.0f, "REC_VGEO_ERROR"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -347,6 +348,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!overdraw_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!gpu_cull_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!meshlet_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
+  if (!vgeo_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
   if (device_->caps().mesh_shaders) {
     // 1x1 fallback hi-z so the mesh-shader cull descriptor is always valid; bound
     // (with occlusion disabled) on frames where no real hi-z was built.
@@ -768,6 +770,11 @@ void Renderer::ApplySettings() {
 void Renderer::UploadMeshletMesh(const asset::Mesh& mesh) {
   if (!device_ || device_->is_stub()) return;
   meshlet_.Upload(*device_, mesh);
+}
+
+void Renderer::UploadVirtualGeometryMesh(const asset::Mesh& mesh) {
+  if (!device_ || device_->is_stub()) return;
+  vgeo_.Upload(*device_, mesh);
 }
 
 bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
@@ -2745,6 +2752,17 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     ExtractFrustumPlanes(view_proj, planes);
     meshlet_.AddToGraph(graph_, lit, depth, view_proj, planes, view.camera.eye, frame_index_);
   }
+  // Virtual geometry: cluster-DAG LOD cut + cull + draw, all on the gpu.
+  if (vgeo_.active()) {
+    f32 planes[5][4];
+    ExtractFrustumPlanes(view_proj, planes);
+    // Screen pixels per world unit at distance 1 (|proj.m5| carries the
+    // vulkan y-flip, hence the fabs).
+    f32 proj_scale = std::fabs(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
+    f32 tau = VgeoError.get() > 0.0f ? VgeoError.get() : 1.0f;
+    vgeo_.AddToGraph(graph_, lit, depth, view_proj, planes, view.camera.eye, proj_scale, tau,
+                     frame_index_);
+  }
 
   if (settings_.debug_view == DebugView::kBounds) {
     gpu_cull_.AddBoundsPass(graph_, lit, view_proj, cull_instance_count, cull_slot);
@@ -3218,6 +3236,7 @@ void Renderer::Shutdown() {
     vrs_.Destroy(*device_);
     restir_di_.Destroy(*device_);
     virtual_texture_.Destroy(*device_);
+    vgeo_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
     recon_path_tracer_.Destroy(*device_);

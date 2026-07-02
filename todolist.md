@@ -56,10 +56,15 @@ streaming.
 
 ## Tier 3 — moonshots (multi-session each)
 
-- [ ] **Virtual geometry** (Nanite-class): cluster-DAG simplification,
-      streaming, software-raster micro-poly path. Meshlets + task culling +
-      occlusion already exist as the foundation. Pairs with **virtual shadow
-      maps** replacing the CSM.
+- [x] **Virtual geometry** (landed - core) — cluster-DAG LOD: QEM
+      simplifier with locked group borders (engine/asset/simplify.cc), DAG
+      build via morton-grouped meshlets re-clustered per group so a cluster
+      and its replacement share the exact (sphere, error) pair (gap-free cut
+      by construction), mesh-shader runtime cut
+      project(self) <= tau < project(parent) + frustum/backface cull.
+      --demo vgeo: 819k-tri terrain -> 29.8k clusters / 5 levels, cluster
+      count scales with REC_VGEO_ERROR. Next: scene-path integration,
+      streaming, software raster, virtual shadow maps.
 - [x] **Virtual texturing** (landed - core) — feedback-driven sparse VT:
       256x256-page virtual space (9 mips) behind a mip-mapped indirection
       texture + 4096^2 page atlas with 4px filter gutters, fragment-shader

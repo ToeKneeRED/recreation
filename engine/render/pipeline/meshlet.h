@@ -29,8 +29,13 @@ struct MeshletGeometry {
 // Greedy spatial clustering of a triangle range into meshlets (<=64 verts /
 // <=124 tris), with a bounding sphere and backface normal cone per cluster for
 // gpu cluster culling. vertex_indices are absolute indices into `vertices`.
+// cone_split finalizes a meshlet early when a triangle would widen its normal
+// cone (tight cones -> effective backface culling). The virtual-geometry DAG
+// build turns it off: coarse simplified levels otherwise fragment into
+// ~15-triangle clusters whose locked borders stall further simplification.
 MeshletGeometry BuildMeshletGeometry(const asset::Vertex* vertices, u32 vertex_count,
-                                     const u32* indices, u32 index_count);
+                                     const u32* indices, u32 index_count,
+                                     bool cone_split = true);
 
 // Mesh-shader meshlet path. A mesh is split into meshlets (clusters of
 // <=64 verts / <=124 tris) at upload; a mesh shader dispatches one workgroup
