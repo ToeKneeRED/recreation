@@ -270,6 +270,7 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
   if (material.alpha_mode == asset::AlphaMode::kMask) params.flags |= kFlagAlphaMask;
   if (material.wind) params.flags |= kFlagWind;
   if (material.is_water) params.flags |= kFlagWater;
+  if (material.skin) params.flags |= kFlagSkin;
   // Terrain reuses the normal slot as a land layer, so the normal-map path must
   // stay off; the shader branches on kFlagTerrain instead.
   if (material.is_terrain) {

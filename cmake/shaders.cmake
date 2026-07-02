@@ -37,11 +37,20 @@ function(recreation_embed_shaders target)
     set(profile ${stage}_6_6)
     set(spv ${CMAKE_CURRENT_BINARY_DIR}/shaders/${name}.spv)
     set(header ${CMAKE_BINARY_DIR}/generated/shaders/${symbol}.h)
+    # #include dependencies are not tracked automatically; wrapper shaders
+    # (variant defines around a shared body) list their includes via
+    # RECREATION_SHADER_DEPS_<symbol> so edits to the body rebuild the variant.
+    set(extra_deps)
+    if(DEFINED RECREATION_SHADER_DEPS_${symbol})
+      foreach(dep ${RECREATION_SHADER_DEPS_${symbol}})
+        list(APPEND extra_deps ${CMAKE_CURRENT_SOURCE_DIR}/${dep})
+      endforeach()
+    endif()
     add_custom_command(OUTPUT ${spv}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
       COMMAND ${RECREATION_DXC} -spirv -fspv-target-env=vulkan1.3 -T ${profile} -E main
               ${include_flags} -Fo ${spv} ${CMAKE_CURRENT_SOURCE_DIR}/${shader}
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${shader}
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${shader} ${extra_deps}
       COMMENT "hlsl ${name}")
     set(embed_args)
     set(embed_deps ${spv})
@@ -58,7 +67,7 @@ function(recreation_embed_shaders target)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
         COMMAND ${RECREATION_DXC} -T ${dxil_profile} -E main -Qstrip_reflect
                 ${include_flags} -Fo ${dxil} ${CMAKE_CURRENT_SOURCE_DIR}/${shader}
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${shader}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${shader} ${extra_deps}
         COMMENT "dxil ${name}")
       list(APPEND embed_args -DDXIL=${dxil})
       list(APPEND embed_deps ${dxil})

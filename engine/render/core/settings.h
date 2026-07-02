@@ -173,6 +173,11 @@ struct RenderSettings {
   f32 dof_aperture = 2.8f;    // coc px per unit relative defocus (bigger = shallower)
   f32 dof_focus = 0.0f;       // meters; <= 0 autofocus
 
+  // Screen-space subsurface scattering: separable per-channel diffusion of the
+  // skin-flagged materials' diffuse lighting (red bleed at shadow terminators).
+  bool sss = true;
+  f32 sss_width = 0.012f;  // world scattering radius, meters
+
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)
   f32 fog_density = 0.03f;
   f32 fog_height_falloff = 0.15f;

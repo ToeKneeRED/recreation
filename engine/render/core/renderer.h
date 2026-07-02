@@ -276,6 +276,8 @@ class Renderer {
   PipelineHandle light_cluster_pipeline_;
   PipelineHandle contact_shadow_pipeline_;
   PipelineHandle cloud_shadow_pipeline_;
+  PipelineHandle sss_pipeline_;
+  SamplerHandle sss_sampler_;
   GpuBuffer cluster_counts_;
   GpuBuffer cluster_indices_;
   GpuBuffer decal_cluster_indices_;

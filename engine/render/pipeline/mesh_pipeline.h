@@ -113,6 +113,10 @@ struct MeshShaderPush {
 // all sharing one layout so they swap mid-frame without rebinding sets.
 class MeshPipeline {
  public:
+  // Third scene-pass attachment: diffuse-only lighting of skin materials plus
+  // a mask, consumed by the screen-space subsurface scattering blur.
+  static constexpr Format kSkinDiffuseFormat = Format::kRGBA16Float;
+
   // bindless_layout enables set 3 (the scene tables the rt variant reads for
   // reflection hit shading); pass a null handle when ray query is unavailable.
   static std::unique_ptr<MeshPipeline> Create(Device& device, Format color_format,

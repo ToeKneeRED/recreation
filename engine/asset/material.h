@@ -57,6 +57,10 @@ struct Material {
   // Vertex wind sway (banners, curtains, foliage). Weight convention: uv.y
   // grows away from the attachment (0 = pinned edge).
   bool wind = false;
+  // Skin: the scene pass exports this material's diffuse lighting to the
+  // subsurface buffer and the screen-space SSS blur diffuses it (red bleed at
+  // shadow edges). Independent of `subsurface` (the analytic transmission term).
+  bool skin = false;
 };
 
 }  // namespace rec::asset

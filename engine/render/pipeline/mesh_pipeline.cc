@@ -4,6 +4,8 @@
 #include "core/log.h"
 #include "shaders/mesh_ps_hlsl.h"
 #include "shaders/mesh_rt_ps_hlsl.h"
+#include "shaders/mesh_rt_sss_ps_hlsl.h"
+#include "shaders/mesh_sss_ps_hlsl.h"
 #include "shaders/mesh_scene_as_hlsl.h"
 #include "shaders/mesh_scene_ms_hlsl.h"
 #include "shaders/mesh_skin_vs_hlsl.h"
@@ -62,17 +64,20 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   // motion alone (the prepass already wrote it).
   GraphicsPipelineDesc scene{};
   scene.vertex = REC_SHADER(k_mesh_vs_hlsl);
-  scene.fragment = REC_SHADER(k_mesh_ps_hlsl);
+  scene.fragment = REC_SHADER(k_mesh_sss_ps_hlsl);
   scene.vertex_buffers = {static_stream};
   // TODO: back face culling once converted content settles winding order.
   scene.raster = {.cull = CullMode::kNone};
   scene.depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
                  .format = depth_format};
-  scene.color_formats = {color_format, motion_format};
+  // Third target: skin diffuse export for the screen-space sss blur. The
+  // scene-pass fragment variants (mesh_sss/mesh_rt_sss) write it; the blend
+  // pass keeps the two-target shaders.
+  scene.color_formats = {color_format, motion_format, kSkinDiffuseFormat};
   // TODO(rhi): blend preset mismatch: the motion target (attachment 1) had
   // colorWriteMask 0 (motion comes from the prepass); presets always write
   // RGBA. Closest is kOpaque.
-  scene.blend = {BlendMode::kOpaque, BlendMode::kOpaque};
+  scene.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
   scene.sets = sets;
   scene.push_constant_size = sizeof(MeshPushConstants);
   scene.debug_name = "mesh_scene";
@@ -82,7 +87,8 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
     if ((variant & kRt) && !rt) continue;
     if ((variant & kWire) && !wire_capable) continue;
     GraphicsPipelineDesc desc = scene;
-    desc.fragment = (variant & kRt) ? REC_SHADER(k_mesh_rt_ps_hlsl) : REC_SHADER(k_mesh_ps_hlsl);
+    desc.fragment =
+        (variant & kRt) ? REC_SHADER(k_mesh_rt_sss_ps_hlsl) : REC_SHADER(k_mesh_sss_ps_hlsl);
     desc.raster.polygon = (variant & kWire) ? PolygonMode::kLine : PolygonMode::kFill;
     pipeline->pipelines_[variant] = device.CreateGraphicsPipeline(desc);
     if (!pipeline->pipelines_[variant]) {
@@ -99,7 +105,8 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
     desc.debug_name = "mesh_scene_skinned";
     for (u32 variant = 0; variant < 2; ++variant) {
       if ((variant & kRt) && !rt) continue;
-      desc.fragment = (variant & kRt) ? REC_SHADER(k_mesh_rt_ps_hlsl) : REC_SHADER(k_mesh_ps_hlsl);
+      desc.fragment =
+          (variant & kRt) ? REC_SHADER(k_mesh_rt_sss_ps_hlsl) : REC_SHADER(k_mesh_sss_ps_hlsl);
       pipeline->skinned_pipelines_[variant] = device.CreateGraphicsPipeline(desc);
       if (!pipeline->skinned_pipelines_[variant]) {
         REC_ERROR("mesh skinned pipeline creation failed (variant {})", variant);
@@ -112,6 +119,9 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   {
     GraphicsPipelineDesc desc = scene;
     desc.depth.compare = CompareOp::kGreater;  // reversed z
+    // Two attachments only (no skin export in the transparent pass), so the
+    // fragments below stay the plain two-target shaders.
+    desc.color_formats = {color_format, motion_format};
     // TODO(rhi): blend preset mismatch: old alpha factors were ONE/ZERO;
     // kAlpha uses ONE/ONE_MINUS_SRC_ALPHA. Color factors (SRC_ALPHA,
     // ONE_MINUS_SRC_ALPHA) match; kAlpha is the closest preset.
@@ -172,15 +182,15 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
       GraphicsPipelineDesc desc = ms;
       desc.depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
                     .format = depth_format};
-      desc.color_formats = {color_format, motion_format};
+      desc.color_formats = {color_format, motion_format, kSkinDiffuseFormat};
       // TODO(rhi): blend preset mismatch: motion target had colorWriteMask 0;
       // closest is kOpaque (see the raster scene variants).
-      desc.blend = {BlendMode::kOpaque, BlendMode::kOpaque};
+      desc.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
       desc.debug_name = "mesh_ms_scene";
       for (u32 variant = 0; variant < 2; ++variant) {
         if (variant == kRt && !rt) continue;
         desc.fragment =
-            variant == kRt ? REC_SHADER(k_mesh_rt_ps_hlsl) : REC_SHADER(k_mesh_ps_hlsl);
+            variant == kRt ? REC_SHADER(k_mesh_rt_sss_ps_hlsl) : REC_SHADER(k_mesh_sss_ps_hlsl);
         pipeline->ms_scene_[variant] = device.CreateGraphicsPipeline(desc);
         if (!pipeline->ms_scene_[variant]) {
           REC_ERROR("mesh-shader scene pipeline creation failed (variant {})", variant);

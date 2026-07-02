@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "core/log.h"
+#include "render/pipeline/mesh_pipeline.h"
 #include "shaders/brdf_lut_cs_hlsl.h"
 #include "shaders/fullscreen_vs_hlsl.h"
 #include "shaders/irradiance_cs_hlsl.h"
@@ -218,8 +219,10 @@ bool EnvironmentSystem::CreateSkyPipeline(BindingLayoutHandle globals_layout, Fo
       .raster = {.cull = CullMode::kNone},
       .depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
                 .format = depth_format},
-      .color_formats = {color_format, motion_format},
-      .blend = {BlendMode::kOpaque, BlendMode::kOpaque},
+      // The scene pass carries a third target (skin diffuse for sss); the sky
+      // writes zeros there.
+      .color_formats = {color_format, motion_format, MeshPipeline::kSkinDiffuseFormat},
+      .blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque},
       .sets = {{.shared = globals_layout},
                {.slots = {{0, BindingType::kCombinedTextureSampler},
                           {1, BindingType::kCombinedTextureSampler}},

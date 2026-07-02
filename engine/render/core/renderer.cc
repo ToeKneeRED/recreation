@@ -17,6 +17,7 @@
 #include "shaders/cloud_shadow_cs_hlsl.h"
 #include "shaders/contact_shadow_cs_hlsl.h"
 #include "shaders/light_cluster_cs_hlsl.h"
+#include "shaders/sss_blur_cs_hlsl.h"
 
 namespace rec::render {
 namespace {
@@ -34,6 +35,8 @@ base::Option<double> LensFlareOpt{"lens.flare", 0.06, "REC_LENS_FLARE"};
 base::Option<double> GrainOpt{"film.grain", 0.015, "REC_FILM_GRAIN"};
 base::Option<double> DofFocus{"dof.focus", 0.0, "REC_DOF_FOCUS"};
 base::Option<double> DofAperture{"dof.aperture", 2.8, "REC_DOF_APERTURE"};
+base::Option<bool> SssOpt{"sss", true, "REC_SSS"};
+base::Option<double> SssWidth{"sss.width", 0.012, "REC_SSS_WIDTH"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -247,6 +250,29 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
         .debug_name = "cloud_shadow",
     });
     if (!cloud_shadow_pipeline_) return false;
+    struct SssPush {
+      u32 size[2];
+      f32 inv_size[2];
+      f32 dir[2];
+      f32 near_plane;
+      f32 width;
+      f32 proj_scale;
+      f32 max_radius;
+      u32 composite;
+      f32 strength;
+    };
+    sss_pipeline_ = device_->CreateComputePipeline({
+        .shader = REC_SHADER(k_sss_blur_cs_hlsl),
+        .sets = {{.slots = {{0, BindingType::kStorageImage},
+                            {1, BindingType::kCombinedTextureSampler},
+                            {2, BindingType::kCombinedTextureSampler},
+                            {3, BindingType::kCombinedTextureSampler}}}},
+        .push_constant_size = sizeof(SssPush),
+        .debug_name = "sss_blur",
+    });
+    if (!sss_pipeline_) return false;
+    sss_sampler_ = device_->GetSampler({.address_u = AddressMode::kClampToEdge,
+                                        .address_v = AddressMode::kClampToEdge});
     cluster_counts_ = device_->CreateBuffer(kClusterCount * sizeof(u32), kBufferUsageStorage);
     cluster_indices_ = device_->CreateBuffer(
         static_cast<u64>(kClusterCount) * kMaxLightsPerCluster * sizeof(u32),
@@ -429,6 +455,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (GrainOpt.overridden()) settings_.film_grain = static_cast<f32>(double(GrainOpt));
   if (DofFocus.overridden()) settings_.dof_focus = static_cast<f32>(double(DofFocus));
   if (DofAperture.overridden()) settings_.dof_aperture = static_cast<f32>(double(DofAperture));
+  if (SssOpt.overridden()) settings_.sss = SssOpt;
+  if (SssWidth.overridden()) settings_.sss_width = static_cast<f32>(double(SssWidth));
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -1256,6 +1284,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         {.name = "depth_export", .format = Format::kR32Float, .width = render_width_,
          .height = render_height_});
   }
+  // Skin diffuse export: third scene-pass attachment, diffused by the
+  // screen-space sss blur after the opaque pass (raster path only).
+  ResourceHandle skin_diffuse = kInvalidResource;
+  if (!path_trace) {
+    skin_diffuse = graph_.CreateTexture(
+        {.name = "skin_diffuse", .format = MeshPipeline::kSkinDiffuseFormat,
+         .width = render_width_, .height = render_height_});
+  }
 
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
@@ -1949,6 +1985,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       [&](RenderGraph::PassBuilder& builder) {
         builder.Write(scene_color, ResourceUsage::kColorAttachment);
         builder.Write(motion, ResourceUsage::kColorAttachment);
+        builder.Write(skin_diffuse, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
         if (ao != kInvalidResource) builder.Read(ao, ResourceUsage::kSampledFragment);
         if (sun_shadow != kInvalidResource) builder.Read(sun_shadow, ResourceUsage::kSampledFragment);
@@ -1956,9 +1993,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (csm_active) builder.Read(shadow_atlas, ResourceUsage::kSampledFragment);
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
-      [this, scene_color, motion, depth, ao, sun_shadow, spec_refl, use_rt_frag, ddgi_active,
-       csm_active, shadow_slot, shadow_atlas, cull_commands, ms_active, globals_set, frame_slot,
-       &frame, &view, draw_meshlet_instances](PassContext& ctx) {
+      [this, scene_color, motion, skin_diffuse, depth, ao, sun_shadow, spec_refl, use_rt_frag,
+       ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands, ms_active, globals_set,
+       frame_slot, &frame, &view, draw_meshlet_instances](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
         TextureView ao_view =
             ao != kInvalidResource ? ctx.graph->image(ao).view : TextureView{};
@@ -1976,16 +2013,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             frame.lights.size, spec_refl_view, cluster_counts_, cluster_indices_,
             frame.decals, decal_cluster_indices_, decal_atlas_view_);
 
-        ColorAttachment colors[2];
+        ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(scene_color).view,
                      .load = LoadOp::kClear,
                      .clear = {0.02f, 0.02f, 0.05f, 1.0f}};
         colors[1] = {.view = ctx.graph->image(motion).view,
                      .load = LoadOp::kLoad};  // the prepass wrote motion
+        colors[2] = {.view = ctx.graph->image(skin_diffuse).view,
+                     .load = LoadOp::kClear,
+                     .clear = {0.0f, 0.0f, 0.0f, 0.0f}};
         DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
                                          .load = LoadOp::kLoad};  // prepass depth, tested EQUAL
         ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
-                                 .colors = {colors, 2},
+                                 .colors = {colors, 3},
                                  .depth = &depth_attachment});
 
         BindingSetHandle bindless_set = bindless_ ? bindless_->set() : BindingSetHandle{};
@@ -2042,6 +2082,82 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (settings_.sky) environment_->DrawSky(*ctx.cmd, globals_set);
         ctx.cmd->EndRendering();
       });
+
+  // Screen-space subsurface scattering: separable per-channel diffusion of the
+  // skin buffer the scene pass exported, folded back into the opaque color
+  // before anything composites on top.
+  if (settings_.sss) {
+    struct SssPush {
+      u32 size[2];
+      f32 inv_size[2];
+      f32 dir[2];
+      f32 near_plane;
+      f32 width;
+      f32 proj_scale;
+      f32 max_radius;
+      u32 composite;
+      f32 strength;
+    };
+    auto fill_sss = [this, proj](SssPush& p) {
+      p.size[0] = render_width_;
+      p.size[1] = render_height_;
+      p.inv_size[0] = 1.0f / static_cast<f32>(render_width_);
+      p.inv_size[1] = 1.0f / static_cast<f32>(render_height_);
+      p.near_plane = 0.1f;
+      p.width = settings_.sss_width;
+      // Pixels per meter at view depth 1. The projection bakes the vulkan
+      // y-flip into m[5], so it is negative - take the magnitude.
+      p.proj_scale = std::abs(proj.m[5]) * 0.5f * static_cast<f32>(render_height_);
+      p.max_radius = 24.0f;
+      p.strength = std::getenv("REC_SSS_DEBUG") ? -1.0f : 1.0f;  // <0 = mask debug view
+    };
+    ResourceHandle sss_tmp = graph_.CreateTexture(
+        {.name = "sss_tmp", .format = MeshPipeline::kSkinDiffuseFormat,
+         .width = render_width_, .height = render_height_});
+    graph_.AddPass(
+        "sss_blur_h",
+        [&](RenderGraph::PassBuilder& b) {
+          b.Write(sss_tmp, ResourceUsage::kStorageWrite);
+          b.Read(skin_diffuse, ResourceUsage::kSampledCompute);
+          b.Read(depth_export, ResourceUsage::kSampledCompute);
+        },
+        [this, sss_tmp, skin_diffuse, depth_export, fill_sss](PassContext& ctx) {
+          SssPush p{};
+          fill_sss(p);
+          p.dir[0] = 1.0f;
+          p.composite = 0;
+          ctx.cmd->BindPipeline(sss_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Storage(0, ctx.graph->image(sss_tmp)),
+                  Bind::Combined(1, ctx.graph->image(skin_diffuse).view, sss_sampler_),
+                  Bind::Combined(2, ctx.graph->image(depth_export).view, sss_sampler_),
+                  Bind::Combined(3, ctx.graph->image(skin_diffuse).view, sss_sampler_)});
+          ctx.cmd->Push(p);
+          ctx.cmd->Dispatch2D({render_width_, render_height_});
+        });
+    graph_.AddPass(
+        "sss_apply",
+        [&](RenderGraph::PassBuilder& b) {
+          b.Write(scene_color, ResourceUsage::kStorageWrite);
+          b.Read(sss_tmp, ResourceUsage::kSampledCompute);
+          b.Read(skin_diffuse, ResourceUsage::kSampledCompute);
+          b.Read(depth_export, ResourceUsage::kSampledCompute);
+        },
+        [this, scene_color, sss_tmp, skin_diffuse, depth_export, fill_sss](PassContext& ctx) {
+          SssPush p{};
+          fill_sss(p);
+          p.dir[1] = 1.0f;
+          p.composite = 1;
+          ctx.cmd->BindPipeline(sss_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Storage(0, ctx.graph->image(scene_color)),
+                  Bind::Combined(1, ctx.graph->image(sss_tmp).view, sss_sampler_),
+                  Bind::Combined(2, ctx.graph->image(depth_export).view, sss_sampler_),
+                  Bind::Combined(3, ctx.graph->image(skin_diffuse).view, sss_sampler_)});
+          ctx.cmd->Push(p);
+          ctx.cmd->Dispatch2D({render_width_, render_height_});
+        });
+  }
 
   // Screen-space gi: add a diffuse bounce over the opaque result before
   // reflections (so reflections pick up the gi-lit color too). Raster tiers only.
@@ -2634,6 +2750,7 @@ void Renderer::Shutdown() {
     if (light_cluster_pipeline_) device_->DestroyPipeline(light_cluster_pipeline_);
     if (contact_shadow_pipeline_) device_->DestroyPipeline(contact_shadow_pipeline_);
     if (cloud_shadow_pipeline_) device_->DestroyPipeline(cloud_shadow_pipeline_);
+    if (sss_pipeline_) device_->DestroyPipeline(sss_pipeline_);
     if (cluster_counts_) device_->DestroyBuffer(cluster_counts_);
     if (cluster_indices_) device_->DestroyBuffer(cluster_indices_);
     if (decal_cluster_indices_) device_->DestroyBuffer(decal_cluster_indices_);

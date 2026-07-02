@@ -29,6 +29,7 @@ static const uint kFrameFlagAurora = 256u;  // 1 << 8, mirrors mesh_pipeline.h
 struct PsOut {
   float4 color : SV_Target0;
   float2 motion : SV_Target1;
+  float4 sss : SV_Target2;  // scene pass skin-diffuse target; sky writes zero
 };
 
 // Physical extinction toward the sun: the ground->sun transmittance straight
@@ -224,5 +225,6 @@ PsOut main(float4 sv_position : SV_Position,
   float4 curr = mul(frame.view_proj, float4(far_point, 1.0));
   float4 prev = mul(frame.prev_view_proj, float4(far_point, 1.0));
   output.motion = (prev.xy / prev.w - curr.xy / curr.w) * 0.5;
+  output.sss = float4(0.0, 0.0, 0.0, 0.0);
   return output;
 }

@@ -189,6 +189,7 @@ static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
 static const uint kFlagTerrain = 4u;
 static const uint kFlagHasHeightMap = 32u;  // 1 << 5
+static const uint kFlagSkin = 64u;          // 1 << 6, exports diffuse for screen-space sss
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -216,7 +217,17 @@ struct PsIn {
 struct PsOut {
   float4 color : SV_Target0;
   float2 motion : SV_Target1;
+#if REC_SSS_MRT
+  // Skin diffuse export for the screen-space sss blur: rgb = the diffuse-only
+  // lighting already inside color, a = skin mask. Only the scene-pass pipeline
+  // variants have this attachment; the blend pass compiles without it.
+  float4 sss : SV_Target2;
+#endif
 };
+
+// Diffuse-only lighting accumulated by ShadeSurface; main() exports it to the
+// sss target for skin materials so the blur can subtract/re-add exactly it.
+static float3 g_skin_diffuse = float3(0.0, 0.0, 0.0);
 
 float3 SurfaceNormal(PsIn input) {
   float3 n = normalize(input.normal);
@@ -544,6 +555,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
 
   float3 sun = frame.sun_color.rgb * frame.sun_direction.w;
   float3 lit = direct * sun * ndl * shadow;
+  g_skin_diffuse += diffuse_color / kPi * sun * ndl * shadow;
 
   // Subsurface scattering: a wrapped front term softens the terminator and a
   // view-aligned back term glows where light transmits through thin geometry.
@@ -551,7 +563,10 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 sss_h = normalize(l + n * 0.2);
     float back = pow(saturate(dot(v, -sss_h)), 2.0);
     float wrap = saturate((dot(n, l) + 0.4) / 1.4);
-    lit += material.subsurface_color * material.subsurface * (back + 0.4 * wrap) * sun * shadow;
+    float3 sss_term =
+        material.subsurface_color * material.subsurface * (back + 0.4 * wrap) * sun * shadow;
+    lit += sss_term;
+    g_skin_diffuse += sss_term;
   }
 
   // Dynamic point lights: ggx + diffuse with smooth inverse-square-ish falloff
@@ -627,6 +642,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 pspec = D_GGX(pndh, a) * V_SmithGGXCorrelated(ndv, pndl, a) * pf * area_norm;
     float3 pdiff = diffuse_color * (1.0 / kPi) * (1.0 - pf);
     lit += (pdiff + pspec) * pl.color_intensity.rgb * pl.color_intensity.w * falloff * pndl;
+    g_skin_diffuse += pdiff * pl.color_intensity.rgb * pl.color_intensity.w * falloff * pndl;
   }
 
   float ao = 1.0;
@@ -669,8 +685,10 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 fms_ems = ems * fss_ess * f_avg / (1.0 - f_avg * ems);
     float3 k_d = diffuse_color * (1.0 - fss_ess - fms_ems);
     ambient = (fss_ess * radiance + (fms_ems + k_d) * irradiance) * frame.camera_position.w;
+    g_skin_diffuse += (fms_ems + k_d) * irradiance * frame.camera_position.w * ao;
   } else {
     ambient = albedo * frame.sun_color.w;
+    g_skin_diffuse += ambient * ao;
   }
   ambient *= ao;
 
@@ -853,5 +871,10 @@ PsOut main(PsIn input) {
   float2 curr = input.curr_clip.xy / input.curr_clip.w;
   float2 prev = input.prev_clip.xy / input.prev_clip.w;
   output.motion = (prev - curr) * 0.5;
+#if REC_SSS_MRT
+  output.sss = (material.flags & kFlagSkin) != 0u && frame.debug_view == 0u
+                   ? float4(g_skin_diffuse, 1.0)
+                   : float4(0.0, 0.0, 0.0, 0.0);
+#endif
   return output;
 }

@@ -154,6 +154,8 @@ set(RECREATION_RENDER_SHADERS
   shaders/post/overdraw.ps.hlsl
   shaders/pipeline/mesh.ps.hlsl
   shaders/pipeline/mesh_rt.ps.hlsl
+  shaders/pipeline/mesh_sss.ps.hlsl
+  shaders/pipeline/mesh_rt_sss.ps.hlsl
   shaders/util/fullscreen.vs.hlsl
   shaders/util/blit.ps.hlsl
   shaders/post/tonemap.ps.hlsl
@@ -177,6 +179,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/screenspace/ssgi.cs.hlsl
   shaders/screenspace/reflection_trace.cs.hlsl
   shaders/screenspace/contact_shadow.cs.hlsl
+  shaders/screenspace/sss_blur.cs.hlsl
   shaders/pipeline/cull.cs.hlsl
   shaders/pipeline/light_cluster.cs.hlsl
   shaders/pipeline/hiz_reduce.cs.hlsl
@@ -244,11 +247,16 @@ endif()
 # unavailable and the engine's caps/feature gating keeps them unreached (mesh
 # shaders and ray query are off under vkd3d). The skinned vertex permutations
 # are NOT here: they carry a dual path (rec_bone_palette root SRV on DXIL).
+# Wrapper-shader include dependencies (see cmake/shaders.cmake).
+set(RECREATION_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
+set(RECREATION_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl)
+
 set(RECREATION_SHADER_NO_DXIL
   mesh_scene.as.hlsl
   mesh_scene.ms.hlsl
   meshlet.ms.hlsl
   mesh_rt.ps.hlsl
+  mesh_rt_sss.ps.hlsl
   water.ps.hlsl
   pathtrace.cs.hlsl
   pathtrace_gbuffer.cs.hlsl

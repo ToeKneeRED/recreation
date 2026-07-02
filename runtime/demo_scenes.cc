@@ -692,6 +692,86 @@ void DemoScenes::CreateBrickDemoScene() {
   REC_INFO("brick demo: pom wall (left) vs flat normal-mapped wall (right)");
 }
 
+void DemoScenes::CreateSssDemoScene() {
+  // Screen-space subsurface scattering A/B: two identical skin-toned spheres
+  // under a hard side sun. The right one carries the skin flag (diffuse routed
+  // through the sss blur - soft terminator, red bleed); the left is the
+  // control. Both share the analytic subsurface term so the only difference
+  // is the screen-space diffusion.
+  asset::Material floor_mat;
+  floor_mat.id = asset::MakeAssetId("builtin/sss/floor");
+  floor_mat.base_color_factor[0] = 0.30f;
+  floor_mat.base_color_factor[1] = 0.30f;
+  floor_mat.base_color_factor[2] = 0.32f;
+  floor_mat.roughness_factor = 0.9f;
+  if (!config_.headless) renderer_.UploadMaterial(floor_mat);
+  asset::Mesh ground =
+      asset::MakeBox(8.0f, 0.15f, 6.0f, asset::MakeAssetId("builtin/sss/ground"));
+  ground.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(ground.lods[0].indices.size()), floor_mat.id});
+  if (!config_.headless) renderer_.UploadMesh(ground);
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, world::Transform{.position = {0, -0.15f, 0}});
+  world_.Add(floor, world::Renderable{ground.id});
+
+  auto spawn_sphere = [&](Vec3 pos, f32 radius, bool skin, const char* tag) {
+    asset::Material mat;
+    mat.id = asset::MakeAssetId(std::string("builtin/sss/mat_") + tag);
+    mat.base_color_factor[0] = 0.62f;
+    mat.base_color_factor[1] = 0.44f;
+    mat.base_color_factor[2] = 0.34f;
+    mat.roughness_factor = 0.55f;
+    mat.subsurface = 0.20f;
+    mat.subsurface_color[0] = 0.9f;
+    mat.subsurface_color[1] = 0.25f;
+    mat.subsurface_color[2] = 0.15f;
+    mat.skin = skin;
+    asset::Mesh sphere =
+        asset::MakeSphere(radius, 48, 64, asset::MakeAssetId(std::string("builtin/sss/") + tag));
+    sphere.lods[0].submeshes[0].material = mat.id;
+    if (!config_.headless) {
+      renderer_.UploadMaterial(mat);
+      renderer_.UploadMesh(sphere);
+    }
+    ecs::Entity e = world_.Create();
+    world_.Add(e, world::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, world::Renderable{sphere.id});
+  };
+  spawn_sphere({-0.75f, 0.6f, 0.0f}, 0.55f, false, "control");
+  spawn_sphere({0.75f, 0.6f, 0.0f}, 0.55f, true, "skin");
+  // A small pair further back: the blur radius must shrink with distance.
+  spawn_sphere({-0.35f, 0.25f, -1.6f}, 0.22f, false, "control_far");
+  spawn_sphere({0.35f, 0.25f, -1.6f}, 0.22f, true, "skin_far");
+
+  // A slim pole per sphere, placed sunward so its hard shadow line crosses the
+  // camera-facing hemisphere: that edge is where the diffusion reads
+  // (softening + red bleed). Smoothly lit spheres alone would show nothing -
+  // a gaussian preserves linear ramps.
+  asset::Mesh pole =
+      asset::MakeBox(0.035f, 0.7f, 0.035f, asset::MakeAssetId("builtin/sss/pole"));
+  pole.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(pole.lods[0].indices.size()), floor_mat.id});
+  if (!config_.headless) renderer_.UploadMesh(pole);
+  const f32 poles[2][3] = {{1.30f, 0.95f, 0.75f}, {-0.20f, 0.95f, 0.75f}};
+  for (auto& pp : poles) {
+    ecs::Entity occluder = world_.Create();
+    world_.Add(occluder, world::Transform{.position = {pp[0], pp[1], pp[2]}});
+    world_.Add(occluder, world::Renderable{pole.id});
+  }
+
+  // Hard side sun so the terminator crosses both spheres mid-face. DoF off:
+  // its near-field blur would mask the effect this demo exists to show.
+  renderer_.settings().sun_direction = {-0.90f, -0.30f, -0.32f};
+  renderer_.settings().sun_intensity = 4.5f;
+  renderer_.settings().sun_color = {1.0f, 0.94f, 0.88f};
+  renderer_.settings().dof = false;
+
+  camera_.set_position({0.0f, 0.72f, 2.0f});
+  camera_.set_yaw_pitch(0.0f, -0.04f);
+  camera_.speed = 2.0f;
+  REC_INFO("sss demo: skin sphere (right) vs control (left)");
+}
+
 void DemoScenes::CreateFireDemoScene() {
   // A campfire at dusk: stone ground, a log ring, gpu-simulated flames and
   // embers (additive hdr), and a flickering point light that the rt path
@@ -1189,6 +1269,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "bricks") {
     CreateBrickDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "sss") {
+    CreateSssDemoScene();
     return;
   }
   if (config_.demo_scene == "autolod") {

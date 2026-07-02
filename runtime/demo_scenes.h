@@ -42,6 +42,7 @@ class DemoScenes {
   void UpdateParticles(f32 dt, render::FrameView& view);
   void CreateFireDemoScene();
   void CreateBrickDemoScene();
+  void CreateSssDemoScene();
 
   struct DemoParticle {
     Vec3 position;

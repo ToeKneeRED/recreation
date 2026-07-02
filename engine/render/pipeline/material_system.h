@@ -54,6 +54,7 @@ class MaterialSystem {
   static constexpr u32 kFlagWind = 1u << 3;     // vertex wind sway (cloth/foliage)
   static constexpr u32 kFlagWater = 1u << 4;    // gerstner vertex displacement
   static constexpr u32 kFlagHasHeightMap = 1u << 5;  // parallax occlusion march
+  static constexpr u32 kFlagSkin = 1u << 6;          // screen-space subsurface scattering
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
