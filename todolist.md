@@ -60,7 +60,13 @@ streaming.
       streaming, software-raster micro-poly path. Meshlets + task culling +
       occlusion already exist as the foundation. Pairs with **virtual shadow
       maps** replacing the CSM.
-- [ ] **Virtual texturing** — scalability for 4K-modded content.
+- [x] **Virtual texturing** (landed - core) — feedback-driven sparse VT:
+      256x256-page virtual space (9 mips) behind a mip-mapped indirection
+      texture + 4096^2 page atlas with 4px filter gutters, fragment-shader
+      request feedback (rotating 1/64 pixel subset), worker-thread page
+      generation, LRU eviction (engine/render/texturing/). Materials opt in
+      via virtual_albedo; --demo vt streams a procedural survey megatexture.
+      Next: real content backing (disk pages), non-albedo channels.
 - [x] **Hybrid-path ReSTIR DI** (landed; GI still recon-only) — per-pixel
       reservoirs over the clustered point/spot lights on the prepass G-buffer
       (temporal + spatial reuse, one ray-query shadow ray for the winner),

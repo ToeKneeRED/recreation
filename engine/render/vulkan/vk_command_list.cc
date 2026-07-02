@@ -215,6 +215,7 @@ void VulkanCommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage
     copies[i] = {};
     copies[i].bufferOffset = r.buffer_offset;
     copies[i].imageSubresource = {texture->aspect, r.mip, r.array_layer, 1};
+    copies[i].imageOffset = {r.offset[0], r.offset[1], 0};
     copies[i].imageExtent = {width, height, 1};
   }
   vkCmdCopyBufferToImage(cmd_, Rec(src.handle)->buffer, texture->image,

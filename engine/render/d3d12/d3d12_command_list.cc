@@ -499,7 +499,8 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
     src_loc.PlacedFootprint.Footprint.Height = height;
     src_loc.PlacedFootprint.Footprint.Depth = 1;
     src_loc.PlacedFootprint.Footprint.RowPitch = static_cast<u32>(pitch);
-    list_->CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, nullptr);
+    list_->CopyTextureRegion(&dst_loc, static_cast<UINT>(region.offset[0]),
+                             static_cast<UINT>(region.offset[1]), 0, &src_loc, nullptr);
   }
 }
 

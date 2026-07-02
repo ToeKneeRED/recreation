@@ -74,6 +74,58 @@ static const uint kMaxDecalsPerCluster = 16;
 [[vk::combinedImageSampler]] [[vk::binding(23, 2)]] SamplerState restir_diffuse_sampler : register(s23, space2);
 [[vk::combinedImageSampler]] [[vk::binding(24, 2)]] Texture2D restir_spec_map : register(t24, space2);
 [[vk::combinedImageSampler]] [[vk::binding(24, 2)]] SamplerState restir_spec_sampler : register(s24, space2);
+// Virtual texturing (slots 25-27): feedback request buffer, mip-mapped page
+// indirection (nearest-sampled), physical page atlas. Constants mirror
+// VirtualTexture in virtual_texture.h.
+[[vk::binding(25, 2)]] RWStructuredBuffer<uint> vt_feedback : register(u25, space2);
+[[vk::combinedImageSampler]] [[vk::binding(26, 2)]] Texture2D vt_indirection : register(t26, space2);
+[[vk::combinedImageSampler]] [[vk::binding(26, 2)]] SamplerState vt_indirection_sampler : register(s26, space2);
+[[vk::combinedImageSampler]] [[vk::binding(27, 2)]] Texture2D vt_atlas : register(t27, space2);
+[[vk::combinedImageSampler]] [[vk::binding(27, 2)]] SamplerState vt_atlas_sampler : register(s27, space2);
+
+static const float kVtPagesX = 256.0;      // mip-0 pages per axis
+static const float kVtPayload = 120.0;     // payload texels per page
+static const float kVtPageStored = 128.0;  // page + border texels
+static const float kVtBorder = 4.0;
+static const float kVtAtlasPages = 32.0;
+static const float kVtMaxMip = 8.0;
+static const uint kVtFeedbackCapacity = 16384u;
+
+// Samples the virtual albedo through the indirection (which always points at
+// the finest RESIDENT ancestor of the wanted page) and appends this pixel's
+// wanted page to the feedback buffer from a sparse rotating pixel subset.
+float3 SampleVirtualAlbedo(float2 uv, float2 sv_pos) {
+  uv = frac(uv);
+  float2 vtexel = uv * (kVtPagesX * kVtPayload);
+  float2 duv_dx = ddx(vtexel);
+  float2 duv_dy = ddy(vtexel);
+  float rho = max(length(duv_dx), length(duv_dy));
+  float mip = clamp(floor(log2(max(rho, 1.0))), 0.0, kVtMaxMip);
+
+  uint2 pix = uint2(sv_pos);
+  uint frame_index = uint(frame.misc.w);
+  if (((pix.x + pix.y * 3u + frame_index) & 63u) == 0u) {
+    uint pages = uint(kVtPagesX) >> uint(mip);
+    uint2 page = min(uint2(uv * float(pages)), (pages - 1u).xx);
+    uint packed = (uint(mip) << 24) | (page.y << 12) | page.x;
+    uint slot;
+    InterlockedAdd(vt_feedback[0], 1u, slot);
+    if (slot < kVtFeedbackCapacity) vt_feedback[1u + slot] = packed;
+  }
+
+  float4 entry = vt_indirection.SampleLevel(vt_indirection_sampler, uv, mip);
+  if (entry.a < 0.5) return float3(0.35, 0.35, 0.35);  // nothing resident yet
+  float src_mip = floor(entry.b * 255.0 + 0.5);
+  float pages_at = kVtPagesX / exp2(src_mip);
+  float2 in_page = frac(uv * pages_at);
+  float2 origin = floor(entry.rg * 255.0 + 0.5) * kVtPageStored;
+  float2 atlas_uv =
+      (origin + kVtBorder + in_page * kVtPayload) / (kVtAtlasPages * kVtPageStored);
+  return vt_atlas.SampleGrad(vt_atlas_sampler, atlas_uv,
+                             duv_dx / (kVtAtlasPages * kVtPageStored) / exp2(src_mip),
+                             duv_dy / (kVtAtlasPages * kVtPageStored) / exp2(src_mip)).rgb;
+}
+
 
 
 // LTC fit tables for rect area lights (Heitz et al. 2016): 18 = inverse
@@ -235,6 +287,7 @@ static const uint kFlagTerrain = 4u;
 static const uint kFlagHasHeightMap = 32u;  // 1 << 5
 static const uint kFlagSkin = 64u;          // 1 << 6, exports diffuse for screen-space sss
 static const uint kFlagHair = 128u;         // 1 << 7, kajiya-kay strand specular
+static const uint kFlagVirtualAlbedo = 256u;  // 1 << 8, albedo via the vt atlas
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -1048,7 +1101,10 @@ PsOut main(PsIn input) {
 
 
   float4 base;
-  if ((material.flags & kFlagTerrain) != 0u) {
+  if ((material.flags & kFlagVirtualAlbedo) != 0u) {
+    base = float4(SampleVirtualAlbedo(input.uv, input.sv_position.xy), 1.0) *
+           material.base_color_factor * input.color;
+  } else if ((material.flags & kFlagTerrain) != 0u) {
     base = float4(TerrainAlbedo(input.uv), 1.0) * material.base_color_factor * input.color;
   } else {
     base = base_color_map.Sample(base_color_sampler, input.uv) * material.base_color_factor *

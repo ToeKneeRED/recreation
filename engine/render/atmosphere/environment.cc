@@ -49,6 +49,11 @@ std::unique_ptr<EnvironmentSystem> EnvironmentSystem::Create(Device& device) {
                                      .address_u = AddressMode::kClampToEdge,
                                      .address_v = AddressMode::kClampToEdge,
                                      .address_w = AddressMode::kClampToEdge});
+  env->point_sampler_ = device.GetSampler({.min_filter = Filter::kNearest,
+                                           .mag_filter = Filter::kNearest,
+                                           .mip_filter = Filter::kNearest,
+                                           .address_u = AddressMode::kClampToEdge,
+                                           .address_v = AddressMode::kClampToEdge});
   if (!env->sampler_) return nullptr;
 
   // Comparison sampler for the cascade shadow atlas: hardware pcf, depth-less-or
@@ -251,6 +256,11 @@ bool EnvironmentSystem::CreatePipelines() {
   // F-less specular), black when the feature is off.
   env_desc.slots.push_back({23, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({24, BindingType::kCombinedTextureSampler});
+  // 25-27: virtual texturing (feedback request buffer, mip-mapped page
+  // indirection, physical page atlas).
+  env_desc.slots.push_back({25, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({26, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({27, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -419,7 +429,9 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     const GpuBuffer& local_shadow_faces,
                                     TextureView local_shadow_atlas,
                                     TextureView decal_normal_atlas,
-                                    TextureView restir_diffuse, TextureView restir_spec) const {
+                                    TextureView restir_diffuse, TextureView restir_spec,
+                                    const GpuBuffer& vt_feedback, TextureView vt_indirection,
+                                    TextureView vt_atlas) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -462,7 +474,11 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        Bind::Combined(22, decal_normal_atlas ? decal_normal_atlas : flat_normal_.view,
                       sampler_),
        Bind::Combined(23, restir_diffuse ? restir_diffuse : black_.view, sampler_),
-       Bind::Combined(24, restir_spec ? restir_spec : black_.view, sampler_)});
+       Bind::Combined(24, restir_spec ? restir_spec : black_.view, sampler_),
+       Bind::StorageBuffer(25, vt_feedback ? vt_feedback : dummy_storage_, 0,
+                           vt_feedback ? vt_feedback.size : 256),
+       Bind::Combined(26, vt_indirection ? vt_indirection : black_.view, point_sampler_),
+       Bind::Combined(27, vt_atlas ? vt_atlas : black_.view, sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

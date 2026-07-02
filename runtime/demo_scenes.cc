@@ -495,6 +495,46 @@ void DemoScenes::CreateGpuParticleDemoScene() {
   REC_INFO("gpu particle demo: {} compute-simulated embers", gpu_particle_count_);
 }
 
+void DemoScenes::CreateVirtualTextureDemoScene() {
+  // Virtual texturing showcase: one huge ground plane whose albedo streams
+  // from the feedback-driven page atlas (the megatexture is procedural - a
+  // survey grid with mip tinting, so residency and LOD read directly).
+  asset::Material vt_mat;
+  vt_mat.id = asset::MakeAssetId("builtin/vt/mat");
+  vt_mat.virtual_albedo = true;
+  vt_mat.roughness_factor = 0.85f;
+  if (!config_.headless) renderer_.UploadMaterial(vt_mat);
+
+  asset::Mesh ground =
+      asset::MakeBox(240.0f, 0.2f, 240.0f, asset::MakeAssetId("builtin/vt/ground"));
+  ground.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(ground.lods[0].indices.size()), vt_mat.id});
+  // A few reference blocks so scale and shadows read.
+  asset::Mesh block = asset::MakeBox(2.0f, 2.0f, 2.0f, asset::MakeAssetId("builtin/vt/block"));
+  block.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(block.lods[0].indices.size()), vt_mat.id});
+  if (!config_.headless) {
+    renderer_.UploadMesh(ground);
+    renderer_.UploadMesh(block);
+  }
+  ecs::Entity g = world_.Create();
+  world_.Add(g, world::Transform{.position = {0.0f, -0.2f, 0.0f}});
+  world_.Add(g, world::Renderable{ground.id});
+  for (int i = 0; i < 4; ++i) {
+    ecs::Entity b = world_.Create();
+    world_.Add(b, world::Transform{.position = {-12.0f + 8.0f * i, 1.0f, -14.0f - 6.0f * i}});
+    world_.Add(b, world::Renderable{block.id});
+  }
+
+  ctx_.scene_owns_sun = true;
+  renderer_.settings().sun_direction = {-0.5f, -0.6f, -0.62f};
+  renderer_.settings().sun_intensity = 3.2f;
+  renderer_.settings().sun_color = {1.0f, 0.95f, 0.88f};
+  camera_.set_position({0.0f, 1.8f, 8.0f});
+  camera_.set_yaw_pitch(0.0f, -0.12f);
+  camera_.speed = 12.0f;
+}
+
 void DemoScenes::CreateBrickDemoScene() {
   // Parallax-occlusion showcase: a procedurally textured brick wall + floor
   // under a grazing sun, so the mortar recesses parallax and self-shadow.
@@ -1361,6 +1401,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "bricks") {
     CreateBrickDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "vt") {
+    CreateVirtualTextureDemoScene();
     return;
   }
   if (config_.demo_scene == "sss") {

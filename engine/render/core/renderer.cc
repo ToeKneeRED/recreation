@@ -339,6 +339,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   }
   vrs_.Initialize(*device_);  // non-fatal: needs attachment VRS hardware
   if (rt_available_) restir_di_.Initialize(*device_);  // non-fatal: gates on available()
+  virtual_texture_.Initialize(*device_);  // non-fatal: gates on available()
   if (!particles_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!gaussians_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!fur_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
@@ -1525,6 +1526,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
          .width = render_width_, .height = render_height_});
   }
 
+  // Virtual texturing: drain last frame's page requests, stream pages, and
+  // record this frame's atlas/indirection uploads + the feedback copy/reset.
+  if (!path_trace) virtual_texture_.AddToGraph(graph_, frame_index_);
+
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
     Vec3 env_sun = applied_sun_direction_;
@@ -2353,7 +2358,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             local_shadows_active_ ? local_shadows_.atlas().view : TextureView{},
             decal_normal_atlas_view_,
             restir_active ? ctx.graph->image(restir_out.diffuse).view : TextureView{},
-            restir_active ? ctx.graph->image(restir_out.spec).view : TextureView{});
+            restir_active ? ctx.graph->image(restir_out.spec).view : TextureView{},
+            virtual_texture_.available() ? virtual_texture_.feedback_buffer() : GpuBuffer{},
+            virtual_texture_.available() ? virtual_texture_.indirection_view() : TextureView{},
+            virtual_texture_.available() ? virtual_texture_.atlas_view() : TextureView{});
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(scene_color).view,
@@ -3209,6 +3217,7 @@ void Renderer::Shutdown() {
     exposure_.Destroy(*device_);
     vrs_.Destroy(*device_);
     restir_di_.Destroy(*device_);
+    virtual_texture_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
     recon_path_tracer_.Destroy(*device_);

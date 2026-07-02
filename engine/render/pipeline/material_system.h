@@ -56,6 +56,7 @@ class MaterialSystem {
   static constexpr u32 kFlagHasHeightMap = 1u << 5;  // parallax occlusion march
   static constexpr u32 kFlagSkin = 1u << 6;          // screen-space subsurface scattering
   static constexpr u32 kFlagHair = 1u << 7;          // kajiya-kay strand specular
+  static constexpr u32 kFlagVirtualAlbedo = 1u << 8;  // albedo via the virtual-texture atlas
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).

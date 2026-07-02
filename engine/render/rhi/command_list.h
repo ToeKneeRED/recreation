@@ -54,7 +54,8 @@ struct BufferTextureCopy {
   u64 buffer_offset = 0;
   u32 mip = 0;
   u32 array_layer = 0;
-  Extent2D extent{};  // texel region at origin; {0,0} = whole mip
+  i32 offset[2] = {0, 0};  // texel destination origin
+  Extent2D extent{};       // texel region; {0,0} = whole mip at origin
 };
 
 // BLAS build input: triangle geometry reached through device addresses, one

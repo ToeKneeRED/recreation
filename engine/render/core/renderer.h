@@ -36,6 +36,7 @@
 #include "render/atmosphere/froxel_fog.h"
 #include "render/post/vrs_rate.h"
 #include "render/gi/restir_di.h"
+#include "render/texturing/virtual_texture.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -293,6 +294,7 @@ class Renderer {
   bool local_shadows_active_ = false;  // faces assigned this frame
   VrsRatePass vrs_;
   RestirDi restir_di_;
+  VirtualTexture virtual_texture_;
   bool vrs_active_ = false;  // rate image attached to this frame's scene pass
   PipelineHandle light_cluster_pipeline_;
   PipelineHandle contact_shadow_pipeline_;

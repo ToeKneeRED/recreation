@@ -65,6 +65,9 @@ struct Material {
   // (strand direction) replaces the GGX sun response; roughness drives the
   // highlight width. Pair with alpha-masked cards for real hair.
   bool hair = false;
+  // Albedo comes from the engine's virtual-texture space instead of the
+  // base_color texture (feedback-streamed page atlas; see VirtualTexture).
+  bool virtual_albedo = false;
 };
 
 }  // namespace rec::asset

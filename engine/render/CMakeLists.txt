@@ -36,6 +36,7 @@ recreation_add_module(render
   post/motion_blur.cc
   post/vrs_rate.cc
   gi/restir_di.cc
+  texturing/virtual_texture.cc
   post/depth_of_field.cc
   post/upscaler.cc
   geometry/water.cc
