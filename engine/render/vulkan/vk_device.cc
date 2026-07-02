@@ -803,6 +803,47 @@ GpuImage VulkanDevice::CreateImage2D(Format format, Extent2D extent, TextureUsag
           .mip_levels = mip_levels};
 }
 
+GpuImage VulkanDevice::CreateImage3D(Format format, u32 width, u32 height, u32 depth,
+                                     TextureUsageFlags usage) {
+  VkFormat vk_format = ToVkFormat(format);
+  VkImageCreateInfo image_info{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  image_info.imageType = VK_IMAGE_TYPE_3D;
+  image_info.format = vk_format;
+  image_info.extent = {width, height, depth};
+  image_info.mipLevels = 1;
+  image_info.arrayLayers = 1;
+  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_info.usage = ToVkImageUsage(usage, format);
+
+  VmaAllocationCreateInfo alloc_info{};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+  VkImage image = VK_NULL_HANDLE;
+  VmaAllocation allocation = nullptr;
+  if (vmaCreateImage(allocator_, &image_info, &alloc_info, &image, &allocation, nullptr) !=
+      VK_SUCCESS) {
+    REC_ERROR("3d image allocation failed: format {} {}x{}x{}", static_cast<int>(format), width,
+              height, depth);
+    return {};
+  }
+
+  VkImageAspectFlags aspect = AspectOf(format);
+  VkImageViewCreateInfo view_info{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  view_info.image = image;
+  view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+  view_info.format = vk_format;
+  view_info.subresourceRange = {aspect, 0, 1, 0, 1};
+  VkImageView view = VK_NULL_HANDLE;
+  vkCreateImageView(device_, &view_info, nullptr, &view);
+
+  auto* record = new TextureRecord{image, allocation, view, vk_format, aspect, 1, 1};
+  return {.handle = MakeHandle<TextureHandle>(record),
+          .view = MakeView(view),
+          .format = format,
+          .extent = {width, height},
+          .mip_levels = 1};
+}
+
 GpuImage VulkanDevice::CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                                        u32 mip_levels) {
   VkFormat vk_format = ToVkFormat(format);

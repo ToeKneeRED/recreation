@@ -254,6 +254,8 @@ void Engine::ApplyRenderPreset() {
   tuned.async_compute = env.async_compute;  // honor REC_ASYNC_COMPUTE
   tuned.frame_generation = env.frame_generation;  // honor REC_FRAMEGEN
   tuned.local_shadows = env.local_shadows;  // honor REC_LOCAL_SHADOWS
+  tuned.froxel_fog = env.froxel_fog;  // honor REC_FROXEL
+  tuned.froxel_density = env.froxel_density;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
   tuned.cloud_coverage = env.cloud_coverage;

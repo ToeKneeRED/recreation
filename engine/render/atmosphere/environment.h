@@ -57,6 +57,9 @@ class EnvironmentSystem {
   // Neutral stand-ins for passes that statically bind ddgi inputs.
   TextureView black_array_view() const { return black_array_view_; }
   const GpuBuffer& dummy_volume() const { return dummy_volume_; }
+  const GpuBuffer& dummy_storage() const { return dummy_storage_; }
+  TextureView shadow_dummy_view() const { return shadow_dummy_.view; }
+  SamplerHandle comparison_sampler() const { return shadow_sampler_; }
 
   struct DdgiBinding {
     TextureView irradiance;

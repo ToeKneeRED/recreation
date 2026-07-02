@@ -40,6 +40,8 @@ base::Option<double> SssWidth{"sss.width", 0.012, "REC_SSS_WIDTH"};
 base::Option<bool> AsyncComputeOpt{"async.compute", true, "REC_ASYNC_COMPUTE"};
 base::Option<bool> FrameGenOpt{"framegen", false, "REC_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "REC_LOCAL_SHADOWS"};
+base::Option<bool> FroxelOpt{"froxel.fog", true, "REC_FROXEL"};
+base::Option<double> FroxelDensity{"froxel.density", 0.015, "REC_FROXEL_DENSITY"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -310,6 +312,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
 
   if (!shadow_.Initialize(*device_, material_system_->set_layout())) return false;  // raster sun shadows
   if (!local_shadows_.Initialize(*device_)) return false;  // clustered light shadows
+  if (!froxel_fog_.Initialize(*device_)) {
+    REC_WARN("froxel volumetrics unavailable");  // non-fatal: feature gates on available()
+  }
   if (!particles_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!gaussians_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!fur_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
@@ -464,6 +469,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (AsyncComputeOpt.overridden()) settings_.async_compute = AsyncComputeOpt;
   if (FrameGenOpt.overridden()) settings_.frame_generation = FrameGenOpt;
   if (LocalShadowsOpt.overridden()) settings_.local_shadows = LocalShadowsOpt;
+  if (FroxelOpt.overridden()) settings_.froxel_fog = FroxelOpt;
+  if (FroxelDensity.overridden()) settings_.froxel_density = static_cast<f32>(double(FroxelDensity));
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -2493,6 +2500,42 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // the high-frequency streaks. Surface wetness (above) stays pre-resolve since
   // it shades real surfaces that should be anti-aliased.
 
+  // Unified froxel volumetrics: near-field scattering from the sun and the
+  // shadowed clustered lights, composited before the temporal pass so the
+  // jittered volume resolves clean.
+  if (settings_.froxel_fog && froxel_fog_.available() && !path_trace &&
+      depth_export != kInvalidResource) {
+    FroxelFog::Frame ff;
+    ff.inv_view_proj = globals.inv_view_proj;
+    ff.prev_view_proj = globals.prev_view_proj;
+    ff.camera_pos = view.camera.eye;
+    ff.frame_index = frame_index_;
+    ff.sun_direction = applied_sun_direction_;
+    ff.anisotropy = settings_.fog_anisotropy;
+    ff.sun_color = applied_sun_color_ * applied_sun_intensity_;
+    ff.ambient = settings_.ambient * 0.05f;
+    ff.density = settings_.froxel_density;
+    ff.height_falloff = settings_.fog_height_falloff;
+    ff.base_height = settings_.fog_base_height;
+    std::memcpy(ff.cluster_params, globals.cluster_params, sizeof(ff.cluster_params));
+    ff.screen_size[0] = static_cast<f32>(render_width_);
+    ff.screen_size[1] = static_cast<f32>(render_height_);
+    ff.csm_active = csm_active;
+    ff.lights = frame.lights;
+    ff.cluster_counts = cluster_counts_;
+    ff.cluster_indices = cluster_indices_;
+    ff.local_shadow_faces = local_shadows_active_ ? local_shadows_.face_buffer(frame_slot)
+                                                  : environment_->dummy_storage();
+    ff.local_shadow_atlas = local_shadows_active_ ? local_shadows_.atlas().view
+                                                  : environment_->shadow_dummy_view();
+    ff.cascade_buffer = csm_active ? shadow_.cascade_buffer(shadow_slot) : GpuBuffer{};
+    ff.cascade_size = shadow_.cascade_buffer_size();
+    ff.comparison_sampler = environment_->comparison_sampler();
+    froxel_fog_.AddToGraph(graph_, lit, depth_export,
+                           csm_active ? shadow_atlas : kInvalidResource,
+                           {render_width_, render_height_}, ff);
+  }
+
   // Volumetric fog marches the lit scene against depth before the temporal
   // pass, so the marched noise resolves into stable shafts.
   if (fog_active) {
@@ -3022,6 +3065,7 @@ void Renderer::Shutdown() {
     device_->DestroyBuffer(hdr_readback_);
     shadow_.Destroy(*device_);
     local_shadows_.Destroy(*device_);
+    froxel_fog_.Destroy(*device_);
     particles_.Destroy(*device_);
     gaussians_.Destroy(*device_);
     fur_.Destroy(*device_);

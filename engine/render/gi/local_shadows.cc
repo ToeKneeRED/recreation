@@ -146,6 +146,9 @@ void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
   TextureBarrier to_read =
       Transition(atlas_, ResourceState::kDepthTarget, ResourceState::kShaderReadFragment);
   cmd.TextureBarriers({&to_read, 1});
+  // The froxel volume samples the atlas from compute; widen visibility (the
+  // layout above already suits any sampled read).
+  cmd.MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeRead);
 }
 
 }  // namespace rec::render

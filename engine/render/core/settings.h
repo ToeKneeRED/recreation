@@ -178,6 +178,12 @@ struct RenderSettings {
   bool sss = true;
   f32 sss_width = 0.012f;  // world scattering radius, meters
 
+  // Unified froxel volumetric lighting: a 3D scattering volume lit by the sun
+  // and every clustered light (with local shadows), sampled by the fog
+  // composite and translucents. Density is the subtle always-on base haze.
+  bool froxel_fog = true;
+  f32 froxel_density = 0.015f;
+
   // Local light shadows: a depth-atlas of faces for the nearest clustered
   // spot/point lights (the raster tier's answer to light leaking; the rt
   // fragment path keeps its exact per-light rays).

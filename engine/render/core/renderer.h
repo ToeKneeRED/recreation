@@ -33,6 +33,7 @@
 #include "render/gi/recon_path_tracer.h"
 #include "render/atmosphere/precipitation.h"
 #include "render/atmosphere/surface_weather.h"
+#include "render/atmosphere/froxel_fog.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -286,6 +287,7 @@ class Renderer {
   MotionBlurPass motion_blur_;
   DepthOfFieldPass dof_;
   LocalShadows local_shadows_;
+  FroxelFog froxel_fog_;
   bool local_shadows_active_ = false;  // faces assigned this frame
   PipelineHandle light_cluster_pipeline_;
   PipelineHandle contact_shadow_pipeline_;

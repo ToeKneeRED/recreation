@@ -22,6 +22,7 @@ recreation_add_module(render
   screenspace/reflection_trace.cc
   atmosphere/environment.cc
   atmosphere/volumetric_fog.cc
+  atmosphere/froxel_fog.cc
   atmosphere/aerial_perspective.cc
   atmosphere/clouds.cc
   atmosphere/precipitation.cc
@@ -168,6 +169,9 @@ set(RECREATION_RENDER_SHADERS
   shaders/atmosphere/aerial_perspective.cs.hlsl
   shaders/atmosphere/clouds.cs.hlsl
   shaders/atmosphere/cloud_shadow.cs.hlsl
+  shaders/atmosphere/froxel_scatter.cs.hlsl
+  shaders/atmosphere/froxel_integrate.cs.hlsl
+  shaders/atmosphere/froxel_apply.cs.hlsl
   shaders/atmosphere/precipitation.cs.hlsl
   shaders/atmosphere/surface_weather.cs.hlsl
   shaders/atmosphere/sky.cs.hlsl

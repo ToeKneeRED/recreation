@@ -19,7 +19,7 @@ streaming.
       nearest-K selection, PCF sampling in the cluster loop. Reuse the CSM
       depth pipeline for face rendering; `PointLight.params.w` carries the
       atlas slot (free across all light types).
-- [ ] **Unified froxel volumetric lighting.** A 3D scattering volume fed by
+- [x] **Unified froxel volumetric lighting.** (landed) A 3D scattering volume fed by
       the sun (shadowed) + all clustered lights (with their new shadows),
       temporally jittered, integrated front-to-back; fog composite samples it,
       and particles/translucents sample the same volume so a torch lights the

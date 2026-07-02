@@ -120,6 +120,12 @@ class Device {
 
   virtual GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
                                  u32 mip_levels = 1) = 0;
+  // Volumetric texture (froxel scattering volumes). Backends without it
+  // return a null image and the caller skips the feature.
+  virtual GpuImage CreateImage3D(Format /*format*/, u32 /*width*/, u32 /*height*/, u32 /*depth*/,
+                                 TextureUsageFlags /*usage*/) {
+    return {};
+  }
   virtual GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                                    u32 mip_levels = 1) = 0;
   virtual void DestroyImage(GpuImage& image) = 0;
