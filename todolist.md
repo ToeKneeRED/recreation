@@ -42,8 +42,11 @@ streaming.
       CONCURRENT sharing on buffers + non-attachment images (render targets
       stay EXCLUSIVE for compression), compute-family command pool, and
       compute-legal stage/access mask filtering on the async list's barriers.
-- [ ] **PSO hitch elimination.** The persistent pipeline cache fixes run 2;
-      async pipeline compilation + ubershader fallback fixes run 1.
+- [x] **PSO hitch elimination.** (landed) The persistent pipeline cache fixes
+      run 2+; startup pipeline creation now batches onto a worker pool
+      (BeginPipelineBatch/EndPipelineBatch, binds wait on in-flight compiles)
+      so a cold cache costs ~90 ms over warm instead of ~2.6 s. REC_PSO_BATCH=0
+      forces the serial path.
 - [x] **Golden-image regression CI.** (landed) tests/golden/golden.py:
       REC_FIXED_DT lockstep captures of 4 demo scenes vs checked-in refs
       (NVIDIA baseline, half-res), diff heatmaps; CI golden-smoke job on

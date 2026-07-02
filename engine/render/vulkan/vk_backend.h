@@ -5,6 +5,14 @@
 // include this; pass code sees rhi/ headers exclusively.
 
 #include <volk.h>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <vector>
+
 
 #include <vk_mem_alloc.h>
 
@@ -48,6 +56,8 @@ struct BindingSetRecord {
 };
 
 struct PipelineRecord {
+  enum BuildState : u32 { kBuilt = 0, kBuilding = 1, kFailed = 2 };
+
   VkPipeline pipeline = VK_NULL_HANDLE;
   VkPipelineLayout layout = VK_NULL_HANDLE;  // cached, not owned
   VkPipelineBindPoint bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -55,6 +65,9 @@ struct PipelineRecord {
   u32 push_size = 0;
   // Cached set layouts for BindTransient, indexed by set. Not owned.
   base::Vector<VkDescriptorSetLayout> set_layouts;
+  // Batched creation compiles on a worker thread; readers wait via
+  // WaitPipelineReady before touching any other field.
+  std::atomic<u32> build_state{kBuilt};
 };
 
 struct AccelStructRecord {
@@ -249,6 +262,11 @@ class VulkanDevice final : public Device {
   PipelineHandle CreateComputePipeline(const ComputePipelineDesc& desc) override;
   PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) override;
   void DestroyPipeline(PipelineHandle pipeline) override;
+  void BeginPipelineBatch() override;
+  bool EndPipelineBatch() override;
+  // Blocks until a (possibly batched) pipeline finished compiling; false if
+  // its creation failed. Cheap once built (one relaxed atomic load).
+  bool WaitPipelineReady(PipelineRecord* record);
   BindingLayoutHandle CreateBindingLayout(const BindingLayoutDesc& desc) override;
   void DestroyBindingLayout(BindingLayoutHandle layout) override;
   BindingSetHandle CreateBindingSet(BindingLayoutHandle layout, u32 variable_count) override;
@@ -285,6 +303,37 @@ class VulkanDevice final : public Device {
 
   // Descriptor writes shared by BindTransient and UpdateBindingSet.
   void WriteDescriptors(VkDescriptorSet set, std::span<const BindingItem> items);
+  bool BuildComputePipeline(const ComputePipelineDesc& desc, PipelineRecord* record);
+  bool BuildGraphicsPipeline(const GraphicsPipelineDesc& desc, PipelineRecord* record);
+  void EnqueuePipelineJob(std::function<void()> job);
+
+  // Inside a batch the build runs on a worker with a deep copy of the desc
+  // (the desc's vectors copy; debug_name is re-pointed at an owned string);
+  // outside it runs inline and failures return a null handle immediately.
+  template <typename Desc, typename Build>
+  PipelineHandle DispatchPipelineBuild(const Desc& desc, Build&& build) {
+    auto* record = new PipelineRecord{};
+    if (!pipeline_batch_active_) {
+      if (!build(desc, record)) {
+        delete record;
+        return {};
+      }
+      return MakeHandle<PipelineHandle>(record);
+    }
+    record->build_state.store(PipelineRecord::kBuilding, std::memory_order_relaxed);
+    EnqueuePipelineJob([this, copy = Desc(desc),
+                        name = std::string(desc.debug_name ? desc.debug_name : ""), record,
+                        build]() mutable {
+      copy.debug_name = name.empty() ? nullptr : name.c_str();
+      const bool ok = build(copy, record);
+      if (!ok) pipeline_batch_failures_.fetch_add(1, std::memory_order_relaxed);
+      record->build_state.store(ok ? PipelineRecord::kBuilt : PipelineRecord::kFailed,
+                                std::memory_order_release);
+      record->build_state.notify_all();
+    });
+    return MakeHandle<PipelineHandle>(record);
+  }
+
   VkPipelineLayout GetOrCreatePipelineLayout(std::span<const VkDescriptorSetLayout> sets,
                                              VkShaderStageFlags push_stages, u32 push_size);
   VkDescriptorSetLayout GetOrCreateSetLayout(const BindingLayoutDesc& desc);
@@ -349,8 +398,20 @@ class VulkanDevice final : public Device {
   FrameRing frames_[kMaxFramesInFlight];
 
   // Caches, keyed by content hash; entries live for the device's lifetime.
+  // The layout caches are shared with pipeline-batch worker threads.
+  std::mutex layout_cache_mutex_;
   base::UnorderedMap<u64, VkDescriptorSetLayout> set_layout_cache_;
   base::UnorderedMap<u64, VkPipelineLayout> pipeline_layout_cache_;
+
+  // Startup pipeline batch: a transient worker pool drains the job queue
+  // while the main thread keeps issuing Create*Pipeline calls.
+  bool pipeline_batch_active_ = false;
+  bool pipeline_workers_quit_ = false;
+  std::mutex pipeline_queue_mutex_;
+  std::condition_variable pipeline_queue_cv_;
+  std::deque<std::function<void()>> pipeline_jobs_;
+  std::vector<std::thread> pipeline_workers_;
+  std::atomic<u32> pipeline_batch_failures_{0};
   base::UnorderedMap<u64, VkSampler> sampler_cache_;
 
   friend class VulkanSwapchain;

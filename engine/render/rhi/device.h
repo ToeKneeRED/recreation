@@ -146,6 +146,15 @@ class Device {
   virtual PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
   virtual void DestroyPipeline(PipelineHandle pipeline) = 0;
 
+  // Bulk pipeline creation (engine startup): between Begin and End the
+  // Create*Pipeline calls may return handles whose driver object is still
+  // compiling on worker threads - binding such a handle blocks until it is
+  // ready. EndPipelineBatch joins the workers and returns false if any
+  // creation failed (individual handles cannot signal failure while a batch
+  // is open). Backends without an implementation stay synchronous.
+  virtual void BeginPipelineBatch() {}
+  virtual bool EndPipelineBatch() { return true; }
+
   // Explicit layouts, for sets shared across pipelines (bindless registry,
   // frame globals). Pass-local sets skip this and declare slots inline in the
   // pipeline desc.

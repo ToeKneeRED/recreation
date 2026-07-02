@@ -1,6 +1,7 @@
 #include "render/core/renderer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -156,6 +157,24 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     REC_WARN("renderer running in stub mode");
     return true;
   }
+
+  // Everything below creates pipelines; batch them so the driver compiles
+  // across cores on a cold cache (the guard joins the workers on every exit
+  // path, and a failed compile fails Initialize at the End check).
+  struct PipelineBatchGuard {
+    Device& device;
+    bool ended = false;
+    bool End() {
+      ended = true;
+      return device.EndPipelineBatch();
+    }
+    ~PipelineBatchGuard() {
+      if (!ended) device.EndPipelineBatch();
+    }
+  } pipeline_batch{*device_};
+  auto t_batch0 = std::chrono::steady_clock::now();
+  const char* pso_batch_env = std::getenv("REC_PSO_BATCH");
+  if (!pso_batch_env || pso_batch_env[0] != '0') device_->BeginPipelineBatch();
 
   swapchain_ = device_->CreateSwapchain(output_width_, output_height_, settings_.vsync,
                                         settings_.hdr_output);
@@ -495,6 +514,15 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (Snow.overridden()) settings_.precip_snow = Snow;
   if (Aurora.overridden()) settings_.aurora = Aurora;
 
+  auto t_batch1 = std::chrono::steady_clock::now();
+  if (!pipeline_batch.End()) {
+    REC_ERROR("pipeline batch reported failed compilations");
+    return false;
+  }
+  auto t_batch2 = std::chrono::steady_clock::now();
+  REC_INFO("renderer init: {} ms (pipeline batch joined in {} ms)",
+           std::chrono::duration_cast<std::chrono::milliseconds>(t_batch1 - t_batch0).count(),
+           std::chrono::duration_cast<std::chrono::milliseconds>(t_batch2 - t_batch1).count());
   return true;
 }
 

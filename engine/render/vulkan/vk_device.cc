@@ -1064,6 +1064,7 @@ SamplerHandle VulkanDevice::GetSampler(const SamplerDesc& desc) {
 // --- bindings ---
 
 VkDescriptorSetLayout VulkanDevice::GetOrCreateSetLayout(const BindingLayoutDesc& desc) {
+  std::lock_guard lock(layout_cache_mutex_);
   u64 key = HashLayoutDesc(desc);
   if (VkDescriptorSetLayout* cached = set_layout_cache_.find(key)) return *cached;
 
@@ -1113,6 +1114,7 @@ VkDescriptorSetLayout VulkanDevice::GetOrCreateSetLayout(const BindingLayoutDesc
 
 VkPipelineLayout VulkanDevice::GetOrCreatePipelineLayout(
     std::span<const VkDescriptorSetLayout> sets, VkShaderStageFlags push_stages, u32 push_size) {
+  std::lock_guard lock(layout_cache_mutex_);
   u64 key = HashBytes(sets.data(), sets.size() * sizeof(VkDescriptorSetLayout));
   key = HashBytes(&push_stages, sizeof(push_stages), key);
   key = HashBytes(&push_size, sizeof(push_size), key);
@@ -1280,20 +1282,75 @@ bool ResolveSetLayouts(VulkanDevice& device, const base::Vector<PipelineBindings
 
 }  // namespace
 
-PipelineHandle VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) {
+void VulkanDevice::BeginPipelineBatch() {
+  if (pipeline_batch_active_) return;
+  pipeline_batch_active_ = true;
+  pipeline_workers_quit_ = false;
+  pipeline_batch_failures_.store(0, std::memory_order_relaxed);
+  const u32 workers = std::clamp(std::thread::hardware_concurrency(), 2u, 16u);
+  for (u32 i = 0; i < workers; ++i) {
+    pipeline_workers_.emplace_back([this] {
+      for (;;) {
+        std::function<void()> job;
+        {
+          std::unique_lock lock(pipeline_queue_mutex_);
+          pipeline_queue_cv_.wait(
+              lock, [this] { return pipeline_workers_quit_ || !pipeline_jobs_.empty(); });
+          if (pipeline_jobs_.empty()) return;
+          job = std::move(pipeline_jobs_.front());
+          pipeline_jobs_.pop_front();
+        }
+        job();
+      }
+    });
+  }
+}
+
+bool VulkanDevice::EndPipelineBatch() {
+  if (!pipeline_batch_active_) return true;
+  pipeline_batch_active_ = false;
+  {
+    std::lock_guard lock(pipeline_queue_mutex_);
+    pipeline_workers_quit_ = true;
+  }
+  pipeline_queue_cv_.notify_all();
+  for (std::thread& worker : pipeline_workers_) worker.join();
+  pipeline_workers_.clear();
+  return pipeline_batch_failures_.load(std::memory_order_relaxed) == 0;
+}
+
+void VulkanDevice::EnqueuePipelineJob(std::function<void()> job) {
+  {
+    std::lock_guard lock(pipeline_queue_mutex_);
+    pipeline_jobs_.push_back(std::move(job));
+  }
+  pipeline_queue_cv_.notify_one();
+}
+
+bool VulkanDevice::WaitPipelineReady(PipelineRecord* record) {
+  u32 state = record->build_state.load(std::memory_order_acquire);
+  while (state == PipelineRecord::kBuilding) {
+    record->build_state.wait(PipelineRecord::kBuilding, std::memory_order_acquire);
+    state = record->build_state.load(std::memory_order_acquire);
+  }
+  return state == PipelineRecord::kBuilt;
+}
+
+bool VulkanDevice::BuildComputePipeline(const ComputePipelineDesc& desc,
+                                        PipelineRecord* record) {
   base::Vector<VkDescriptorSetLayout> set_layouts;
-  if (!ResolveSetLayouts(*this, desc.sets, kShaderStageCompute, &set_layouts)) return {};
+  if (!ResolveSetLayouts(*this, desc.sets, kShaderStageCompute, &set_layouts)) return false;
 
   VkPipelineLayout layout = GetOrCreatePipelineLayout(
       {set_layouts.data(), set_layouts.size()}, VK_SHADER_STAGE_COMPUTE_BIT,
       desc.push_constant_size);
-  if (layout == VK_NULL_HANDLE) return {};
+  if (layout == VK_NULL_HANDLE) return false;
 
   VkShaderModule module = CreateModule(device_, desc.shader);
   if (module == VK_NULL_HANDLE) {
     REC_ERROR("compute shader module creation failed ({})",
               desc.debug_name ? desc.debug_name : "?");
-    return {};
+    return false;
   }
 
   VkComputePipelineCreateInfo info{.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
@@ -1308,28 +1365,38 @@ PipelineHandle VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& de
   vkDestroyShaderModule(device_, module, nullptr);
   if (result != VK_SUCCESS) {
     REC_ERROR("compute pipeline creation failed ({})", desc.debug_name ? desc.debug_name : "?");
-    return {};
+    return false;
   }
 
-  auto* record = new PipelineRecord{pipeline, layout, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                    VK_SHADER_STAGE_COMPUTE_BIT, desc.push_constant_size,
-                                    std::move(set_layouts)};
-  return MakeHandle<PipelineHandle>(record);
+  record->pipeline = pipeline;
+  record->layout = layout;
+  record->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
+  record->push_stages = VK_SHADER_STAGE_COMPUTE_BIT;
+  record->push_size = desc.push_constant_size;
+  record->set_layouts = std::move(set_layouts);
+  return true;
 }
 
-PipelineHandle VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) {
+PipelineHandle VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) {
+  return DispatchPipelineBuild(desc, [this](const ComputePipelineDesc& d, PipelineRecord* r) {
+    return BuildComputePipeline(d, r);
+  });
+}
+
+bool VulkanDevice::BuildGraphicsPipeline(const GraphicsPipelineDesc& desc,
+                                         PipelineRecord* record) {
   bool mesh_path = desc.mesh.valid();
   ShaderStageFlags all_stages =
       mesh_path ? (kShaderStageTask | kShaderStageMesh | kShaderStageFragment)
                 : (kShaderStageVertex | kShaderStageFragment);
 
   base::Vector<VkDescriptorSetLayout> set_layouts;
-  if (!ResolveSetLayouts(*this, desc.sets, all_stages, &set_layouts)) return {};
+  if (!ResolveSetLayouts(*this, desc.sets, all_stages, &set_layouts)) return false;
 
   VkShaderStageFlags push_stages = ToVkStages(all_stages);
   VkPipelineLayout layout = GetOrCreatePipelineLayout(
       {set_layouts.data(), set_layouts.size()}, push_stages, desc.push_constant_size);
-  if (layout == VK_NULL_HANDLE) return {};
+  if (layout == VK_NULL_HANDLE) return false;
 
   VkPipelineShaderStageCreateInfo stages[3];
   u32 stage_count = 0;
@@ -1359,7 +1426,7 @@ PipelineHandle VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& 
     destroy_modules();
     REC_ERROR("graphics shader module creation failed ({})",
               desc.debug_name ? desc.debug_name : "?");
-    return {};
+    return false;
   }
 
   base::Vector<VkVertexInputBindingDescription> vertex_bindings;
@@ -1505,16 +1572,27 @@ PipelineHandle VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& 
   destroy_modules();
   if (result != VK_SUCCESS) {
     REC_ERROR("graphics pipeline creation failed ({})", desc.debug_name ? desc.debug_name : "?");
-    return {};
+    return false;
   }
 
-  auto* record = new PipelineRecord{pipeline, layout, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    push_stages, desc.push_constant_size, std::move(set_layouts)};
-  return MakeHandle<PipelineHandle>(record);
+  record->pipeline = pipeline;
+  record->layout = layout;
+  record->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  record->push_stages = push_stages;
+  record->push_size = desc.push_constant_size;
+  record->set_layouts = std::move(set_layouts);
+  return true;
+}
+
+PipelineHandle VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) {
+  return DispatchPipelineBuild(desc, [this](const GraphicsPipelineDesc& d, PipelineRecord* r) {
+    return BuildGraphicsPipeline(d, r);
+  });
 }
 
 void VulkanDevice::DestroyPipeline(PipelineHandle pipeline) {
   if (PipelineRecord* record = Rec(pipeline)) {
+    WaitPipelineReady(record);
     if (record->pipeline) vkDestroyPipeline(device_, record->pipeline, nullptr);
     // Layouts are cached and shared; freed at shutdown.
     delete record;

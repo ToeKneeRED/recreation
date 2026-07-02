@@ -4,6 +4,10 @@
 namespace rec::render::vk {
 
 void VulkanCommandList::BindPipeline(PipelineHandle pipeline) {
+  if (!device_.WaitPipelineReady(Rec(pipeline))) {
+    REC_ERROR("binding a pipeline whose creation failed");
+    return;
+  }
   bound_ = Rec(pipeline);
   vkCmdBindPipeline(cmd_, bound_->bind_point, bound_->pipeline);
 }
