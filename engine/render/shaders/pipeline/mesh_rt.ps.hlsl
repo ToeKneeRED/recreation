@@ -344,6 +344,19 @@ float3 ThinFilm(float ndv, float thickness_nm, float film_ior) {
   return 0.5 + 0.5 * cos(phase);
 }
 
+
+// Specular anti-aliasing (Tokuyoshi/Kaplanyan-style): widen the GGX lobe by
+// the screen-space variance of the shaded normal, so minified normal maps and
+// curved silhouettes stop minting single-pixel fireflies the TAA cannot hold.
+// The kernel cap keeps mirrors from degrading into satin at grazing angles.
+float SpecularAaRoughness(float roughness, float3 n) {
+  float3 dndx = ddx(n);
+  float3 dndy = ddy(n);
+  float variance = 0.25 * (dot(dndx, dndx) + dot(dndy, dndy));
+  float kernel = min(variance, 0.18);
+  return sqrt(saturate(roughness * roughness + kernel));
+}
+
 // Cook-Torrance ggx with Schlick fresnel and Smith visibility for the sun,
 // split-sum ibl with Fdez-Aguera multi-scatter for ambient. Optional clearcoat,
 // sheen and anisotropy lobes layer on top.
@@ -357,6 +370,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
                   ? float2(1.0, 0.0)
                   : metallic_roughness_map.Sample(metallic_roughness_sampler, input.uv).gb;
   float roughness = clamp(mr.x * material.roughness_factor, 0.045, 1.0);
+  roughness = SpecularAaRoughness(roughness, n);
   float metallic = clamp(mr.y * material.metallic_factor, 0.0, 1.0);
 
   float3 l = normalize(-frame.sun_direction.xyz);
