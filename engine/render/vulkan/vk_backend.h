@@ -9,6 +9,7 @@
 #include <vk_mem_alloc.h>
 
 #include <memory>
+#include <string>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
@@ -294,6 +295,8 @@ class VulkanDevice final : public Device {
   VkSurfaceKHR surface_ = VK_NULL_HANDLE;
   VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
   VkDevice device_ = VK_NULL_HANDLE;
+  VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
+  std::string pipeline_cache_path_;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
   u32 graphics_family_ = 0;
   VmaAllocator allocator_ = nullptr;

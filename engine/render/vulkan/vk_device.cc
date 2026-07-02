@@ -1,4 +1,8 @@
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <vector>
 #include <cstring>
 
 #include <base/containers/vector.h>
@@ -468,6 +472,31 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
   volkLoadDevice(device->device_);
   vkGetDeviceQueue(device->device_, device->graphics_family_, 0, &device->graphics_queue_);
 
+  // Pipeline cache, persisted to disk so shader compilation hitches only ever
+  // happen once per driver/app version. Stale or corrupt blobs are rejected by
+  // the driver, so loading is fire-and-forget.
+  {
+    const char* home = std::getenv("HOME");
+    std::string dir = std::string(home ? home : ".") + "/.cache/recreation";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    device->pipeline_cache_path_ = dir + "/pipeline.cache";
+    std::vector<char> blob;
+    if (std::ifstream in{device->pipeline_cache_path_, std::ios::binary}) {
+      blob.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    VkPipelineCacheCreateInfo cache_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    cache_info.initialDataSize = blob.size();
+    cache_info.pInitialData = blob.empty() ? nullptr : blob.data();
+    if (vkCreatePipelineCache(device->device_, &cache_info, nullptr,
+                              &device->pipeline_cache_) != VK_SUCCESS) {
+      cache_info.initialDataSize = 0;  // corrupt blob: start fresh
+      cache_info.pInitialData = nullptr;
+      vkCreatePipelineCache(device->device_, &cache_info, nullptr, &device->pipeline_cache_);
+    }
+    if (!blob.empty()) REC_INFO("pipeline cache: loaded {} KB", blob.size() >> 10);
+  }
+
   if (!device->InitResources()) {
     return nullptr;
   }
@@ -563,6 +592,19 @@ void VulkanDevice::ShutdownResources() {
 VulkanDevice::~VulkanDevice() {
   if (device_ != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(device_);
+    if (pipeline_cache_ != VK_NULL_HANDLE) {
+      size_t size = 0;
+      vkGetPipelineCacheData(device_, pipeline_cache_, &size, nullptr);
+      if (size > 0 && !pipeline_cache_path_.empty()) {
+        std::vector<char> blob(size);
+        if (vkGetPipelineCacheData(device_, pipeline_cache_, &size, blob.data()) == VK_SUCCESS) {
+          if (std::ofstream out{pipeline_cache_path_, std::ios::binary}) {
+            out.write(blob.data(), static_cast<std::streamsize>(size));
+          }
+        }
+      }
+      vkDestroyPipelineCache(device_, pipeline_cache_, nullptr);
+    }
     ShutdownResources();
     vkDestroyDevice(device_, nullptr);
   }
@@ -1096,7 +1138,7 @@ PipelineHandle VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& de
   info.stage.pName = "main";
   info.layout = layout;
   VkPipeline pipeline = VK_NULL_HANDLE;
-  VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &info, nullptr,
+  VkResult result = vkCreateComputePipelines(device_, pipeline_cache_, 1, &info, nullptr,
                                              &pipeline);
   vkDestroyShaderModule(device_, module, nullptr);
   if (result != VK_SUCCESS) {
@@ -1280,7 +1322,7 @@ PipelineHandle VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& 
   info.layout = layout;
 
   VkPipeline pipeline = VK_NULL_HANDLE;
-  VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &info, nullptr,
+  VkResult result = vkCreateGraphicsPipelines(device_, pipeline_cache_, 1, &info, nullptr,
                                               &pipeline);
   destroy_modules();
   if (result != VK_SUCCESS) {
