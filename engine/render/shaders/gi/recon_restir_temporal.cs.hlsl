@@ -28,11 +28,11 @@ PUSH_CONSTANTS(ReconRestirTemporalPush, pc);
 [[vk::binding(0, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> r0_out : register(u0, space0);
 [[vk::binding(1, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> r1_out : register(u1, space0);
 [[vk::binding(2, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> r2_out : register(u2, space0);
-[[vk::binding(3, 0)]] Texture2D<float4> s_pos;     // initial sample position (.w hit distance)
-[[vk::binding(4, 0)]] Texture2D<float4> s_nrm;     // initial sample normal
-[[vk::binding(5, 0)]] Texture2D<float4> s_rad;     // initial sample radiance
-[[vk::binding(6, 0)]] Texture2D<float4> p_pos;     // primary hit world position (.w 0 = sky)
-[[vk::binding(7, 0)]] Texture2D<float4> curr_nr;   // primary normal + roughness
+[[vk::binding(3, 0)]] Texture2D<float4> s_pos : register(t3, space0);  // initial sample position (.w hit distance)
+[[vk::binding(4, 0)]] Texture2D<float4> s_nrm : register(t4, space0);  // initial sample normal
+[[vk::binding(5, 0)]] Texture2D<float4> s_rad : register(t5, space0);  // initial sample radiance
+[[vk::binding(6, 0)]] Texture2D<float4> p_pos : register(t6, space0);  // primary hit world position (.w 0 = sky)
+[[vk::binding(7, 0)]] Texture2D<float4> curr_nr : register(t7, space0);  // primary normal + roughness
 [[vk::binding(8, 0)]] Texture2D<float4> prev_nr : register(t8, space0);
 [[vk::binding(9, 0)]] Texture2D<float> curr_viewz : register(t9, space0);
 [[vk::binding(10, 0)]] Texture2D<float> prev_viewz : register(t10, space0);

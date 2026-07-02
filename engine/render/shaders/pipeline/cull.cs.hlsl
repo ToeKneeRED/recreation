@@ -15,9 +15,9 @@ struct Instance {
   uint pad;
 };
 [[vk::binding(0, 0)]] StructuredBuffer<Instance> instances : register(t0, space0);
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint> commands;       // 5 u32 per draw command
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint> visible_count;  // [0]
-[[vk::binding(3, 0)]] Texture2D<float> hiz;                    // last frame, farthest depth
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> commands : register(u1, space0);  // 5 u32 per draw command
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> visible_count : register(u2, space0);  // [0]
+[[vk::binding(3, 0)]] Texture2D<float> hiz : register(t3, space0);  // last frame, farthest depth
 
 struct PushData {
   float4 planes[5];  // left, right, bottom, top, near (normalized, inside >= 0)

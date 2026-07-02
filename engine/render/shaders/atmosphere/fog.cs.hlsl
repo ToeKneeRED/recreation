@@ -17,8 +17,8 @@ struct FogPush {
 PUSH_CONSTANTS(FogPush, pc);
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> output_image : register(u0, space0);
-[[vk::binding(1, 0)]] Texture2D color_in;   // full res, fetched per texel
-[[vk::binding(2, 0)]] Texture2D depth_in;   // raw reversed-z depth export
+[[vk::binding(1, 0)]] Texture2D color_in : register(t1, space0);  // full res, fetched per texel
+[[vk::binding(2, 0)]] Texture2D depth_in : register(t2, space0);  // raw reversed-z depth export
 [[vk::binding(3, 0)]] RaytracingAccelerationStructure tlas : register(t3, space0);
 
 static const float kPi = 3.14159265359;

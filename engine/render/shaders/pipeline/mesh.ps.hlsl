@@ -88,7 +88,7 @@ struct CascadeData {
   float4 p1;  // x cascade-local texel, y unused, z normal bias, w unused
 };
 [[vk::binding(8, 2)]] ConstantBuffer<CascadeData> cascades : register(b8, space2);
-[[vk::combinedImageSampler]] [[vk::binding(9, 2)]] Texture2D opaque_scene;  // for transmission
+[[vk::combinedImageSampler]] [[vk::binding(9, 2)]] Texture2D opaque_scene : register(t9, space2);  // for transmission
 [[vk::combinedImageSampler]] [[vk::binding(9, 2)]] SamplerState opaque_scene_sampler : register(s9, space2);
 
 static const uint kFlagAlphaMask = 1u;

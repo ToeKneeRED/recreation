@@ -34,7 +34,7 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 [[vk::binding(7, 0)]] RaytracingAccelerationStructure tlas : register(t7, space0);
 [[vk::combinedImageSampler]] [[vk::binding(8, 0)]] TextureCube sky_cube : register(t8, space0);
 [[vk::combinedImageSampler]] [[vk::binding(8, 0)]] SamplerState sky_sampler : register(s8, space0);
-[[vk::binding(9, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> specular_out;  // noisy
+[[vk::binding(9, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> specular_out : register(u9, space0);  // noisy
 // ReSTIR GI initial sample (bit 8 of pc.bounces): the first indirect vertex's
 // position/normal and its outgoing radiance toward the primary hit, plus the
 // primary hit's world position (.w 0 marks sky) for reservoir reuse geometry.
@@ -413,6 +413,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   bool restir = (pc.bounces & 0x100u) != 0u;
   bool rr = (pc.bounces & 0x200u) != 0u;  // emit DLSS-RR guide outputs
+  bool restir_di = (pc.bounces & 0x400u) != 0u;  // DI reservoirs own primary direct
 
   if (!prim.hit) {
     // Sky: irradiance 0, sky goes to emissive (composite adds it). Far reprojection
@@ -450,10 +451,14 @@ void main(uint3 id : SV_DispatchThreadID) {
     // a cosine-drawn first vertex whose OUTGOING radiance toward the primary
     // hit folds in its emissive, direct light and the remaining bounces
     // (throughput starts at 1, not pi: this is radiance, not irradiance).
-    for (uint s = 0; s < spp; ++s) {
-      irradiance += DirectIrradiance(prim.position, prim.normal, rng);
+    // With ReSTIR DI the reservoir passes own the primary direct term
+    // (including the point lights this inline path never sampled).
+    if (!restir_di) {
+      for (uint s = 0; s < spp; ++s) {
+        irradiance += DirectIrradiance(prim.position, prim.normal, rng);
+      }
+      irradiance /= float(spp);
     }
-    irradiance /= float(spp);
 
     float3 wi = CosineHemisphere(prim.normal, rng);
     Hit h = TraceClosest(prim.position + prim.normal * 0.002, wi, kSecondarySpread, false);

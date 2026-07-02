@@ -3,8 +3,8 @@
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] SamplerState scene_sampler : register(s0, space0);
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D bloom : register(t1, space0);
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState bloom_sampler : register(s1, space0);
-[[vk::binding(2, 0)]] StructuredBuffer<float> exposure_buffer;  // [0] resolved exposure
-[[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D color_lut;  // 1024x32 strip lut
+[[vk::binding(2, 0)]] StructuredBuffer<float> exposure_buffer : register(t2, space0);  // [0] resolved exposure
+[[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D color_lut : register(t3, space0);  // 1024x32 strip lut
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState color_lut_sampler : register(s3, space0);
 
 struct PushData {

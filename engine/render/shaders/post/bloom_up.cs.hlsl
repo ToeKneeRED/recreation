@@ -2,7 +2,7 @@
 // 3x3 tent upsample, added on top of the matching downsample mip.
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture2D<float4> dst : register(u0, space0);
-[[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D src;  // smaller mip
+[[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D src : register(t1, space0);  // smaller mip
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState src_sampler : register(s1, space0);
 
 struct PushData {

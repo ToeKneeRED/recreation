@@ -80,9 +80,9 @@ struct DdgiVolume {
                           // z max ray distance, w energy scale
 };
 [[vk::binding(6, 2)]] ConstantBuffer<DdgiVolume> ddgi : register(b6, space2);
-[[vk::combinedImageSampler]] [[vk::binding(9, 2)]] Texture2D opaque_scene;  // for transmission
+[[vk::combinedImageSampler]] [[vk::binding(9, 2)]] Texture2D opaque_scene : register(t9, space2);  // for transmission
 [[vk::combinedImageSampler]] [[vk::binding(9, 2)]] SamplerState opaque_scene_sampler : register(s9, space2);
-[[vk::combinedImageSampler]] [[vk::binding(10, 2)]] Texture2D sun_shadow_map;  // SIGMA-denoised
+[[vk::combinedImageSampler]] [[vk::binding(10, 2)]] Texture2D sun_shadow_map : register(t10, space2);  // SIGMA-denoised
 [[vk::combinedImageSampler]] [[vk::binding(10, 2)]] SamplerState sun_shadow_sampler : register(s10, space2);
 
 // Scene tables for reflection hit shading (set 3), matching water.ps.hlsl.

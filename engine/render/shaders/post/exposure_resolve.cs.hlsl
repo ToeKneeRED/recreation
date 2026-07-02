@@ -3,7 +3,7 @@
 // exponential adaptation toward the keyed exposure.
 
 [[vk::binding(0, 0)]] RWStructuredBuffer<uint> histogram : register(u0, space0);
-[[vk::binding(1, 0)]] RWStructuredBuffer<float> exposure;  // [0] exposure, [1] avg luma
+[[vk::binding(1, 0)]] RWStructuredBuffer<float> exposure : register(u1, space0);  // [0] exposure, [1] avg luma
 
 struct PushData {
   float min_log_luma;

@@ -26,14 +26,14 @@ struct ReconRestirSpatialPush {
 PUSH_CONSTANTS(ReconRestirSpatialPush, pc);
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> irradiance_out : register(u0, space0);
-[[vk::binding(1, 0)]] Texture2D<float4> r0_in;    // reservoir: pos + W
-[[vk::binding(2, 0)]] Texture2D<float4> r1_in;    // reservoir: normal + M
-[[vk::binding(3, 0)]] Texture2D<float4> r2_in;    // reservoir: radiance + w_sum
-[[vk::binding(4, 0)]] Texture2D<float4> p_pos;    // primary hit world position (.w 0 = sky)
-[[vk::binding(5, 0)]] Texture2D<float4> curr_nr;  // primary normal + roughness
+[[vk::binding(1, 0)]] Texture2D<float4> r0_in : register(t1, space0);  // reservoir: pos + W
+[[vk::binding(2, 0)]] Texture2D<float4> r1_in : register(t2, space0);  // reservoir: normal + M
+[[vk::binding(3, 0)]] Texture2D<float4> r2_in : register(t3, space0);  // reservoir: radiance + w_sum
+[[vk::binding(4, 0)]] Texture2D<float4> p_pos : register(t4, space0);  // primary hit world position (.w 0 = sky)
+[[vk::binding(5, 0)]] Texture2D<float4> curr_nr : register(t5, space0);  // primary normal + roughness
 [[vk::binding(6, 0)]] Texture2D<float> curr_viewz : register(t6, space0);
 [[vk::binding(7, 0)]] Texture2D<uint> curr_matid : register(t7, space0);
-[[vk::binding(8, 0)]] Texture2D<float4> direct_irr;  // gbuffer's direct-only irradiance
+[[vk::binding(8, 0)]] Texture2D<float4> direct_irr : register(t8, space0);  // gbuffer's direct-only irradiance
 [[vk::binding(9, 0)]] RaytracingAccelerationStructure tlas : register(t9, space0);
 // Persistent reservoir history for next frame's temporal stage.
 [[vk::binding(10, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> r0_out : register(u10, space0);

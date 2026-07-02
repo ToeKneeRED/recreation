@@ -17,7 +17,7 @@ PUSH_CONSTANTS(ReconCompositePush, pc);
 [[vk::binding(4, 0)]] Texture2D<float4> moments : register(t4, space0);
 [[vk::binding(5, 0)]] Texture2D<float4> normal_rough : register(t5, space0);
 [[vk::binding(6, 0)]] Texture2D<float2> motion : register(t6, space0);
-[[vk::binding(7, 0)]] Texture2D<float4> specular;  // denoised reflection
+[[vk::binding(7, 0)]] Texture2D<float4> specular : register(t7, space0);  // denoised reflection
 
 static const float kInvPi = 0.31830988618;
 

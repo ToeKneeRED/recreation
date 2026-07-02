@@ -9,8 +9,8 @@
 #include "atmosphere.hlsli"
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> out_image : register(u0, space0);
-[[vk::binding(1, 0)]] Texture2D color_in;  // lit scene, fetched per texel
-[[vk::binding(2, 0)]] Texture2D depth_in;  // raw reversed-z depth export
+[[vk::binding(1, 0)]] Texture2D color_in : register(t1, space0);  // lit scene, fetched per texel
+[[vk::binding(2, 0)]] Texture2D depth_in : register(t2, space0);  // raw reversed-z depth export
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D<float4> transmittance : register(t3, space0);
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState transmittance_sampler : register(s3, space0);
 [[vk::combinedImageSampler]] [[vk::binding(4, 0)]] Texture2D<float4> multiscatter : register(t4, space0);

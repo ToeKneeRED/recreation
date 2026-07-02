@@ -7,7 +7,7 @@
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> out_image : register(u0, space0);
 [[vk::binding(1, 0)]] Texture2D color_in : register(t1, space0);
-[[vk::binding(2, 0)]] Texture2D<float2> normal_map;  // world-space, octahedral
+[[vk::binding(2, 0)]] Texture2D<float2> normal_map : register(t2, space0);  // world-space, octahedral
 [[vk::binding(3, 0)]] Texture2D depth_in : register(t3, space0);
 [[vk::combinedImageSampler]] [[vk::binding(4, 0)]] TextureCube sky : register(t4, space0);
 [[vk::combinedImageSampler]] [[vk::binding(4, 0)]] SamplerState sky_sampler : register(s4, space0);

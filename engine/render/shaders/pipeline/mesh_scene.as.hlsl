@@ -19,7 +19,7 @@ struct FrameGlobals {
   float3 pad;
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
-[[vk::binding(2, 0)]] Texture2D<float> hiz;  // last frame's coarse farthest-depth pyramid
+[[vk::binding(2, 0)]] Texture2D<float> hiz : register(t2, space0);  // last frame's coarse farthest-depth pyramid
 
 struct PushData {
   column_major float4x4 model;
