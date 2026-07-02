@@ -11,6 +11,8 @@ struct PushData {
   float pad0;
   float3 sun_color;
   float ambient;
+  float4 cluster_params;  // x slice scale, y slice bias, zw tile size px
+  float4 froxel_params;   // x near, y far, z enabled
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -23,6 +25,7 @@ struct VsOut {
   float4 pos : SV_Position;
   [[vk::location(0)]] float3 normal : NORMAL;
   [[vk::location(1)]] float view_z : TEXCOORD0;  // for the depth weight
+  [[vk::location(2)]] float3 world_pos : TEXCOORD1;  // for clustered lighting
 };
 
 VsOut main(VsIn input) {
@@ -32,5 +35,6 @@ VsOut main(VsIn input) {
   o.pos = clip;
   o.normal = mul((float3x3)push.model, input.normal);
   o.view_z = clip.w;  // perspective w == view-space depth
+  o.world_pos = world.xyz;
   return o;
 }

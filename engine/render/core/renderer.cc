@@ -2508,8 +2508,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Unified froxel volumetrics: near-field scattering from the sun and the
   // shadowed clustered lights, composited before the temporal pass so the
   // jittered volume resolves clean.
-  if (settings_.froxel_fog && froxel_fog_.available() && !path_trace &&
-      depth_export != kInvalidResource) {
+  bool froxel_on = settings_.froxel_fog && froxel_fog_.available() && !path_trace &&
+                   depth_export != kInvalidResource;
+  if (froxel_on) {
     FroxelFog::Frame ff;
     ff.inv_view_proj = globals.inv_view_proj;
     ff.prev_view_proj = globals.prev_view_proj;
@@ -2575,9 +2576,20 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Order-independent transparency (weighted blended) over the lit scene.
   if (!view.oit.empty() && !path_trace) {
     Vec3 sun_col = applied_sun_color_ * applied_sun_intensity_;
+    WboitPass::LightingContext oit_light;
+    oit_light.lights = frame.lights;
+    oit_light.cluster_counts = cluster_counts_;
+    oit_light.cluster_indices = cluster_indices_;
+    std::memcpy(oit_light.cluster_params, globals.cluster_params,
+                sizeof(oit_light.cluster_params));
+    oit_light.froxel_volume = froxel_fog_.integrated().view;
+    oit_light.froxel_sampler = froxel_fog_.volume_sampler();
+    oit_light.froxel_near = FroxelFog::kNear;
+    oit_light.froxel_far = FroxelFog::kFar;
+    oit_light.froxel_enabled = froxel_on;
     lit = wboit_.AddToGraph(graph_, lit, depth, view.oit, view_proj, applied_sun_direction_,
                             sun_col, std::max(settings_.ambient, 0.12f), render_width_,
-                            render_height_);
+                            render_height_, oit_light);
   }
 
   // Lit billboard particles blend over the resolved scene, faded against the
@@ -2597,6 +2609,21 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     pf.ambient = std::max(settings_.ambient, 0.15f);
     pf.near_plane = 0.1f;
     pf.soft_fade = 0.6f;
+    // Lit translucency inputs: clustered lights + shadows + the fog volume.
+    std::memcpy(pf.cluster_params, globals.cluster_params, sizeof(pf.cluster_params));
+    pf.froxel_near = FroxelFog::kNear;
+    pf.froxel_far = FroxelFog::kFar;
+    pf.froxel_enabled = froxel_on;
+    pf.lights = frame.lights;
+    pf.cluster_counts = cluster_counts_;
+    pf.cluster_indices = cluster_indices_;
+    pf.local_shadow_faces = local_shadows_active_ ? local_shadows_.face_buffer(frame_slot)
+                                                  : environment_->dummy_storage();
+    pf.local_shadow_atlas = local_shadows_active_ ? local_shadows_.atlas().view
+                                                  : environment_->shadow_dummy_view();
+    pf.comparison_sampler = environment_->comparison_sampler();
+    pf.froxel_volume = froxel_fog_.integrated().view;
+    pf.froxel_sampler = froxel_fog_.volume_sampler();
     if (view.gpu_particle_count > 0) {
       ParticleSystem::Sim sim;
       sim.emitter[0] = view.gpu_particle_emitter.x;

@@ -26,6 +26,8 @@ struct ParticlePush {
   Mat4 prev_view_proj;
   u32 emissive;
   f32 pad[3];
+  f32 cluster_params[4];
+  f32 froxel_params[4];
 };
 
 struct ParticleSimPush {
@@ -63,7 +65,13 @@ bool ParticleSystem::Initialize(Device& device, Format color_format) {
       .color_formats = {color_format, kParticleMotionFormat},
       .blend = {BlendMode::kAlpha, BlendMode::kAlpha},
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kSampledImage}}}},
+                          {1, BindingType::kSampledImage},
+                          {2, BindingType::kStorageBuffer},
+                          {3, BindingType::kStorageBuffer},
+                          {4, BindingType::kStorageBuffer},
+                          {5, BindingType::kStorageBuffer},
+                          {6, BindingType::kCombinedTextureSampler},
+                          {7, BindingType::kCombinedTextureSampler}}}},
       .push_constant_size = sizeof(ParticlePush),
       .debug_name = "particles",
   });
@@ -76,7 +84,13 @@ bool ParticleSystem::Initialize(Device& device, Format color_format) {
       .color_formats = {color_format, kParticleMotionFormat},
       .blend = {BlendMode::kAdditive, BlendMode::kAlpha},
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
-                          {1, BindingType::kSampledImage}}}},
+                          {1, BindingType::kSampledImage},
+                          {2, BindingType::kStorageBuffer},
+                          {3, BindingType::kStorageBuffer},
+                          {4, BindingType::kStorageBuffer},
+                          {5, BindingType::kStorageBuffer},
+                          {6, BindingType::kCombinedTextureSampler},
+                          {7, BindingType::kCombinedTextureSampler}}}},
       .push_constant_size = sizeof(ParticlePush),
       .debug_name = "particles_additive",
   });
@@ -145,9 +159,16 @@ void ParticleSystem::RecordDraw(PassContext& ctx, ResourceHandle color, Resource
   ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
 
   ctx.cmd->BindPipeline(frame.emissive ? pipeline_additive_ : pipeline_);
-  ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, instances, 0,
-                                                 count * sizeof(ParticleInstance)),
-                             Bind::Sampled(1, ctx.graph->image(depth))});
+  // The froxel volume stays in GENERAL; every other input arrives shader-read.
+  ctx.cmd->BindTransient(
+      0, {Bind::StorageBuffer(0, instances, 0, count * sizeof(ParticleInstance)),
+          Bind::Sampled(1, ctx.graph->image(depth)),
+          Bind::StorageBuffer(2, frame.lights, 0, frame.lights.size),
+          Bind::StorageBuffer(3, frame.cluster_counts, 0, frame.cluster_counts.size),
+          Bind::StorageBuffer(4, frame.cluster_indices, 0, frame.cluster_indices.size),
+          Bind::StorageBuffer(5, frame.local_shadow_faces, 0, frame.local_shadow_faces.size),
+          Bind::Combined(6, frame.local_shadow_atlas, frame.comparison_sampler),
+          InGeneral(Bind::Combined(7, frame.froxel_volume, frame.froxel_sampler))});
 
   ParticlePush push{};
   push.view_proj = frame.view_proj;
@@ -168,6 +189,11 @@ void ParticleSystem::RecordDraw(PassContext& ctx, ResourceHandle color, Resource
   push.sun_color[2] = frame.sun_color.z;
   push.ambient = frame.ambient;
   push.prev_view_proj = frame.prev_view_proj;
+  std::memcpy(push.cluster_params, frame.cluster_params, sizeof(push.cluster_params));
+  push.froxel_params[0] = frame.froxel_near;
+  push.froxel_params[1] = frame.froxel_far;
+  push.froxel_params[2] = frame.froxel_enabled ? 1.0f : 0.0f;
+  push.froxel_params[3] = 0.0f;
   push.emissive = frame.emissive ? 1u : 0u;
   ctx.cmd->Push(push);
   ctx.cmd->Draw(4, count, 0, 0);

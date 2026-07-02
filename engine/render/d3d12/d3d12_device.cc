@@ -630,6 +630,36 @@ GpuImage D3D12Device::CreateImage2D(Format format, Extent2D extent, TextureUsage
   return WrapTexture(MakeTextureRecord(resource, format, extent, mip_levels, 1, false, usage));
 }
 
+GpuImage D3D12Device::CreateImage3D(Format format, u32 width, u32 height, u32 depth,
+                                    TextureUsageFlags usage) {
+  D3D12_RESOURCE_DESC desc = {};
+  desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+  desc.Width = width;
+  desc.Height = height;
+  desc.DepthOrArraySize = static_cast<UINT16>(depth);
+  desc.MipLevels = 1;
+  desc.Format = ToDxgiFormat(format);
+  desc.SampleDesc.Count = 1;
+  if (usage & kTextureUsageStorage) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  if (usage & kTextureUsageTransferDst) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+  D3D12_HEAP_PROPERTIES heap = {};
+  heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  ID3D12Resource* resource = nullptr;
+  if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                              D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                              IID_ID3D12Resource,
+                                              reinterpret_cast<void**>(&resource)))) {
+    REC_ERROR("d3d12: 3d image allocation failed: format {} {}x{}x{}",
+              static_cast<int>(format), width, height, depth);
+    return {};
+  }
+  TextureRecord* record = MakeTextureRecord(resource, format, {width, height}, 1, 1, false, usage);
+  record->depth = depth;
+  record->volume = true;
+  return WrapTexture(record);
+}
+
 GpuImage D3D12Device::CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                                       u32 mip_levels) {
   D3D12_RESOURCE_DESC desc = {};
@@ -703,7 +733,11 @@ u32 D3D12Device::EnsureSrv(TextureViewRecord* view) {
   D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
   desc.Format = ToDxgiSrvFormat(texture->rhi_format);
   desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  if (texture->cube && !view->force_array) {
+  if (texture->volume) {
+    desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+    desc.Texture3D.MostDetailedMip = view->base_mip;
+    desc.Texture3D.MipLevels = mip_count;
+  } else if (texture->cube && !view->force_array) {
     desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
     desc.TextureCube.MostDetailedMip = view->base_mip;
     desc.TextureCube.MipLevels = mip_count;
@@ -728,7 +762,12 @@ u32 D3D12Device::EnsureUav(TextureViewRecord* view) {
 
   D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
   desc.Format = ToDxgiFormat(texture->rhi_format);
-  if (texture->array_layers > 1) {
+  if (texture->volume) {
+    desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+    desc.Texture3D.MipSlice = view->base_mip;
+    desc.Texture3D.FirstWSlice = 0;
+    desc.Texture3D.WSize = texture->depth;
+  } else if (texture->array_layers > 1) {
     desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
     desc.Texture2DArray.MipSlice = view->base_mip;
     desc.Texture2DArray.ArraySize = texture->array_layers;

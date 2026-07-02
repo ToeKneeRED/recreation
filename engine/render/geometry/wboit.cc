@@ -1,5 +1,7 @@
 #include "render/geometry/wboit.h"
 
+#include <cstring>
+
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
@@ -22,6 +24,8 @@ struct WboitPush {
   f32 pad0;
   f32 sun_color[3];
   f32 ambient;
+  f32 cluster_params[4];
+  f32 froxel_params[4];
 };
 
 }  // namespace
@@ -57,6 +61,10 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
                 .format = depth_format},
       .color_formats = {kAccumFormat, kRevealFormat},
       .blend = {BlendMode::kWboitAccum, BlendMode::kWboitReveal},
+      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
+                          {1, BindingType::kStorageBuffer},
+                          {2, BindingType::kStorageBuffer},
+                          {3, BindingType::kCombinedTextureSampler}}}},
       .push_constant_size = sizeof(WboitPush),
       .debug_name = "wboit_geom",
   });
@@ -95,7 +103,7 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
 ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                                      const base::Vector<WboitInstance>& instances,
                                      const Mat4& view_proj, const Vec3& sun_dir,
-                                     const Vec3& sun_color, f32 ambient, u32 width, u32 height) {
+                                     const Vec3& sun_color, f32 ambient, u32 width, u32 height, const LightingContext& lighting) {
   ResourceHandle accum =
       graph.CreateTexture({.name = "oit_accum", .format = kAccumFormat, .width = width, .height = height});
   ResourceHandle reveal =
@@ -112,6 +120,11 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
   base.sun_color[1] = sun_color.y;
   base.sun_color[2] = sun_color.z;
   base.ambient = ambient;
+  std::memcpy(base.cluster_params, lighting.cluster_params, sizeof(base.cluster_params));
+  base.froxel_params[0] = lighting.froxel_near;
+  base.froxel_params[1] = lighting.froxel_far;
+  base.froxel_params[2] = lighting.froxel_enabled ? 1.0f : 0.0f;
+  base.froxel_params[3] = 0.0f;
 
   graph.AddPass(
       "oit_accumulate",
@@ -120,7 +133,7 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
         builder.Write(reveal, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
       },
-      [this, accum, reveal, depth, instances, base, width, height](PassContext& ctx) {
+      [this, accum, reveal, depth, instances, base, width, height, lighting](PassContext& ctx) {
         ColorAttachment colors[2];
         colors[0] = {.view = ctx.graph->image(accum).view,
                      .load = LoadOp::kClear,
@@ -133,6 +146,12 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
         ctx.cmd->BeginRendering(
             {.extent = {width, height}, .colors = colors, .depth = &depth_att});
         ctx.cmd->BindPipeline(geom_pipeline_);
+        ctx.cmd->BindTransient(
+            0, {Bind::StorageBuffer(0, lighting.lights, 0, lighting.lights.size),
+                Bind::StorageBuffer(1, lighting.cluster_counts, 0, lighting.cluster_counts.size),
+                Bind::StorageBuffer(2, lighting.cluster_indices, 0,
+                                    lighting.cluster_indices.size),
+                InGeneral(Bind::Combined(3, lighting.froxel_volume, lighting.froxel_sampler))});
         ctx.cmd->BindVertexBuffer(0, vertices_, 0);
         ctx.cmd->BindIndexBuffer(indices_, 0, IndexType::kUint32);
         for (const WboitInstance& inst : instances) {

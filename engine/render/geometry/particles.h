@@ -44,6 +44,20 @@ class ParticleSystem {
     // HDR additive mode (fire): particle color is radiance, drawn with an
     // additive blend instead of lit alpha.
     bool emissive = false;
+    // Lit translucency: clustered lights (with local shadow maps) wrap the
+    // puffs and the froxel volume's transmittance dims them with the fog.
+    f32 cluster_params[4] = {0, 0, 64, 64};
+    f32 froxel_near = 0.1f;
+    f32 froxel_far = 64.0f;
+    bool froxel_enabled = false;
+    GpuBuffer lights;
+    GpuBuffer cluster_counts;
+    GpuBuffer cluster_indices;
+    GpuBuffer local_shadow_faces;
+    TextureView local_shadow_atlas;
+    SamplerHandle comparison_sampler;
+    TextureView froxel_volume;
+    SamplerHandle froxel_sampler;
   };
 
   // Uploads particles into the frame slot's buffer and adds the draw pass.

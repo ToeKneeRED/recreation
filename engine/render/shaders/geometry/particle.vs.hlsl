@@ -30,6 +30,7 @@ struct VsOut {
   [[vk::location(0)]] float2 uv : TEXCOORD0;  // -1..1 across the quad
   [[vk::location(1)]] float4 color : COLOR0;
   [[vk::location(2)]] float2 motion : TEXCOORD1;  // centre velocity, uv space
+  [[vk::location(3)]] float3 world_pos : TEXCOORD2;  // for clustered lighting
 };
 
 static const float2 kCorners[4] = {float2(-1, -1), float2(1, -1), float2(-1, 1), float2(1, 1)};
@@ -41,6 +42,7 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   VsOut o;
   o.pos = mul(push.view_proj, float4(world, 1.0));
   o.uv = c;
+  o.world_pos = world;
   o.color = p.color;
   // Centre motion, matching the prepass convention (prev - curr) * 0.5 in uv.
   float4 cc = mul(push.view_proj, float4(p.pos, 1.0));

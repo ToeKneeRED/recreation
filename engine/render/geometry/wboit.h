@@ -30,10 +30,24 @@ class WboitPass {
 
   // Renders the instances order-independently and composites over color; returns
   // the composited colour handle.
+  // Lit-translucency inputs: clustered lights plus the froxel volume's
+  // transmittance (dummies when a feature is off this frame).
+  struct LightingContext {
+    GpuBuffer lights;
+    GpuBuffer cluster_counts;
+    GpuBuffer cluster_indices;
+    f32 cluster_params[4] = {0, 0, 64, 64};
+    TextureView froxel_volume;
+    SamplerHandle froxel_sampler;
+    f32 froxel_near = 0.1f;
+    f32 froxel_far = 64.0f;
+    bool froxel_enabled = false;
+  };
+
   ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                             const base::Vector<WboitInstance>& instances, const Mat4& view_proj,
                             const Vec3& sun_dir, const Vec3& sun_color, f32 ambient, u32 width,
-                            u32 height);
+                            u32 height, const LightingContext& lighting);
 
  private:
   PipelineHandle geom_pipeline_;

@@ -55,6 +55,8 @@ struct TextureRecord {
   Extent2D extent{};
   u32 mip_levels = 1;
   u32 array_layers = 1;
+  u32 depth = 1;        // 3d volumes
+  bool volume = false;  // TEXTURE3D resource
   bool cube = false;
   bool owns_resource = true;  // false for swapchain wrappers? (offscreen owns)
   TextureUsageFlags usage = 0;
@@ -334,6 +336,8 @@ class D3D12Device final : public Device {
   void DestroyBuffer(GpuBuffer& buffer) override;
   GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
                          u32 mip_levels) override;
+  GpuImage CreateImage3D(Format format, u32 width, u32 height, u32 depth,
+                         TextureUsageFlags usage) override;
   GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                            u32 mip_levels) override;
   void DestroyImage(GpuImage& image) override;

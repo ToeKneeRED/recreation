@@ -27,7 +27,7 @@ streaming.
 - [x] **Decal channels.** (landed) Clustered decals blend albedo only; add
       normal/roughness/emissive perturbation (wet stains with glossy
       interiors, glowing runes, impact craters).
-- [ ] **Lit translucency.** Particles and WBOIT get sun+ambient only; loop
+- [x] **Lit translucency.** (landed) Particles and WBOIT get sun+ambient only; loop
       the light clusters and sample the froxel volume (transmittance +
       inscatter) at their depth.
 
