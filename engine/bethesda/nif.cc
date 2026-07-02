@@ -901,7 +901,7 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
       material.two_sided = true;
       material.is_water = true;
     } else if (shader) {
-      std::string diffuse, normal;
+      std::string diffuse, normal, height;
       if (shader->effect) {
         diffuse = NormalizeTexturePath(shader->effect_texture);
         material.alpha_mode = asset::AlphaMode::kBlend;
@@ -909,6 +909,15 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
         if (const auto* set = texture_sets.find(static_cast<u32>(shader->texture_set))) {
           if (set->size() > 0) diffuse = NormalizeTexturePath((*set)[0]);
           if (set->size() > 1) normal = NormalizeTexturePath((*set)[1]);
+          // Parallax shader types carry a height map in slot 3 (the _p.dds
+          // convention); it feeds the renderer's parallax occlusion march.
+          // Multilayer parallax (11) repurposes the slot for the inner layer,
+          // so only the plain (3) and occlusion (7) variants qualify.
+          if ((shader->shader_type == 3 || shader->shader_type == 7) && set->size() > 3 &&
+              !(*set)[3].empty()) {
+            height = NormalizeTexturePath((*set)[3]);
+            REC_INFO("nif: parallax height map {}", height);
+          }
         }
       }
       // River, creek and waterfall fx surfaces carry water tile textures on
@@ -946,6 +955,15 @@ static NifConversion ConvertNifImpl(ByteSpan data, asset::AssetId id, std::strin
         material.normal = asset::MakeAssetId(normal);
         if (std::ranges::find(result.texture_paths, normal) == result.texture_paths.end()) {
           result.texture_paths.push_back(std::move(normal));
+        }
+      }
+      if (!height.empty()) {
+        material.height = asset::MakeAssetId(height);
+        // Skyrim stores no per-material depth; ~3 cm at typical 2 m texture
+        // tiling reads right for stone and timber without silhouette breakup.
+        material.height_scale = 0.03f;
+        if (std::ranges::find(result.texture_paths, height) == result.texture_paths.end()) {
+          result.texture_paths.push_back(std::move(height));
         }
       }
       material.two_sided = (shader->flags2 & 0x10) != 0;
