@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive  # third_party/equilibrium
       - name: zetanet
         uses: actions/checkout@v4
         with:
@@ -57,6 +59,8 @@ jobs:
       DXC_TAG: v1.9.2602.24
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive  # third_party/equilibrium
       - name: zetanet
         uses: actions/checkout@v4
         with:
@@ -125,6 +129,8 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive  # third_party/equilibrium
       - name: zetanet
         uses: actions/checkout@v4
         with:
@@ -174,6 +180,8 @@ jobs:
       DXC_TAG: v1.9.2602.24
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive  # third_party/equilibrium
       - name: zetanet
         uses: actions/checkout@v4
         with:
@@ -247,6 +255,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive  # third_party/equilibrium
       - name: zetanet
         uses: actions/checkout@v4
         with:
