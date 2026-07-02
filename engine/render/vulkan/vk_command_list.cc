@@ -29,8 +29,8 @@ void VulkanCommandList::BindTransient(u32 set_index, std::span<const BindingItem
                           nullptr);
 }
 
-void VulkanCommandList::PushConstants(const void* data, u32 size) {
-  vkCmdPushConstants(cmd_, bound_->layout, bound_->push_stages, 0, size, data);
+void VulkanCommandList::PushConstants(const void* data, u32 size, u32 offset) {
+  vkCmdPushConstants(cmd_, bound_->layout, bound_->push_stages, offset, size, data);
 }
 
 void VulkanCommandList::Dispatch(u32 x, u32 y, u32 z) { vkCmdDispatch(cmd_, x, y, z); }

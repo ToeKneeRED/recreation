@@ -129,7 +129,7 @@ class VulkanCommandList final : public CommandList {
   void BindPipeline(PipelineHandle pipeline) override;
   void BindSet(u32 set_index, BindingSetHandle set) override;
   void BindTransient(u32 set_index, std::span<const BindingItem> items) override;
-  void PushConstants(const void* data, u32 size) override;
+  void PushConstants(const void* data, u32 size, u32 offset) override;
   void Dispatch(u32 x, u32 y, u32 z) override;
   void BeginRendering(const RenderingInfo& info) override;
   void EndRendering() override;

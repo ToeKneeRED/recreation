@@ -110,10 +110,13 @@ class CommandList {
   void BindTransient(u32 set_index, std::initializer_list<BindingItem> items) {
     BindTransient(set_index, std::span<const BindingItem>(items.begin(), items.size()));
   }
-  virtual void PushConstants(const void* data, u32 size) = 0;
+  // offset allows partial updates of a larger push block (e.g. a per-cascade
+  // matrix at 0 with per-draw model matrices behind it). Maps to
+  // vkCmdPushConstants offset / SetGraphicsRoot32BitConstants dest offset.
+  virtual void PushConstants(const void* data, u32 size, u32 offset = 0) = 0;
   template <typename T>
-  void Push(const T& constants) {
-    PushConstants(&constants, sizeof(T));
+  void Push(const T& constants, u32 offset = 0) {
+    PushConstants(&constants, sizeof(T), offset);
   }
 
   // --- compute ---

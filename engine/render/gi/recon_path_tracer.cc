@@ -146,6 +146,7 @@ void ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   make(normal_rough_, kNormalRough);
   make(viewz_, kViewZ);
   make(matid_, kMatId);
+  history_invalid_ = true;
 
   // Prime every owned image to kGeneral so the first frame's barriers have a
   // defined source state (and reads of the not-yet-written prev slot are legal).
@@ -263,7 +264,13 @@ ResourceHandle ReconPathTracer::RunAtrous(RenderGraph& graph, ResourceHandle in,
 void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
                                  BindingSetHandle bindless_set, TextureView sky_view,
                                  SamplerHandle sky_sampler, ResourceHandle output,
-                                 const Frame& frame) {
+                                 const Frame& original_frame) {
+  // Freshly (re)created history images hold undefined data; force one reset
+  // frame so the temporal pass never blends garbage into the moments EMA.
+  Frame frame = original_frame;
+  frame.reset |= history_invalid_;
+  history_invalid_ = false;
+
   u32 cur = frame.frame_index & 1u;
   u32 prv = 1u - cur;
   auto imp = [&](const char* name, PingPong& pp, u32 i) {

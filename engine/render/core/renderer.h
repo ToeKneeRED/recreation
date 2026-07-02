@@ -54,6 +54,7 @@
 namespace rec::render {
 
 struct RendererDesc {
+  Backend backend = Backend::kAuto;
   bool enable_validation = false;
   AntiAliasingMode aa_mode = AntiAliasingMode::kTaa;
   UpscalerKind upscaler = UpscalerKind::kNone;
@@ -110,8 +111,8 @@ struct FrameView {
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
-  std::function<void(VkCommandBuffer)> hud_draw;
-  std::function<void(VkCommandBuffer)> ui_draw;
+  std::function<void(CommandList&)> hud_draw;
+  std::function<void(CommandList&)> ui_draw;
 
   // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI sets
   // needs_blur so the renderer captures + blurs the backbuffer before the ui
@@ -119,8 +120,8 @@ struct FrameView {
   // are filled by the renderer inside the ui pass, just before hud_draw runs.
   bool needs_blur = false;
   // Filled by the renderer during the (const) frame record, hence mutable.
-  mutable VkImageView blur_source = VK_NULL_HANDLE;
-  mutable VkSampler blur_sampler = VK_NULL_HANDLE;
+  mutable TextureView blur_source;
+  mutable SamplerHandle blur_sampler;
 };
 
 class Renderer {
@@ -166,7 +167,7 @@ class Renderer {
 
   const DeviceCaps* caps() const;
   Device* device() { return device_.get(); }
-  VkFormat swapchain_format() const;
+  Format swapchain_format() const;
   u32 swapchain_image_count() const;
   u32 render_width() const { return render_width_; }
   u32 render_height() const { return render_height_; }
@@ -198,22 +199,18 @@ class Renderer {
   u32 meshlets_visible() const { return meshlet_visible_; }
 
  private:
-  static constexpr u32 kFramesInFlight = 2;
-  static constexpr VkFormat kSceneColorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-  static constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
-  static constexpr VkFormat kNormalFormat = VK_FORMAT_R16G16_SFLOAT;
-  static constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+  static constexpr u32 kFramesInFlight = Device::kMaxFramesInFlight;
+  static constexpr Format kSceneColorFormat = Format::kRGBA16Float;
+  static constexpr Format kMotionFormat = Format::kRG16Float;
+  static constexpr Format kNormalFormat = Format::kRG16Float;
+  static constexpr Format kDepthFormat = Format::kD32Float;
 
+  // Per frame-in-flight host-visible buffers. Command recording, sync and the
+  // transient descriptor pools live inside the rhi Device's frame ring.
   struct FrameResources {
-    VkCommandPool pool = VK_NULL_HANDLE;
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkSemaphore image_available = VK_NULL_HANDLE;
-    VkFence in_flight = VK_NULL_HANDLE;
-    VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-    GpuBuffer globals;  // host visible FrameGlobals
+    GpuBuffer globals;       // host visible FrameGlobals
     GpuBuffer bone_palette;  // host visible skinning matrices, read by device address
-    VkDeviceAddress bone_palette_address = 0;
-    GpuBuffer lights;  // host visible PointLight array
+    GpuBuffer lights;        // host visible PointLight array
   };
   // Max bones across all skinned draws in one frame.
   static constexpr u32 kMaxFrameBones = 8192;
@@ -221,10 +218,9 @@ class Renderer {
 
   bool CreateFrameResources();
   void DestroyFrameResources();
-  bool CreateRenderFinishedSemaphores();
-  void DestroyRenderFinishedSemaphores();
   void RecreateSwapchain();
   void UpdateRenderResolution();
+  void ResizeSizedPasses();
   void ApplySettings();
   bool CreateUpscalerForSettings();
   void BuildFrameGraph(FrameResources& frame, u32 image_index, const FrameView& view);
@@ -249,9 +245,12 @@ class Renderer {
   std::unique_ptr<UiBlurPass> ui_blur_;  // frosted-glass backdrop blur for the UI
   base::UnorderedMap<u64, GpuMesh> meshes_;
   FrameResources frames_[kFramesInFlight];
-  // One per swapchain image: a present may still wait on the semaphore
-  // until its image is reacquired, so frame slots cannot own these.
-  base::Vector<VkSemaphore> render_finished_;
+  // Per-slot persistent sets, rewritten each frame once the slot's fence fired:
+  // frame globals (uniform + tlas + hi-z) and the two environment-set variants
+  // (the scene and transparent passes bind different ao / opaque-color views).
+  BindingSetHandle globals_sets_[kFramesInFlight];
+  BindingSetHandle env_scene_sets_[kFramesInFlight];
+  BindingSetHandle env_transparent_sets_[kFramesInFlight];
   std::unique_ptr<Upscaler> upscaler_;
   std::unique_ptr<RayTracingContext> raytracing_;
   RenderGraph graph_;
@@ -318,9 +317,7 @@ class Renderer {
   bool hdr_pending_ = false;  // the copy pass ran this frame; read it back after submit
   u32 hdr_width_ = 0, hdr_height_ = 0;
   GpuBuffer hdr_readback_;  // host-visible rgba32f, one float4 per pixel
-  VkDescriptorSetLayout hdr_set_layout_ = VK_NULL_HANDLE;
-  VkPipelineLayout hdr_layout_ = VK_NULL_HANDLE;
-  VkPipeline hdr_pipeline_ = VK_NULL_HANDLE;
+  PipelineHandle hdr_pipeline_;
   Mat4 prev_view_proj_ = Mat4::Identity();
   Mat4 prev_view_ = Mat4::Identity();
   Mat4 prev_proj_ = Mat4::Identity();

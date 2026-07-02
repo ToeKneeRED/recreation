@@ -72,6 +72,11 @@ class ReconPathTracer {
   Extent2D extent_{};
   u32 spp_ = 1;
   u32 bounces_ = 2;
+  // Set when (re)creating the history images: their contents are undefined, so
+  // the next frame must drop history even if the caller did not ask for a
+  // reset (a mid-session resize otherwise feeds garbage - possibly NaN - into
+  // the temporal moments EMA, which never recovers).
+  bool history_invalid_ = false;
 
   // gbuffer (set 0: 7 storage + tlas + sky; set 1: bindless)
   PipelineHandle gbuffer_pipeline_;

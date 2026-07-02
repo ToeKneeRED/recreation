@@ -13,7 +13,7 @@ class NullCommandList final : public CommandList {
   void BindPipeline(PipelineHandle) override {}
   void BindSet(u32, BindingSetHandle) override {}
   void BindTransient(u32, std::span<const BindingItem>) override {}
-  void PushConstants(const void*, u32) override {}
+  void PushConstants(const void*, u32, u32) override {}
   void Dispatch(u32, u32, u32) override {}
   void BeginRendering(const RenderingInfo&) override {}
   void EndRendering() override {}

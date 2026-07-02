@@ -6,7 +6,10 @@
 #include <base/option.h>
 
 #include "core/log.h"
-#include "render/rhi/device.h"  // pulls volk (VK_NO_PROTOTYPES) before the ngx vk header
+#include "render/rhi/device.h"
+// Vulkan escape hatch: NGX speaks raw Vulkan. Also pulls volk
+// (VK_NO_PROTOTYPES) before the ngx vk header.
+#include "render/rhi/vulkan_interop.h"
 
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_vk.h>
@@ -54,6 +57,13 @@ class DlssUpscaler final : public Upscaler {
   bool Initialize(const UpscalerDesc& desc) override {
     desc_ = desc;
 
+    VulkanHandles h = GetVulkanHandles(device_);
+    if (h.device == VK_NULL_HANDLE) {
+      REC_WARN("dlss: requires the vulkan backend, upscaler unavailable");
+      return false;
+    }
+    vk_device_ = h.device;
+
     // PathListInfo tells NGX where the DLSS inference snippet (.so) lives; the
     // SDK lib dir is baked in at build time by third_party/dlss.cmake, with an
     // env override so a driver-bundled or dev snippet can be pointed at without
@@ -68,8 +78,8 @@ class DlssUpscaler final : public Upscaler {
     common.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_ON;
 
     NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_Init_with_ProjectID(
-        kProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0", L"/tmp", device_.instance(),
-        device_.physical_device(), device_.device(), vkGetInstanceProcAddr, vkGetDeviceProcAddr,
+        kProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0", L"/tmp", h.instance,
+        h.physical_device, h.device, vkGetInstanceProcAddr, vkGetDeviceProcAddr,
         &common, NVSDK_NGX_Version_API);
     if (r != NVSDK_NGX_Result_Success) {
       REC_ERROR("dlss: ngx init failed ({:#x})", static_cast<u32>(r));
@@ -103,7 +113,7 @@ class DlssUpscaler final : public Upscaler {
     // Feature creation records into a command buffer; reuse the device's one
     // shot submit, the same way the fsr3 backend primes its shared resources.
     bool created = false;
-    device_.ImmediateSubmit([&](VkCommandBuffer cmd) {
+    device_.ImmediateSubmit([&](CommandList& cmd) {
       NVSDK_NGX_DLSS_Create_Params create{};
       create.Feature.InWidth = desc.render_width;
       create.Feature.InHeight = desc.render_height;
@@ -116,7 +126,8 @@ class DlssUpscaler final : public Upscaler {
                                     NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
                                     NVSDK_NGX_DLSS_Feature_Flags_DepthInverted |
                                     NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
-      NVSDK_NGX_Result cr = NGX_VULKAN_CREATE_DLSS_EXT(cmd, 1, 1, &handle_, params_, &create);
+      NVSDK_NGX_Result cr =
+          NGX_VULKAN_CREATE_DLSS_EXT(GetVkCommandBuffer(cmd), 1, 1, &handle_, params_, &create);
       created = cr == NVSDK_NGX_Result_Success;
       if (!created) REC_ERROR("dlss: feature creation failed ({:#x})", static_cast<u32>(cr));
     });
@@ -129,7 +140,7 @@ class DlssUpscaler final : public Upscaler {
 
   ResourceHandle AddToGraph(RenderGraph& graph, const UpscalerInputs& inputs) override {
     ResourceHandle output = graph.CreateTexture({.name = "dlss_output",
-                                                 .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                                                 .format = Format::kRGBA16Float,
                                                  .width = desc_.output_width,
                                                  .height = desc_.output_height});
     graph.AddPass(
@@ -158,9 +169,9 @@ class DlssUpscaler final : public Upscaler {
     // GENERAL, which is what NGX expects.
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     auto wrap = [&](const GpuImage& image, bool read_write) {
-      return NVSDK_NGX_Create_ImageView_Resource_VK(image.view, image.image, range, image.format,
-                                                    image.extent.width, image.extent.height,
-                                                    read_write);
+      return NVSDK_NGX_Create_ImageView_Resource_VK(
+          GetVkImageView(image.view), GetVkImage(image), range, GetVkFormat(image.format),
+          image.extent.width, image.extent.height, read_write);
     };
     NVSDK_NGX_Resource_VK color_res = wrap(color, false);
     NVSDK_NGX_Resource_VK depth_res = wrap(depth, false);
@@ -181,7 +192,8 @@ class DlssUpscaler final : public Upscaler {
     eval.InMVScaleX = static_cast<f32>(desc_.render_width);
     eval.InMVScaleY = static_cast<f32>(desc_.render_height);
 
-    NVSDK_NGX_Result er = NGX_VULKAN_EVALUATE_DLSS_EXT(ctx.cmd, handle_, params_, &eval);
+    NVSDK_NGX_Result er =
+        NGX_VULKAN_EVALUATE_DLSS_EXT(GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
     if (er != NVSDK_NGX_Result_Success) {
       REC_ERROR("dlss: evaluate failed ({:#x})", static_cast<u32>(er));
     }
@@ -198,12 +210,13 @@ class DlssUpscaler final : public Upscaler {
       params_ = nullptr;
     }
     if (ngx_initialized_) {
-      NVSDK_NGX_VULKAN_Shutdown1(device_.device());
+      NVSDK_NGX_VULKAN_Shutdown1(vk_device_);
       ngx_initialized_ = false;
     }
   }
 
   Device& device_;
+  VkDevice vk_device_ = VK_NULL_HANDLE;  // raw handle via GetVulkanHandles
   UpscalerDesc desc_;
   std::wstring snippet_dir_;
   const wchar_t* snippet_path_ = nullptr;
