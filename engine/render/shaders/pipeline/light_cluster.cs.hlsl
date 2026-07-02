@@ -12,6 +12,8 @@ struct ClusterPush {
   uint light_count;
   float tan_half_fov_y;
   float aspect;
+  uint decal_count;
+  float3 pad;
 };
 PUSH_CONSTANTS(ClusterPush, pc);
 
@@ -21,14 +23,24 @@ struct Light {
   float4 direction_type;
   float4 params;
 };
+struct Decal {
+  float4 row0;  // world -> unit box
+  float4 row1;
+  float4 row2;
+  float4 uv_rect;
+  float4 tint_blend;
+};
 [[vk::binding(0, 0)]] StructuredBuffer<Light> lights : register(t0, space0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> cluster_counts : register(u1, space0);
 [[vk::binding(2, 0)]] RWStructuredBuffer<uint> cluster_indices : register(u2, space0);
+[[vk::binding(3, 0)]] StructuredBuffer<Decal> decals : register(t3, space0);
+[[vk::binding(4, 0)]] RWStructuredBuffer<uint> decal_indices : register(u4, space0);
 
 static const uint kTilesX = 16;
 static const uint kTilesY = 9;
 static const uint kSlices = 24;
 static const uint kMaxPerCluster = 32;
+static const uint kMaxDecalsPerCluster = 16;
 
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
@@ -69,5 +81,27 @@ void main(uint3 id : SV_DispatchThreadID) {
     cluster_indices[cluster * kMaxPerCluster + count] = li;
     ++count;
   }
-  cluster_counts[cluster] = count;
+
+  // Decals: conservative bounding-sphere test of the oriented box. The box
+  // rows are world->unit, so the world-space half-extent along each axis is
+  // 1/|row| and the center is -rows^T * offsets... cheaper: bound by the
+  // largest half-extent around the reconstructed center.
+  uint dcount = 0;
+  for (uint di = 0; di < pc.decal_count && dcount < kMaxDecalsPerCluster; ++di) {
+    Decal dec = decals[di];
+    // center: solve rows * c + offset = 0 => c = -M^-1 * offset. For the
+    // scaled-rotation rows M = S*R, M^-1 = R^T * S^-1; column k of M^-1 is
+    // row k / |row k|^2.
+    float3 r0 = dec.row0.xyz, r1 = dec.row1.xyz, r2 = dec.row2.xyz;
+    float3 center = -(r0 / dot(r0, r0) * dec.row0.w + r1 / dot(r1, r1) * dec.row1.w +
+                      r2 / dot(r2, r2) * dec.row2.w);
+    float radius = sqrt(1.0 / dot(r0, r0) + 1.0 / dot(r1, r1) + 1.0 / dot(r2, r2));
+    float3 c = mul(pc.view, float4(center, 1.0)).xyz;
+    float3 closest = clamp(c, mn, mx);
+    float3 d = c - closest;
+    if (dot(d, d) > radius * radius) continue;
+    decal_indices[cluster * kMaxDecalsPerCluster + dcount] = di;
+    ++dcount;
+  }
+  cluster_counts[cluster] = count | (dcount << 16);
 }

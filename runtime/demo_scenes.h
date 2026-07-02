@@ -65,6 +65,7 @@ class DemoScenes {
   Vec3 particle_emitter_{0, 0, 0};
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain
   Vec3 gpu_particle_emitter_{0, 0, 0};
+  base::Vector<render::Decal> demo_decals_;
   u32 gpu_particle_mode_ = 0;         // 1 = fire (buoyant flames + embers)
   f32 gpu_particle_radius_ = 0.3f;
   f32 gpu_particle_intensity_ = 1.0f;

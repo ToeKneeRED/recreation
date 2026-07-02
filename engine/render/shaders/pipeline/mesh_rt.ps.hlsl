@@ -49,6 +49,46 @@ uint ClusterOf(float2 sv_xy, float view_z) {
   return (tz * kClusterTilesY + ty) * kClusterTilesX + tx;
 }
 
+// Clustered decals (share the froxel grid with the lights).
+struct Decal {
+  float4 row0;  // world -> unit box rows
+  float4 row1;
+  float4 row2;
+  float4 uv_rect;     // atlas uv scale.xy offset.zw
+  float4 tint_blend;  // rgb tint, w albedo blend
+};
+[[vk::binding(15, 2)]] StructuredBuffer<Decal> decal_buffer : register(t15, space2);
+[[vk::binding(16, 2)]] StructuredBuffer<uint> decal_cluster_indices : register(t16, space2);
+[[vk::combinedImageSampler]] [[vk::binding(17, 2)]] Texture2D decal_atlas : register(t17, space2);
+[[vk::combinedImageSampler]] [[vk::binding(17, 2)]] SamplerState decal_atlas_sampler : register(s17, space2);
+static const uint kMaxDecalsPerCluster = 16;
+
+// Blends clustered decal albedo over the surface. Runs after the base-color
+// fetch, before lighting, so decals shade like part of the material.
+float3 ApplyDecals(float3 albedo, float3 world_pos, float3 n, float2 sv_xy, float view_z) {
+  uint cluster = ClusterOf(sv_xy, view_z);
+  uint dcount = min(cluster_counts[cluster] >> 16, kMaxDecalsPerCluster);
+  for (uint i = 0; i < dcount; ++i) {
+    Decal d = decal_buffer[decal_cluster_indices[cluster * kMaxDecalsPerCluster + i]];
+    float3 local = float3(dot(d.row0.xyz, world_pos) + d.row0.w,
+                          dot(d.row1.xyz, world_pos) + d.row1.w,
+                          dot(d.row2.xyz, world_pos) + d.row2.w);
+    if (any(abs(local) > 1.0)) continue;
+    // Reject steep surfaces (project along the box -z) and fade the box rim.
+    float3 proj_dir = normalize(d.row2.xyz);
+    float facing = dot(n, proj_dir);
+    if (facing < 0.25) continue;
+    float2 uv = local.xy * 0.5 + 0.5;
+    float4 sample_c = decal_atlas.Sample(decal_atlas_sampler,
+                                         uv * d.uv_rect.xy + d.uv_rect.zw);
+    float edge = saturate((1.0 - max(abs(local.x), abs(local.y))) * 6.0) *
+                 saturate((1.0 - abs(local.z)) * 3.0);
+    float w = sample_c.a * d.tint_blend.w * edge * saturate((facing - 0.25) / 0.5);
+    albedo = lerp(albedo, sample_c.rgb * d.tint_blend.rgb, saturate(w));
+  }
+  return albedo;
+}
+
 // NRD REBLUR-denoised stochastic reflections (radiance in rgb); replaces the
 // inline mirror trace when kFrameSpecReflTex is set.
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] Texture2D spec_refl_map : register(t12, space2);
@@ -439,6 +479,8 @@ float SpecularAaRoughness(float roughness, float3 n) {
 float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float3 v = normalize(frame.camera_position.xyz - input.world_pos);
   if (dot(n, v) < 0.0) n = -n;  // shade double sided geometry from both sides
+  albedo = ApplyDecals(albedo, input.world_pos, n, input.sv_position.xy,
+                       0.1 / max(input.sv_position.z, 1e-6));
 
   // glTF metallic roughness packing: g roughness, b metallic. Terrain reuses
   // this slot as a land layer, so it takes the neutral rough dielectric path.

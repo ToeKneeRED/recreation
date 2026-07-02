@@ -79,7 +79,10 @@ class EnvironmentSystem {
                    const GpuBuffer& lights = {}, u64 lights_size = 0,
                    TextureView spec_reflections = {},
                    const GpuBuffer& cluster_counts = {},
-                   const GpuBuffer& cluster_indices = {}) const;
+                   const GpuBuffer& cluster_indices = {},
+                   const GpuBuffer& decal_buffer = {},
+                   const GpuBuffer& decal_indices = {},
+                   TextureView decal_atlas = {}) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

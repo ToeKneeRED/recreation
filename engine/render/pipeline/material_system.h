@@ -55,6 +55,10 @@ class MaterialSystem {
   static constexpr u32 kFlagWater = 1u << 4;    // gerstner vertex displacement
   static constexpr u32 kFlagHasHeightMap = 1u << 5;  // parallax occlusion march
 
+  // Looks up an uploaded texture by asset hash (null when absent). Used by
+  // systems that bind textures outside the material sets (decal atlas).
+  const GpuImage* find_texture(u64 hash) const;
+
   // registry may be null (no raytracing); hit-shading tables are skipped.
   static std::unique_ptr<MaterialSystem> Create(Device& device, BindlessRegistry* registry);
   ~MaterialSystem();

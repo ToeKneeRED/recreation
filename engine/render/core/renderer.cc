@@ -190,12 +190,16 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       u32 light_count;
       f32 tan_half_fov_y;
       f32 aspect;
+      u32 decal_count;
+      f32 pad[3];
     };
     light_cluster_pipeline_ = device_->CreateComputePipeline({
         .shader = REC_SHADER(k_light_cluster_cs_hlsl),
         .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                             {1, BindingType::kStorageBuffer},
-                            {2, BindingType::kStorageBuffer}}}},
+                            {2, BindingType::kStorageBuffer},
+                            {3, BindingType::kStorageBuffer},
+                            {4, BindingType::kStorageBuffer}}}},
         .push_constant_size = sizeof(ClusterPush),
         .debug_name = "light_cluster",
     });
@@ -224,7 +228,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     cluster_indices_ = device_->CreateBuffer(
         static_cast<u64>(kClusterCount) * kMaxLightsPerCluster * sizeof(u32),
         kBufferUsageStorage);
-    if (!cluster_counts_ || !cluster_indices_) return false;
+    decal_cluster_indices_ = device_->CreateBuffer(
+        static_cast<u64>(kClusterCount) * kMaxDecalsPerCluster * sizeof(u32),
+        kBufferUsageStorage);
+    if (!cluster_counts_ || !cluster_indices_ || !decal_cluster_indices_) return false;
   }
   if (!ssao_.Initialize(*device_)) return false;  // raster ao fallback, no rt needed
   if (!ssr_.Initialize(*device_)) return false;   // raster reflection fallback
@@ -810,6 +817,12 @@ void Renderer::EnsureRayTracingGeometry() {
   }
 }
 
+void Renderer::SetDecalAtlas(asset::AssetId texture) {
+  if (!material_system_) return;
+  const GpuImage* img = material_system_->find_texture(texture.hash);
+  decal_atlas_view_ = img ? img->view : TextureView{};
+}
+
 bool Renderer::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   if (!material_system_) return false;
   return material_system_->UploadTexture(texture, id_salt);
@@ -1025,7 +1038,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               csm_on ? ctx.graph->image(shadow_atlas).view : TextureView{},
               csm_on ? shadow_.cascade_buffer(shadow_slot) : GpuBuffer{},
               shadow_.cascade_buffer_size(), ctx.graph->image(opaque_color).view, sun_shadow_view,
-              frame.lights, frame.lights.size, TextureView{}, cluster_counts_, cluster_indices_);
+              frame.lights, frame.lights.size, TextureView{}, cluster_counts_, cluster_indices_,
+              frame.decals, decal_cluster_indices_, decal_atlas_view_);
 
           ColorAttachment colors[2];
           colors[0] = {.view = ctx.graph->image(composite).view, .load = LoadOp::kLoad};
@@ -1158,6 +1172,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   u32 light_count = std::min<u32>(static_cast<u32>(view.lights.size()), kMaxFrameLights);
   if (light_count > 0) {
     std::memcpy(frame.lights.mapped, view.lights.data(), light_count * sizeof(PointLight));
+  }
+  u32 decal_count = std::min<u32>(static_cast<u32>(view.decals.size()), kMaxFrameDecals);
+  if (decal_count > 0) {
+    std::memcpy(frame.decals.mapped, view.decals.data(), decal_count * sizeof(Decal));
   }
   globals.light_count = light_count;
   {
@@ -1824,7 +1842,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   graph_.AddPass(
       "light_cluster",
       [&](RenderGraph::PassBuilder&) {},
-      [this, &frame, &view, light_count, proj](PassContext& ctx) {
+      [this, &frame, &view, light_count, decal_count, proj](PassContext& ctx) {
         struct ClusterPush {
           Mat4 view_mat;
           f32 screen[2];
@@ -1834,6 +1852,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           u32 light_count;
           f32 tan_half_fov_y;
           f32 aspect;
+          u32 decal_count;
+          f32 pad[3];
         } p{};
         p.view_mat = LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
         p.screen[0] = static_cast<f32>(render_width_);
@@ -1845,11 +1865,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         p.light_count = light_count;
         p.tan_half_fov_y = std::tan(view.camera.fov_y * 0.5f);
         p.aspect = static_cast<f32>(render_width_) / static_cast<f32>(render_height_);
+        p.decal_count = decal_count;
         ctx.cmd->BindPipeline(light_cluster_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::StorageBuffer(0, frame.lights, 0, frame.lights.size),
                 Bind::StorageBuffer(1, cluster_counts_, 0, cluster_counts_.size),
-                Bind::StorageBuffer(2, cluster_indices_, 0, cluster_indices_.size)});
+                Bind::StorageBuffer(2, cluster_indices_, 0, cluster_indices_.size),
+                Bind::StorageBuffer(3, frame.decals, 0, frame.decals.size),
+                Bind::StorageBuffer(4, decal_cluster_indices_, 0,
+                                    decal_cluster_indices_.size)});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch((kClusterCount + 63) / 64, 1, 1);
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
@@ -1884,7 +1908,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             csm_active ? ctx.graph->image(shadow_atlas).view : TextureView{},
             csm_active ? shadow_.cascade_buffer(shadow_slot) : GpuBuffer{},
             shadow_.cascade_buffer_size(), TextureView{}, sun_shadow_view, frame.lights,
-            frame.lights.size, spec_refl_view, cluster_counts_, cluster_indices_);
+            frame.lights.size, spec_refl_view, cluster_counts_, cluster_indices_,
+            frame.decals, decal_cluster_indices_, decal_atlas_view_);
 
         ColorAttachment colors[2];
         colors[0] = {.view = ctx.graph->image(scene_color).view,
@@ -2423,6 +2448,9 @@ bool Renderer::CreateFrameResources() {
     frame.lights = device_->CreateBuffer(static_cast<u64>(kMaxFrameLights) * sizeof(PointLight),
                                          kBufferUsageStorage, true);
     if (!frame.lights.mapped) return false;
+    frame.decals = device_->CreateBuffer(static_cast<u64>(kMaxFrameDecals) * sizeof(Decal),
+                                         kBufferUsageStorage, true);
+    if (!frame.decals.mapped) return false;
   }
   return true;
 }
@@ -2432,6 +2460,7 @@ void Renderer::DestroyFrameResources() {
     if (frame.globals) device_->DestroyBuffer(frame.globals);
     if (frame.bone_palette) device_->DestroyBuffer(frame.bone_palette);
     if (frame.lights) device_->DestroyBuffer(frame.lights);
+    if (frame.decals) device_->DestroyBuffer(frame.decals);
     frame = {};
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
@@ -2536,6 +2565,7 @@ void Renderer::Shutdown() {
     if (contact_shadow_pipeline_) device_->DestroyPipeline(contact_shadow_pipeline_);
     if (cluster_counts_) device_->DestroyBuffer(cluster_counts_);
     if (cluster_indices_) device_->DestroyBuffer(cluster_indices_);
+    if (decal_cluster_indices_) device_->DestroyBuffer(decal_cluster_indices_);
 #if defined(RECREATION_HAS_NRD)
     if (rt_available_) nrd_.Destroy(*device_);
     if (rt_available_) shadow_trace_.Destroy(*device_);

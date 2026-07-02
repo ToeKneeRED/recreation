@@ -193,6 +193,10 @@ bool EnvironmentSystem::CreatePipelines() {
   // 13/14: froxel cluster counts + light index list (light_cluster.cs).
   env_desc.slots.push_back({13, BindingType::kStorageBuffer});
   env_desc.slots.push_back({14, BindingType::kStorageBuffer});
+  // 15-17: clustered decals (buffer, per-cluster indices, atlas).
+  env_desc.slots.push_back({15, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({16, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({17, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -352,7 +356,10 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     const GpuBuffer& lights, u64 lights_size,
                                     TextureView spec_reflections,
                                     const GpuBuffer& cluster_counts,
-                                    const GpuBuffer& cluster_indices) const {
+                                    const GpuBuffer& cluster_indices,
+                                    const GpuBuffer& decal_buffer,
+                                    const GpuBuffer& decal_indices,
+                                    TextureView decal_atlas) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -380,7 +387,12 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        Bind::StorageBuffer(13, cluster_counts ? cluster_counts : dummy_storage_, 0,
                            cluster_counts ? cluster_counts.size : 256),
        Bind::StorageBuffer(14, cluster_indices ? cluster_indices : dummy_storage_, 0,
-                           cluster_indices ? cluster_indices.size : 256)});
+                           cluster_indices ? cluster_indices.size : 256),
+       Bind::StorageBuffer(15, decal_buffer ? decal_buffer : dummy_storage_, 0,
+                           decal_buffer ? decal_buffer.size : 256),
+       Bind::StorageBuffer(16, decal_indices ? decal_indices : dummy_storage_, 0,
+                           decal_indices ? decal_indices.size : 256),
+       Bind::Combined(17, decal_atlas ? decal_atlas : white_.view, sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

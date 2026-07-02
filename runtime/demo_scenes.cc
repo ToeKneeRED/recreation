@@ -67,6 +67,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (!oit_instances_.empty()) view.oit = oit_instances_;
   if (!demo_gaussians_.empty()) view.gaussians = demo_gaussians_;
   if (!demo_lights_.empty()) view.lights = demo_lights_;
+  if (!demo_decals_.empty()) view.decals = demo_decals_;
 }
 
 namespace {
@@ -603,6 +604,82 @@ void DemoScenes::CreateBrickDemoScene() {
   ecs::Entity fl = world_.Create();
   world_.Add(fl, world::Transform{.position = {0, -0.15f, 0}});
   world_.Add(fl, world::Renderable{floor_mesh.id});
+
+  // Decal atlas: left half a dried blood splat, right half a moss patch.
+  asset::Texture atlas;
+  atlas.id = asset::MakeAssetId("builtin/decals/atlas");
+  atlas.format = asset::TextureFormat::kRgba8;
+  atlas.width = 512;
+  atlas.height = 256;
+  atlas.is_srgb = true;
+  atlas.data.resize(static_cast<size_t>(atlas.width) * atlas.height * 4);
+  auto blob = [](f32 u, f32 v, u32 seed_base, int arms) {
+    // Irregular radial blob: radius modulated by a few sine lobes.
+    f32 du = u - 0.5f, dv = v - 0.5f;
+    f32 r = std::sqrt(du * du + dv * dv) * 2.2f;
+    f32 ang = std::atan2(dv, du);
+    f32 rim = 0.75f + 0.18f * std::sin(ang * arms + seed_base) +
+              0.12f * std::sin(ang * (arms * 2 + 1) + seed_base * 1.7f);
+    return std::max(0.0f, 1.0f - r / rim);
+  };
+  for (u32 y = 0; y < atlas.height; ++y) {
+    for (u32 x = 0; x < atlas.width; ++x) {
+      size_t o = (static_cast<size_t>(y) * atlas.width + x) * 4;
+      f32 v = (y + 0.5f) / atlas.height;
+      if (x < 256) {  // blood
+        f32 u = (x + 0.5f) / 256.0f;
+        f32 m = blob(u, v, 3, 7);
+        f32 a = m > 0.02f ? std::min(1.0f, m * 2.2f) : 0.0f;
+        atlas.data[o] = static_cast<u8>(90 + 40 * m);
+        atlas.data[o + 1] = static_cast<u8>(8 + 10 * m);
+        atlas.data[o + 2] = static_cast<u8>(8 + 8 * m);
+        atlas.data[o + 3] = static_cast<u8>(a * 255.0f);
+      } else {  // moss
+        f32 u = (x - 256 + 0.5f) / 256.0f;
+        f32 m = blob(u, v, 11, 9);
+        f32 grain = 0.7f + 0.3f * blob(std::fmod(u * 5.0f, 1.0f), std::fmod(v * 5.0f, 1.0f), 5, 5);
+        f32 a = m > 0.05f ? std::min(1.0f, m * 1.6f) * grain : 0.0f;
+        atlas.data[o] = static_cast<u8>(40 + 25 * m);
+        atlas.data[o + 1] = static_cast<u8>(85 + 60 * m * grain);
+        atlas.data[o + 2] = static_cast<u8>(28 + 15 * m);
+        atlas.data[o + 3] = static_cast<u8>(a * 255.0f);
+      }
+    }
+  }
+  if (!config_.headless) {
+    renderer_.UploadTexture(atlas);
+    renderer_.SetDecalAtlas(atlas.id);
+  }
+  // A blood splat + moss patches projected onto the pom wall and the floor.
+  auto make_decal = [](Vec3 pos, Vec3 normal, Vec3 up_hint, f32 w, f32 h, f32 depth,
+                       bool moss) {
+    render::Decal d;
+    Vec3 n = Normalize(normal);
+    Vec3 t = Normalize(Cross(up_hint, n));
+    Vec3 b = Cross(n, t);
+    auto row = [&](Vec3 axis, f32 extent, f32* out) {
+      out[0] = axis.x / extent;
+      out[1] = axis.y / extent;
+      out[2] = axis.z / extent;
+      out[3] = -(axis.x * pos.x + axis.y * pos.y + axis.z * pos.z) / extent;
+    };
+    row(t, w, d.row0);
+    row(b, h, d.row1);
+    row(n, depth, d.row2);
+    d.uv_rect[0] = 0.5f;
+    d.uv_rect[1] = 1.0f;
+    d.uv_rect[2] = moss ? 0.5f : 0.0f;
+    d.uv_rect[3] = 0.0f;
+    return d;
+  };
+  demo_decals_.push_back(
+      make_decal({-3.6f, 1.6f, -1.85f}, {0, 0, 1}, {0, 1, 0}, 0.7f, 0.7f, 0.4f, false));
+  demo_decals_.push_back(
+      make_decal({-2.2f, 0.8f, -1.85f}, {0, 0, 1}, {0, 1, 0}, 1.1f, 1.1f, 0.4f, true));
+  demo_decals_.push_back(
+      make_decal({-1.0f, 0.0f, 0.6f}, {0, 1, 0}, {0, 0, 1}, 0.9f, 0.9f, 0.3f, false));
+  demo_decals_.push_back(
+      make_decal({1.6f, 0.0f, 1.4f}, {0, 1, 0}, {0, 0, 1}, 1.3f, 1.3f, 0.3f, true));
 
   // Grazing warm sun to pop the relief.
   renderer_.settings().sun_direction = {-0.85f, -0.18f, -0.49f};

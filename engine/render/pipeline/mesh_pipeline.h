@@ -48,12 +48,25 @@ struct FrameGlobals {
   f32 cluster_params[4] = {0, 0, 64, 64};
 };
 
+// A projected decal: an oriented box whose -z face carries an atlas region,
+// blended into the surface albedo before shading (clustered like the lights).
+struct Decal {
+  // World -> unit-box rows (decal space: xyz in [-1,1], z along the normal).
+  f32 row0[4] = {1, 0, 0, 0};
+  f32 row1[4] = {0, 1, 0, 0};
+  f32 row2[4] = {0, 0, 1, 0};
+  f32 uv_rect[4] = {1, 1, 0, 0};     // atlas uv scale.xy, offset.zw
+  f32 tint_blend[4] = {1, 1, 1, 1};  // rgb tint, w albedo blend strength
+};
+
 // Froxel grid for clustered lighting/decals (mirrored in the shaders).
 inline constexpr u32 kClusterTilesX = 16;
 inline constexpr u32 kClusterTilesY = 9;
 inline constexpr u32 kClusterSlices = 24;
 inline constexpr u32 kClusterCount = kClusterTilesX * kClusterTilesY * kClusterSlices;
 inline constexpr u32 kMaxLightsPerCluster = 32;
+inline constexpr u32 kMaxDecalsPerCluster = 16;
+inline constexpr u32 kMaxFrameDecals = 128;
 
 // FrameGlobals::flags bits, mirrored in mesh.ps.hlsl.
 inline constexpr u32 kFrameFlagIbl = 1u << 0;

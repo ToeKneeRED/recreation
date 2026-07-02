@@ -302,6 +302,10 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
   return true;
 }
 
+const GpuImage* MaterialSystem::find_texture(u64 hash) const {
+  return textures_.find(hash);
+}
+
 bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt) {
   u64 key = material.id.hash ^ id_salt;
   if (sets_.find(key)) return true;
