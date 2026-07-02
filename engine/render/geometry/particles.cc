@@ -24,6 +24,8 @@ struct ParticlePush {
   f32 sun_color[3];
   f32 ambient;
   Mat4 prev_view_proj;
+  u32 emissive;
+  f32 pad[3];
 };
 
 struct ParticleSimPush {
@@ -37,6 +39,11 @@ struct ParticleSimPush {
   f32 size_range;
   u32 count;
   u32 frame;
+  u32 mode;
+  f32 radius;
+  f32 intensity;
+  f32 time;
+  f32 pad[2];
 };
 
 }  // namespace
@@ -60,7 +67,20 @@ bool ParticleSystem::Initialize(Device& device, Format color_format) {
       .push_constant_size = sizeof(ParticlePush),
       .debug_name = "particles",
   });
-  if (!pipeline_) {
+  // Fire path: HDR additive color, motion still alpha-weighted.
+  pipeline_additive_ = device.CreateGraphicsPipeline({
+      .vertex = REC_SHADER(k_particle_vs_hlsl),
+      .fragment = REC_SHADER(k_particle_ps_hlsl),
+      .topology = PrimitiveTopology::kTriangleStrip,
+      .raster = {.cull = CullMode::kNone},
+      .color_formats = {color_format, kParticleMotionFormat},
+      .blend = {BlendMode::kAdditive, BlendMode::kAlpha},
+      .sets = {{.slots = {{0, BindingType::kStorageBuffer},
+                          {1, BindingType::kSampledImage}}}},
+      .push_constant_size = sizeof(ParticlePush),
+      .debug_name = "particles_additive",
+  });
+  if (!pipeline_ || !pipeline_additive_) {
     REC_ERROR("particle pipeline creation failed");
     return false;
   }
@@ -124,7 +144,7 @@ void ParticleSystem::RecordDraw(PassContext& ctx, ResourceHandle color, Resource
                     .load = LoadOp::kLoad};  // blend velocity over the mvecs
   ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
 
-  ctx.cmd->BindPipeline(pipeline_);
+  ctx.cmd->BindPipeline(frame.emissive ? pipeline_additive_ : pipeline_);
   ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, instances, 0,
                                                  count * sizeof(ParticleInstance)),
                              Bind::Sampled(1, ctx.graph->image(depth))});
@@ -148,6 +168,7 @@ void ParticleSystem::RecordDraw(PassContext& ctx, ResourceHandle color, Resource
   push.sun_color[2] = frame.sun_color.z;
   push.ambient = frame.ambient;
   push.prev_view_proj = frame.prev_view_proj;
+  push.emissive = frame.emissive ? 1u : 0u;
   ctx.cmd->Push(push);
   ctx.cmd->Draw(4, count, 0, 0);
   ctx.cmd->EndRendering();
@@ -183,6 +204,10 @@ void ParticleSystem::SimulateAndDraw(RenderGraph& graph, ResourceHandle color, R
         sp.size_range = sim.size_range;
         sp.count = count;
         sp.frame = 0x9e3779b9u ^ count;  // nonzero seed salt; per-particle index varies it
+        sp.mode = sim.mode;
+        sp.radius = sim.radius;
+        sp.intensity = sim.intensity;
+        sp.time = sim.time;
         ctx.cmd->BindPipeline(sim_pipeline_);
         ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, state),
                                    Bind::StorageBuffer(1, instances, 0,
@@ -202,6 +227,8 @@ void ParticleSystem::SimulateAndDraw(RenderGraph& graph, ResourceHandle color, R
 void ParticleSystem::Destroy(Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
+  device.DestroyPipeline(pipeline_additive_);
+  pipeline_additive_ = {};
   device.DestroyPipeline(sim_pipeline_);
   sim_pipeline_ = {};
   device.DestroyBuffer(sim_state_);

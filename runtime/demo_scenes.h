@@ -40,6 +40,7 @@ class DemoScenes {
   void CreateMeshletDemoScene();
   void CreatePointLightDemoScene();
   void UpdateParticles(f32 dt, render::FrameView& view);
+  void CreateFireDemoScene();
 
   struct DemoParticle {
     Vec3 position;
@@ -63,6 +64,10 @@ class DemoScenes {
   Vec3 particle_emitter_{0, 0, 0};
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain
   Vec3 gpu_particle_emitter_{0, 0, 0};
+  u32 gpu_particle_mode_ = 0;         // 1 = fire (buoyant flames + embers)
+  f32 gpu_particle_radius_ = 0.3f;
+  f32 gpu_particle_intensity_ = 1.0f;
+  f32 fire_time_ = 0.0f;  // drives the campfire light flicker
   bool fur_ball_ = false;
   Vec3 fur_position_{0, 0, 0};
   base::Vector<render::WboitInstance> oit_instances_;

@@ -103,6 +103,9 @@ struct FrameView {
   // simulation on the gpu (compute) and draws it, instead of the cpu particles.
   u32 gpu_particle_count = 0;
   Vec3 gpu_particle_emitter{};
+  u32 gpu_particle_mode = 0;         // 0 ember fountain, 1 fire
+  f32 gpu_particle_radius = 0.3f;    // fire emitter disk radius
+  f32 gpu_particle_intensity = 1.0f; // fire emissive scale
   // shell-fur ball: when enabled, the fur pass draws a fuzzy sphere here.
   bool fur_ball = false;
   Vec3 fur_position{};

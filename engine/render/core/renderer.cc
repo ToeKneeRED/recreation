@@ -1955,6 +1955,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       sim.emitter[2] = view.gpu_particle_emitter.z;
       sim.dt = view.frame_delta_seconds;
       sim.count = view.gpu_particle_count;
+      sim.mode = view.gpu_particle_mode;
+      sim.radius = view.gpu_particle_radius;
+      sim.intensity = view.gpu_particle_intensity;
+      sim.time = static_cast<f32>(time_seconds_);
+      pf.emissive = view.gpu_particle_mode == 1;
       particles_.SimulateAndDraw(graph_, lit, depth_export, motion, sim, pf, frame_index_ % 2);
     } else {
       particles_.AddToGraph(graph_, lit, depth_export, motion, view.particles, pf, frame_index_ % 2);

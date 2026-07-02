@@ -15,6 +15,8 @@ struct PushData {
   float3 sun_color;
   float ambient;
   column_major float4x4 prev_view_proj;
+  uint emissive;  // 1: hdr additive (fire) - color is radiance, no sun/ambient
+  float3 pad;
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -52,7 +54,15 @@ PsOut main(PsIn input) {
   float alpha = input.color.a * smoothstep(1.0, 0.55, sqrt(r2)) * soft;
   if (alpha <= 0.001) discard;
   PsOut o;
-  o.color = float4(lit, alpha);
+  if (push.emissive != 0u) {
+    // Additive HDR: the sim authored radiance; a soft gaussian-ish falloff
+    // shapes the puff and the blend accumulates the flame body. Bloom does
+    // the rest of the glow.
+    float shape = exp(-r2 * 2.6) * smoothstep(1.0, 0.7, sqrt(r2));
+    o.color = float4(input.color.rgb * shape * soft, 0.0);
+  } else {
+    o.color = float4(lit, alpha);
+  }
   o.motion = float4(input.motion, 0.0, alpha);  // alpha-weighted into the motion buffer
   return o;
 }

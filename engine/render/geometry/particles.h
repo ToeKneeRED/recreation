@@ -41,6 +41,9 @@ class ParticleSystem {
     f32 ambient = 0.1f;
     f32 near_plane = 0.1f;
     f32 soft_fade = 0.5f;  // meters of view-z fade as a particle nears geometry
+    // HDR additive mode (fire): particle color is radiance, drawn with an
+    // additive blend instead of lit alpha.
+    bool emissive = false;
   };
 
   // Uploads particles into the frame slot's buffer and adds the draw pass.
@@ -62,6 +65,10 @@ class ParticleSystem {
     f32 life_range = 0.8f;
     f32 size_min = 0.12f;
     f32 size_range = 0.10f;
+    u32 mode = 0;          // 0 ember fountain, 1 fire (buoyant flames + embers)
+    f32 radius = 0.3f;     // fire emitter disk radius
+    f32 intensity = 1.0f;  // fire emissive scale
+    f32 time = 0.0f;       // seconds, drives the turbulence field
   };
   static constexpr u32 kMaxParticles = 1u << 18;  // 262144
 
@@ -77,6 +84,7 @@ class ParticleSystem {
 
   Device* device_ = nullptr;
   PipelineHandle pipeline_;
+  PipelineHandle pipeline_additive_;
   PipelineHandle sim_pipeline_;
   GpuBuffer buffers_[kFramesInFlight];  // host-visible billboard storage
   GpuBuffer sim_state_;                 // persistent gpu particle state

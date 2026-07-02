@@ -37,6 +37,28 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (gpu_particle_count_ > 0) {
     view.gpu_particle_count = gpu_particle_count_;
     view.gpu_particle_emitter = gpu_particle_emitter_;
+    view.gpu_particle_mode = gpu_particle_mode_;
+    view.gpu_particle_radius = gpu_particle_radius_;
+    view.gpu_particle_intensity = gpu_particle_intensity_;
+    if (gpu_particle_mode_ == 1) {
+      // The fire lights its surroundings: a warm point light hovering in the
+      // flame body, intensity flickering with layered sines (the rt lighting
+      // path traces real shadows from it).
+      fire_time_ += dt;
+      f32 t = fire_time_;
+      f32 flicker = 0.82f + 0.12f * std::sin(t * 11.7f) + 0.06f * std::sin(t * 23.3f + 1.7f) +
+                    0.05f * std::sin(t * 5.1f + 0.6f);
+      render::PointLight l;
+      l.pos_radius[0] = gpu_particle_emitter_.x;
+      l.pos_radius[1] = gpu_particle_emitter_.y + 0.55f;
+      l.pos_radius[2] = gpu_particle_emitter_.z;
+      l.pos_radius[3] = 14.0f;
+      l.color_intensity[0] = 1.0f;
+      l.color_intensity[1] = 0.55f;
+      l.color_intensity[2] = 0.22f;
+      l.color_intensity[3] = 9.0f * flicker;
+      view.lights.push_back(l);
+    }
   }
   if (fur_ball_) {
     view.fur_ball = true;
@@ -459,6 +481,79 @@ void DemoScenes::CreateGpuParticleDemoScene() {
   REC_INFO("gpu particle demo: {} compute-simulated embers", gpu_particle_count_);
 }
 
+void DemoScenes::CreateFireDemoScene() {
+  // A campfire at dusk: stone ground, a log ring, gpu-simulated flames and
+  // embers (additive hdr), and a flickering point light that the rt path
+  // shadows. Exercises the whole fire stack in one shot.
+  asset::Material stone;
+  stone.id = asset::MakeAssetId("builtin/fire/stone");
+  stone.base_color_factor[0] = 0.23f;
+  stone.base_color_factor[1] = 0.22f;
+  stone.base_color_factor[2] = 0.21f;
+  stone.roughness_factor = 0.9f;
+  if (!config_.headless) renderer_.UploadMaterial(stone);
+  asset::Material wood;
+  wood.id = asset::MakeAssetId("builtin/fire/wood");
+  wood.base_color_factor[0] = 0.16f;
+  wood.base_color_factor[1] = 0.09f;
+  wood.base_color_factor[2] = 0.05f;
+  wood.roughness_factor = 0.85f;
+  if (!config_.headless) renderer_.UploadMaterial(wood);
+
+  asset::Mesh ground = asset::MakeBox(30.0f, 0.2f, 30.0f, asset::MakeAssetId("builtin/fire/ground"));
+  ground.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(ground.lods[0].indices.size()), stone.id});
+  if (!config_.headless) renderer_.UploadMesh(ground);
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, world::Transform{.position = {0, -0.2f, 0}});
+  world_.Add(floor, world::Renderable{ground.id});
+
+  // Log ring: slim boxes leaned into the fire, plus a few seat rocks so the
+  // flicker light has geometry to shadow.
+  asset::Mesh log = asset::MakeBox(0.9f, 0.14f, 0.14f, asset::MakeAssetId("builtin/fire/log"));
+  log.lods[0].submeshes.push_back({0, static_cast<u32>(log.lods[0].indices.size()), wood.id});
+  if (!config_.headless) renderer_.UploadMesh(log);
+  for (int i = 0; i < 5; ++i) {
+    f32 a = static_cast<f32>(i) * 1.2566f;
+    Quat q = QuatFromAxisAngle({0, 1, 0}, a);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, world::Transform{.position = {std::cos(a) * 0.28f, 0.10f + 0.02f * i,
+                                                std::sin(a) * 0.28f},
+                                   .rotation = {q.x, q.y, q.z, q.w}});
+    world_.Add(e, world::Renderable{log.id});
+  }
+  asset::Mesh rock = asset::MakeSphere(0.45f, 16, 24, asset::MakeAssetId("builtin/fire/rock"));
+  rock.lods[0].submeshes.push_back({0, static_cast<u32>(rock.lods[0].indices.size()), stone.id});
+  if (!config_.headless) renderer_.UploadMesh(rock);
+  const f32 rocks[4][2] = {{2.2f, 0.6f}, {-1.8f, 1.4f}, {0.6f, -2.1f}, {-2.4f, -1.2f}};
+  for (auto& r : rocks) {
+    ecs::Entity e = world_.Create();
+    world_.Add(e, world::Transform{.position = {r[0], 0.25f, r[1]}});
+    world_.Add(e, world::Renderable{rock.id});
+  }
+
+  gpu_particle_count_ = 3000;
+  gpu_particle_emitter_ = {0.0f, 0.12f, 0.0f};
+  gpu_particle_mode_ = 1;
+  gpu_particle_radius_ = 0.26f;
+  gpu_particle_intensity_ = 0.55f;
+
+  // Dusk: the sun barely up so the fire owns the scene. Auto exposure would
+  // brighten the dim scene back to noon; bias it down for the mood.
+  renderer_.settings().sun_direction = {0.35f, -0.08f, -0.93f};
+  renderer_.settings().sun_intensity = 0.25f;
+  renderer_.settings().sun_color = {1.0f, 0.55f, 0.35f};
+  renderer_.settings().ambient = 0.03f;
+  renderer_.settings().cloud_coverage = 0.6f;
+  renderer_.settings().exposure = 0.30f;
+
+  camera_.set_position({2.6f, 1.5f, 3.4f});
+  camera_.set_yaw_pitch(-0.65f, -0.22f);
+  camera_.speed = 3.0f;
+  REC_INFO("fire demo: {} gpu flame/ember particles + flickering shadowed light",
+           gpu_particle_count_);
+}
+
 void DemoScenes::CreateFurDemoScene() {
   // A fuzzy sphere: an opaque brown core (so the shells have a solid base and a
   // depth occluder) under the shell-fur pass that draws the coat.
@@ -776,6 +871,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "gpuparticles") {
     CreateGpuParticleDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "fire") {
+    CreateFireDemoScene();
     return;
   }
   if (config_.demo_scene == "autolod") {
