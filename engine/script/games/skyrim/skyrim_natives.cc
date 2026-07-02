@@ -200,6 +200,12 @@ void RegisterGameAndForms(papyrus::NativeRegistry& reg, SkyrimBindings* bindings
   reg.Register("Form", "HasKeyword", [bindings](VirtualMachine&, ObjectRef self, Args& a) {
     return Value::Bool(Resolve(bindings).HasKeyword(self, ArgO(a, 0)));
   });
+  reg.Register("Form", "GetWeight", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Float(Resolve(bindings).GetWeight(self));
+  });
+  reg.Register("Form", "GetGoldValue", [bindings](VirtualMachine&, ObjectRef self, Args&) {
+    return Value::Int(Resolve(bindings).GetGoldValue(self));
+  });
 
   // ActorBase (and Actor, which delegates) read the NPC_ record.
   for (const char* type : {"ActorBase", "Actor"}) {

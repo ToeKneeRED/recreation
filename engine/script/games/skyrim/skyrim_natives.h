@@ -29,6 +29,11 @@ class SkyrimBindings {
   virtual i32 GetFormType(papyrus::ObjectRef form) { return 0; }
   virtual std::string GetName(papyrus::ObjectRef form) { return ""; }
   virtual bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) { return false; }
+  // Item weight and gold value, read from the form's record. Supported for the
+  // common inventory item types (weapons, armor, misc, ingredients, soul gems,
+  // keys, potions); other forms report 0.
+  virtual f32 GetWeight(papyrus::ObjectRef form) { return 0; }
+  virtual i32 GetGoldValue(papyrus::ObjectRef form) { return 0; }
 
   // ActorBase (NPC_ record data).
   virtual i32 GetSex(papyrus::ObjectRef actor_base) { return 0; }  // 0 male, 1 female
