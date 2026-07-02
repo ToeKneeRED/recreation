@@ -23,7 +23,7 @@ struct MaterialParams {
 
 static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
-static const uint kFlagTerrain = 16u;  // mr slot holds a land layer, not m/r
+static const uint kFlagTerrain = 4u;  // mr slot holds a land layer, not m/r
 
 struct PsIn {
   float4 sv_position : SV_Position;

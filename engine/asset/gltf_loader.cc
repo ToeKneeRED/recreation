@@ -235,6 +235,18 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
       std::memcpy(material.sheen_color, src.sheen.sheen_color_factor, sizeof(f32) * 3);
       material.sheen_roughness = src.sheen.sheen_roughness_factor;
     }
+    // Cloth heuristic: glTF has no wind flag, so name-tag the usual suspects.
+    // Sway weight follows the uv.y-away-from-attachment convention, which
+    // holds for typical hanging drapery unwraps.
+    if (src.name) {
+      std::string n = src.name;
+      for (char& c : n) c = static_cast<char>(std::tolower(c));
+      if (n.find("curtain") != std::string::npos || n.find("banner") != std::string::npos ||
+          n.find("flag") != std::string::npos || n.find("cloth") != std::string::npos ||
+          n.find("fabric") != std::string::npos || n.find("drape") != std::string::npos) {
+        material.wind = true;
+      }
+    }
   }
 
   out->meshes.resize(data->meshes_count);

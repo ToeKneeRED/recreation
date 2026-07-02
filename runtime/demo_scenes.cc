@@ -532,6 +532,68 @@ void DemoScenes::CreateFireDemoScene() {
     world_.Add(e, world::Renderable{rock.id});
   }
 
+  // Two wind-swayed banners flanking the fire (the cloth material carries the
+  // wind flag; uv.y = 0 at the pinned top edge per the sway convention).
+  asset::Material cloth;
+  cloth.id = asset::MakeAssetId("builtin/fire/cloth");
+  cloth.base_color_factor[0] = 0.55f;
+  cloth.base_color_factor[1] = 0.12f;
+  cloth.base_color_factor[2] = 0.10f;
+  cloth.roughness_factor = 0.85f;
+  cloth.two_sided = true;
+  cloth.wind = true;
+  cloth.sheen_color[0] = cloth.sheen_color[1] = cloth.sheen_color[2] = 0.35f;
+  cloth.sheen_roughness = 0.5f;
+  if (!config_.headless) renderer_.UploadMaterial(cloth);
+
+  asset::Mesh banner;
+  banner.id = asset::MakeAssetId("builtin/fire/banner");
+  banner.lods.resize(1);
+  {
+    constexpr int kW = 8, kH = 12;  // subdivided so the sway bends smoothly
+    const f32 width = 0.9f, height = 1.6f;
+    asset::MeshLod& lod = banner.lods[0];
+    for (int y = 0; y <= kH; ++y) {
+      for (int x = 0; x <= kW; ++x) {
+        asset::Vertex v{};
+        f32 u = static_cast<f32>(x) / kW;
+        f32 vv = static_cast<f32>(y) / kH;
+        v.position[0] = (u - 0.5f) * width;
+        v.position[1] = -vv * height;  // hangs downward from the rod
+        v.position[2] = 0.0f;
+        v.normal[2] = 1.0f;
+        v.tangent[0] = 1.0f;
+        v.tangent[3] = 1.0f;
+        v.uv[0] = u;
+        v.uv[1] = vv;  // 0 at the pinned edge
+        lod.vertices.push_back(v);
+      }
+    }
+    for (int y = 0; y < kH; ++y) {
+      for (int x = 0; x < kW; ++x) {
+        u32 a = y * (kW + 1) + x;
+        u32 b = a + 1;
+        u32 c = a + (kW + 1);
+        u32 d = c + 1;
+        for (u32 idx : {a, c, b, b, c, d}) lod.indices.push_back(idx);
+      }
+    }
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), cloth.id});
+  }
+  if (!config_.headless) renderer_.UploadMesh(banner);
+  asset::Mesh pole = asset::MakeBox(0.04f, 1.3f, 0.04f, asset::MakeAssetId("builtin/fire/pole"));
+  pole.lods[0].submeshes.push_back({0, static_cast<u32>(pole.lods[0].indices.size()), wood.id});
+  if (!config_.headless) renderer_.UploadMesh(pole);
+  const f32 banners[2][2] = {{-2.6f, -0.8f}, {2.3f, -1.6f}};
+  for (auto& b : banners) {
+    ecs::Entity pe = world_.Create();
+    world_.Add(pe, world::Transform{.position = {b[0], 1.3f, b[1]}});
+    world_.Add(pe, world::Renderable{pole.id});
+    ecs::Entity be = world_.Create();
+    world_.Add(be, world::Transform{.position = {b[0], 2.5f, b[1]}});
+    world_.Add(be, world::Renderable{banner.id});
+  }
+
   gpu_particle_count_ = 3000;
   gpu_particle_emitter_ = {0.0f, 0.12f, 0.0f};
   gpu_particle_mode_ = 1;

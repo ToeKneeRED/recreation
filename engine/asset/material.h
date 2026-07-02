@@ -50,6 +50,9 @@ struct Material {
   // (emissive). The shader tiles the layers at the native land repeat and
   // blends them by the weight map instead of the usual base-color sample.
   bool is_terrain = false;
+  // Vertex wind sway (banners, curtains, foliage). Weight convention: uv.y
+  // grows away from the attachment (0 = pinned edge).
+  bool wind = false;
 };
 
 }  // namespace rec::asset

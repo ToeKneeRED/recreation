@@ -10,9 +10,28 @@ struct FrameGlobals {
   float4 camera_position;  // xyz eye, w ibl intensity
   float4 misc;             // x,y render size, z sun angular radius, w frame index
   uint flags;
-  float3 pad;
+  float time;  // seconds
+  uint debug_view;
+  float reflection_cutoff;
+  uint ao_ray_count;
+  uint light_count;
+  float2 pad;
+  float4 wind;  // xyz direction*strength, w gust frequency
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
+
+// Prefix of the material params (set 1 is vertex-visible for the wind flag).
+struct MaterialFlagsCb {
+  float4 base_color_factor;
+  float3 emissive_factor;
+  float metallic_factor;
+  float roughness_factor;
+  float alpha_cutoff;
+  uint flags;
+  float pad;
+};
+[[vk::binding(0, 1)]] ConstantBuffer<MaterialFlagsCb> material_vs : register(b0, space1);
+static const uint kVsFlagWind = 8u;  // 1 << 3, mirrors MaterialSystem::kFlagWind
 
 struct PushData {
   column_major float4x4 model;
@@ -98,6 +117,24 @@ VsOut main(VsIn input) {
   SkinVertex(input, local_pos, local_normal, local_tangent);
 #endif
   float4 world = mul(push.model, float4(local_pos, 1.0));
+  // Wind sway for cloth/foliage: layered gusts along the global wind vector,
+  // weighted by uv.y (0 = pinned edge). Spatial phase decorrelates instances;
+  // prev reuses the displaced position, so the sway reads as static to the
+  // motion buffer (slow motion; TAA handles it).
+  if ((material_vs.flags & kVsFlagWind) != 0u) {
+    float3 wind = frame.wind.xyz;
+    float amp = length(wind);
+    if (amp > 1e-4) {
+      float3 dir = wind / amp;
+      float weight = saturate(input.uv.y);
+      float phase = frame.time * (1.1 * frame.wind.w) + dot(world.xz, float2(0.31, 0.47));
+      float gust = sin(phase) * 0.55 + sin(phase * 2.33 + 1.3) * 0.3 +
+                   sin(phase * 5.11 + 2.1) * 0.15;
+      float3 offset = dir * (gust * amp * weight);
+      offset.y -= abs(gust) * amp * 0.25 * weight;  // swing lowers the free edge
+      world.xyz += offset;
+    }
+  }
   float4 clip = mul(frame.view_proj, world);
   output.world_pos = world.xyz;
   // Motion vectors compare unjittered positions, so jitter only moves the

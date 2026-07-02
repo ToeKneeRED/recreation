@@ -68,7 +68,8 @@ std::unique_ptr<MaterialSystem> MaterialSystem::Create(Device& device,
   system->sampler_ = device.GetSampler(sampler_desc);
 
   system->set_layout_ = device.CreateBindingLayout({
-      .stages = kShaderStageFragment,
+      // Vertex too: the wind sway in mesh.vs reads the material flags.
+      .stages = kShaderStageVertex | kShaderStageFragment,
       .slots = {{0, BindingType::kUniformBuffer},
                 {1, BindingType::kCombinedTextureSampler},
                 {2, BindingType::kCombinedTextureSampler},
@@ -266,6 +267,7 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
   params.transmission = material.transmission;
   // Blend materials draw without the cutout test; mask materials cut.
   if (material.alpha_mode == asset::AlphaMode::kMask) params.flags |= kFlagAlphaMask;
+  if (material.wind) params.flags |= kFlagWind;
   // Terrain reuses the normal slot as a land layer, so the normal-map path must
   // stay off; the shader branches on kFlagTerrain instead.
   if (material.is_terrain) {

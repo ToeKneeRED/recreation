@@ -33,6 +33,9 @@ struct FrameGlobals {
   f32 reflection_cutoff = 0.6f;  // roughness above which rt reflections fall back to ibl
   u32 ao_ray_count = 0;  // rt ao rays/pixel this frame (0 when ao is screen-space), for the ray-count view
   u32 light_count = 0;   // dynamic point lights in the bound light buffer
+  f32 pad_wind[2] = {0, 0};  // aligns wind to the hlsl float4 register
+  // xyz wind direction * strength (m of sway at weight 1), w gust frequency.
+  f32 wind[4] = {0.6f, 0.0f, 0.35f, 1.0f};
 };
 
 // FrameGlobals::flags bits, mirrored in mesh.ps.hlsl.
