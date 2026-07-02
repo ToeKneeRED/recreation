@@ -37,6 +37,7 @@ base::Option<double> DofFocus{"dof.focus", 0.0, "REC_DOF_FOCUS"};
 base::Option<double> DofAperture{"dof.aperture", 2.8, "REC_DOF_APERTURE"};
 base::Option<bool> SssOpt{"sss", true, "REC_SSS"};
 base::Option<double> SssWidth{"sss.width", 0.012, "REC_SSS_WIDTH"};
+base::Option<bool> AsyncComputeOpt{"async.compute", true, "REC_ASYNC_COMPUTE"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -457,6 +458,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (DofAperture.overridden()) settings_.dof_aperture = static_cast<f32>(double(DofAperture));
   if (SssOpt.overridden()) settings_.sss = SssOpt;
   if (SssWidth.overridden()) settings_.sss_width = static_cast<f32>(double(SssWidth));
+  if (AsyncComputeOpt.overridden()) settings_.async_compute = AsyncComputeOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -918,9 +920,11 @@ void Renderer::RenderFrame(const FrameView& view) {
   ctx.cmd = cmd;
   ctx.device = device_.get();
   ctx.graph = &graph_;
-  graph_.Execute(ctx);
+  // With async passes the graph splits the frame into segments; the returned
+  // list is the final one and the only valid argument for SubmitFrame.
+  CommandList* final_cmd = graph_.Execute(ctx);
 
-  PresentResult presented = device_->SubmitFrame(cmd, *swapchain_, image_index);
+  PresentResult presented = device_->SubmitFrame(final_cmd, *swapchain_, image_index);
 
   if (!screenshot_path_.empty() && time_seconds_ >= screenshot_at_) {
     WriteScreenshot(image_index);
@@ -1327,6 +1331,17 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         [this, tlas_slot, instances = std::move(instances)](PassContext& ctx) {
           raytracing_->BuildTlas(*ctx.cmd, tlas_slot, instances);
         });
+  }
+
+  // DDGI right after the TLAS (its only same-frame dependency): flagged async
+  // it forks onto the compute queue here and overlaps everything up to the
+  // join before its first consumer (the reflection trace / scene pass).
+  bool ddgi_async = ddgi_active && !path_trace && settings_.async_compute &&
+                    device_->caps().async_compute;
+  if (ddgi_active && !path_trace) {
+    ddgi_->AddToGraph(graph_, *raytracing_, tlas_slot, view.camera.eye,
+                      applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
+                      frame_index_, ddgi_async);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -1778,12 +1793,6 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     gpu_cull_.CopyDepth(graph_, depth_export, cull_slot);
   }
 
-  if (ddgi_active) {
-    ddgi_->AddToGraph(graph_, *raytracing_, tlas_slot, view.camera.eye,
-                      applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
-                      frame_index_);
-  }
-
   ResourceHandle ao = kInvalidResource;
   ResourceHandle sun_shadow = kInvalidResource;
   ResourceHandle spec_refl = kInvalidResource;
@@ -1900,6 +1909,12 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             });
       }
     }
+    if (ddgi_async && spec_refl_active) {
+      // First DDGI consumer: the reflection trace samples the probe atlases.
+      graph_.AddPass(
+          "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
+          [](PassContext&) {});
+    }
     if (spec_refl_active) {
       // 1-spp VNDF reflection radiance -> REBLUR_SPECULAR; the scene pass
       // samples the result instead of tracing an inline mirror ray.
@@ -1936,6 +1951,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     const f32 proj_scale[2] = {proj.m[0], proj.m[5]};
     ao = ssao_.AddToGraph(graph_, depth_export, normals, globals.inv_view_proj, proj_scale, 0.1f,
                           frame_index_);
+  }
+
+  // Without the reflection trace the scene pass is DDGI's first consumer;
+  // join the async queue before the lighting work leading into it.
+  if (ddgi_async && spec_refl == kInvalidResource) {
+    graph_.AddPass(
+        "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
+        [](PassContext&) {});
   }
 
   // Froxel light culling: fixed slots per cluster, run every frame (a zero

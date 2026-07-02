@@ -251,6 +251,7 @@ void Engine::ApplyRenderPreset() {
   tuned.dof_aperture = env.dof_aperture;
   tuned.sss = env.sss;  // honor REC_SSS over the preset
   tuned.sss_width = env.sss_width;
+  tuned.async_compute = env.async_compute;  // honor REC_ASYNC_COMPUTE
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
   tuned.cloud_coverage = env.cloud_coverage;

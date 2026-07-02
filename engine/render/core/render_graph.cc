@@ -199,19 +199,82 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
   return true;
 }
 
-void RenderGraph::Execute(PassContext& ctx) {
+CommandList* RenderGraph::Execute(PassContext& ctx) {
   ctx.graph = this;
-  for (Pass& pass : passes_) {
+  auto run_pass = [&](Pass& pass) {
     if (pass_begin_) pass_begin_(*ctx.cmd, pass.name.c_str());
     if (!pass.barriers.empty()) {
       ctx.cmd->TextureBarriers({pass.barriers.data(), pass.barriers.size()});
     }
     if (pass.execute) pass.execute(ctx);
     if (pass_end_) pass_end_(*ctx.cmd);
+  };
+
+  // Async plan: passes flagged async run on the compute queue, forked after
+  // the last main pass preceding the first async pass and joined at the first
+  // pass flagged JoinAsync. Falls back to inline execution when the device
+  // has no second queue or the markers are inconsistent.
+  size_t first_async = passes_.size();
+  size_t join = passes_.size();
+  bool any_async = false;
+  for (size_t i = 0; i < passes_.size(); ++i) {
+    if (passes_[i].builder.async && !any_async) {
+      any_async = true;
+      first_async = i;
+    }
+    if (passes_[i].builder.join_async && join == passes_.size()) join = i;
+  }
+  bool do_async = any_async && ctx.device && ctx.device->caps().async_compute;
+  if (do_async) {
+    // Every async pass must precede the join (its first consumer).
+    for (size_t i = join; i < passes_.size(); ++i) {
+      if (passes_[i].builder.async) {
+        do_async = false;
+        break;
+      }
+    }
+  }
+
+  if (!do_async) {
+    for (Pass& pass : passes_) run_pass(pass);
+    if (!final_barriers_.empty()) {
+      ctx.cmd->TextureBarriers({final_barriers_.data(), final_barriers_.size()});
+    }
+    return ctx.cmd;
+  }
+
+  // Segment A: main passes before the fork.
+  size_t i = 0;
+  for (; i < first_async; ++i) {
+    if (!passes_[i].builder.async) run_pass(passes_[i]);
+  }
+  CommandList* main_cmd = ctx.device->SplitFrame(ctx.cmd, /*signal_fork=*/true);
+
+  // Async segment: all flagged passes, in add order, on the compute queue.
+  CommandList* async_cmd = ctx.device->BeginAsync();
+  if (async_cmd) {
+    ctx.cmd = async_cmd;
+    for (Pass& pass : passes_) {
+      if (pass.builder.async) run_pass(pass);
+    }
+    ctx.device->SubmitAsync(async_cmd);
+  }
+
+  // Segment B: main passes inside the overlap window.
+  ctx.cmd = main_cmd;
+  for (; i < join; ++i) {
+    if (!passes_[i].builder.async) run_pass(passes_[i]);
+  }
+  ctx.cmd = ctx.device->SplitFrame(ctx.cmd, /*signal_fork=*/false);
+
+  // Final segment: from the join onward; SubmitFrame waits the async queue.
+  for (; i < passes_.size(); ++i) {
+    if (!passes_[i].builder.async) run_pass(passes_[i]);
   }
   if (!final_barriers_.empty()) {
     ctx.cmd->TextureBarriers({final_barriers_.data(), final_barriers_.size()});
   }
+  return ctx.cmd;
 }
 
 void RenderGraph::Reset() {

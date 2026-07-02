@@ -256,6 +256,9 @@ class VulkanDevice final : public Device {
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
   CommandList* BeginFrame(u32 slot) override;
   PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) override;
+  CommandList* SplitFrame(CommandList* cmd, bool signal_fork) override;
+  CommandList* BeginAsync() override;
+  void SubmitAsync(CommandList* cmd) override;
 
   // Internal + interop surface.
   VkInstance instance() const { return instance_; }
@@ -288,6 +291,20 @@ class VulkanDevice final : public Device {
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
     std::unique_ptr<VulkanCommandList> list;
     bool fence_armed = false;  // submit happened; next BeginFrame must wait
+    // Async compute: extra graphics segments (fork/join splits) + the compute
+    // queue's list, all reset with the shared pool. The fork semaphore gates
+    // the async submission behind the pre-fork segment; the async semaphore
+    // gates the final segment behind the compute work.
+    static constexpr u32 kMaxSegments = 3;
+    VkCommandBuffer seg_cmds[kMaxSegments - 1] = {};
+    std::unique_ptr<VulkanCommandList> seg_lists[kMaxSegments - 1];
+    VkCommandBuffer async_cmd = VK_NULL_HANDLE;
+    std::unique_ptr<VulkanCommandList> async_list;
+    VkSemaphore fork_sem = VK_NULL_HANDLE;
+    VkSemaphore async_sem = VK_NULL_HANDLE;
+    u32 active_segment = 0;
+    bool fork_signaled = false;
+    bool async_submitted = false;
   };
 
   VkInstance instance_ = VK_NULL_HANDLE;
@@ -298,7 +315,9 @@ class VulkanDevice final : public Device {
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::string pipeline_cache_path_;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
+  VkQueue compute_queue_ = VK_NULL_HANDLE;  // second same-family queue, async compute
   u32 graphics_family_ = 0;
+  u32 current_slot_ = 0;  // frame ring slot set by BeginFrame
   VmaAllocator allocator_ = nullptr;
   VkCommandPool immediate_pool_ = VK_NULL_HANDLE;
   VkFence immediate_fence_ = VK_NULL_HANDLE;

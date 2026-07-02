@@ -168,7 +168,7 @@ EnvironmentSystem::DdgiBinding DdgiSystem::binding(u32 frame_index) const {
 
 void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
                             const Vec3& camera, const Vec3& sun_direction, f32 sun_intensity,
-                            const Vec3& sun_color, u32 frame_index) {
+                            const Vec3& sun_color, u32 frame_index, bool async) {
   // Snap the volume to the probe grid around the camera; a snap shifts what
   // every probe represents, so history resets and re-converges.
   f32 spacing = settings_.probe_spacing;
@@ -210,7 +210,7 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   rays_push.sun_color[3] = static_cast<f32>(kRaysPerProbe);
 
   graph.AddPass(
-      "ddgi", [](RenderGraph::PassBuilder&) {},
+      "ddgi", [async](RenderGraph::PassBuilder& b) { if (async) b.Async(); },
       [this, &raytracing, tlas_slot, rays_push, frame_index, reset](PassContext& ctx) {
         const GpuBuffer& volume_buffer = volume_buffers_[frame_index % 2];
 

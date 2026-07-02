@@ -50,9 +50,10 @@ class DdgiSystem {
   // Re-centers the volume on the camera (snapped to the probe grid; the
   // hysteresis re-converges probes after a snap) and adds the ray trace,
   // blend and border passes.
+  // async runs the pass on the compute queue (see RenderGraph::PassBuilder).
   void AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
                   const Vec3& camera, const Vec3& sun_direction, f32 sun_intensity,
-                  const Vec3& sun_color, u32 frame_index);
+                  const Vec3& sun_color, u32 frame_index, bool async = false);
 
   // Bound as part of descriptor set 2 by the renderer.
   EnvironmentSystem::DdgiBinding binding(u32 frame_index) const;

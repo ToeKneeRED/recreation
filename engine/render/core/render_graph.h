@@ -80,11 +80,21 @@ class RenderGraph {
   struct PassBuilder {
     void Read(ResourceHandle handle, ResourceUsage usage) { accesses.push_back({handle, usage}); }
     void Write(ResourceHandle handle, ResourceUsage usage) { accesses.push_back({handle, usage}); }
+    // Runs the pass on the async compute queue (when the device has one),
+    // overlapped with the main-queue passes between it and the join marker.
+    // Async passes manage their own barriers and must not touch resources any
+    // main-queue pass inside the overlap window uses.
+    void Async() { async = true; }
+    // Marks the first pass that consumes async results: the graph splits the
+    // main command list here and the final segment waits on the async queue.
+    void JoinAsync() { join_async = true; }
     struct Access {
       ResourceHandle handle;
       ResourceUsage usage;
     };
     base::Vector<Access> accesses;
+    bool async = false;
+    bool join_async = false;
   };
 
   using SetupFn = std::function<void(PassBuilder&)>;
@@ -113,7 +123,11 @@ class RenderGraph {
   }
 
   bool Compile(Device& device, TransientPool& pool);
-  void Execute(PassContext& ctx);
+  // Executes the passes. With async-flagged passes and a capable device the
+  // frame is split into segments (fork -> async compute overlap -> join) and
+  // the returned list is the final segment; hand THAT to SubmitFrame. Without
+  // async the input list is returned unchanged.
+  CommandList* Execute(PassContext& ctx);
   void Reset();
 
   const GpuImage& image(ResourceHandle handle) const { return resources_[handle - 1].image; }

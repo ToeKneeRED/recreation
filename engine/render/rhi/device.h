@@ -53,6 +53,7 @@ struct DeviceCaps {
   bool integrated = false;           // integrated/handheld gpu (shared memory)
   u64 device_local_bytes = 0;        // summed device-local heap size, vram proxy
   u32 accel_scratch_alignment = 256;  // min scratch offset alignment for AS builds
+  bool async_compute = false;  // second same-family queue for overlapped compute
 };
 
 enum class AccelStructType : u8 { kBlas, kTlas };
@@ -179,6 +180,19 @@ class Device {
   // image_index. Backends fold "suboptimal but same extent" (Android rotation)
   // into kOk; kOutOfDate means the caller must recreate the swapchain.
   virtual PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) = 0;
+
+  // --- async compute (optional; see caps().async_compute) ---
+  // A second queue of the same family overlaps flagged compute passes with the
+  // graphics timeline (same family = no ownership transfers, semaphore-only
+  // sync). SplitFrame ends the current graphics segment, submits it (signaling
+  // the fork point when asked) and returns the next segment's list; BeginAsync
+  // returns the slot's compute list; SubmitAsync submits it waiting on the
+  // fork and signaling completion. The final segment goes through SubmitFrame,
+  // which additionally waits on the async submission when one happened this
+  // frame. Defaults are inert so backends without the feature stay linear.
+  virtual CommandList* SplitFrame(CommandList* cmd, bool /*signal_fork*/) { return cmd; }
+  virtual CommandList* BeginAsync() { return nullptr; }
+  virtual void SubmitAsync(CommandList* /*cmd*/) {}
 
  protected:
   Device() = default;

@@ -451,11 +451,24 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
         std::max<u32>(accel_props.minAccelerationStructureScratchOffsetAlignment, 1);
   }
 
-  f32 priority = 1.0f;
+  // Second same-family queue for async compute when the family has one to
+  // spare: no queue-family ownership transfers, semaphore-only sync.
+  u32 family_queue_count = 0;
+  {
+    u32 count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device->physical_device_, &count, nullptr);
+    base::Vector<VkQueueFamilyProperties> families(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device->physical_device_, &count, families.data());
+    family_queue_count = families[device->graphics_family_].queueCount;
+  }
+  const u32 queue_count = std::min<u32>(family_queue_count, 2);
+  device->caps_.async_compute = queue_count >= 2;
+
+  const f32 priorities[2] = {1.0f, 1.0f};
   VkDeviceQueueCreateInfo queue_info{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
   queue_info.queueFamilyIndex = device->graphics_family_;
-  queue_info.queueCount = 1;
-  queue_info.pQueuePriorities = &priority;
+  queue_info.queueCount = queue_count;
+  queue_info.pQueuePriorities = priorities;
 
   VkDeviceCreateInfo device_info{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
   device_info.pNext = &features;
@@ -471,6 +484,9 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
   }
   volkLoadDevice(device->device_);
   vkGetDeviceQueue(device->device_, device->graphics_family_, 0, &device->graphics_queue_);
+  if (device->caps_.async_compute) {
+    vkGetDeviceQueue(device->device_, device->graphics_family_, 1, &device->compute_queue_);
+  }
 
   // Pipeline cache, persisted to disk so shader compilation hitches only ever
   // happen once per driver/app version. Stale or corrupt blobs are rejected by
@@ -560,6 +576,24 @@ bool VulkanDevice::InitResources() {
     vkCreateFence(device_, &frame_fence, nullptr, &frame.in_flight);
     frame.descriptor_pool = CreateTransientPool(device_);
     frame.list = std::make_unique<VulkanCommandList>(*this, frame.cmd, frame.descriptor_pool);
+
+    if (caps_.async_compute) {
+      // Segment command buffers (graphics splits) + the compute list share the
+      // frame's pool (same family) and reset with it.
+      VkCommandBuffer extra[FrameRing::kMaxSegments] = {};  // segments-1 + async
+      alloc.commandBufferCount = FrameRing::kMaxSegments;
+      vkAllocateCommandBuffers(device_, &alloc, extra);
+      for (u32 i = 0; i + 1 < FrameRing::kMaxSegments; ++i) {
+        frame.seg_cmds[i] = extra[i];
+        frame.seg_lists[i] =
+            std::make_unique<VulkanCommandList>(*this, extra[i], frame.descriptor_pool);
+      }
+      frame.async_cmd = extra[FrameRing::kMaxSegments - 1];
+      frame.async_list =
+          std::make_unique<VulkanCommandList>(*this, frame.async_cmd, frame.descriptor_pool);
+      vkCreateSemaphore(device_, &semaphore_info, nullptr, &frame.fork_sem);
+      vkCreateSemaphore(device_, &semaphore_info, nullptr, &frame.async_sem);
+    }
   }
   return true;
 }
@@ -569,6 +603,8 @@ void VulkanDevice::ShutdownResources() {
     if (frame.descriptor_pool) vkDestroyDescriptorPool(device_, frame.descriptor_pool, nullptr);
     if (frame.in_flight) vkDestroyFence(device_, frame.in_flight, nullptr);
     if (frame.image_available) vkDestroySemaphore(device_, frame.image_available, nullptr);
+    if (frame.fork_sem) vkDestroySemaphore(device_, frame.fork_sem, nullptr);
+    if (frame.async_sem) vkDestroySemaphore(device_, frame.async_sem, nullptr);
     if (frame.pool) vkDestroyCommandPool(device_, frame.pool, nullptr);
     frame = {};
   }
@@ -1510,6 +1546,10 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
   vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
   vkResetCommandPool(device_, frame.pool, 0);
   vkResetDescriptorPool(device_, frame.descriptor_pool, 0);
+  current_slot_ = slot;
+  frame.active_segment = 0;
+  frame.fork_signaled = false;
+  frame.async_submitted = false;
 
   VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1517,31 +1557,112 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
   return frame.list.get();
 }
 
+CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
+  FrameRing& frame = frames_[current_slot_];
+  if (!caps_.async_compute || frame.active_segment + 1 >= FrameRing::kMaxSegments) return cmd;
+
+  VkCommandBuffer current =
+      frame.active_segment == 0 ? frame.cmd : frame.seg_cmds[frame.active_segment - 1];
+  vkEndCommandBuffer(current);
+
+  VkCommandBufferSubmitInfo cmd_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+  cmd_info.commandBuffer = current;
+  VkSemaphoreSubmitInfo signal{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  signal.semaphore = frame.fork_sem;
+  signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  VkSubmitInfo2 submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.commandBufferInfoCount = 1;
+  submit.pCommandBufferInfos = &cmd_info;
+  if (signal_fork) {
+    submit.signalSemaphoreInfoCount = 1;
+    submit.pSignalSemaphoreInfos = &signal;
+    frame.fork_signaled = true;
+  }
+  vkQueueSubmit2(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
+
+  VkCommandBuffer next = frame.seg_cmds[frame.active_segment];
+  ++frame.active_segment;
+  VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(next, &begin);
+  return frame.seg_lists[frame.active_segment - 1].get();
+}
+
+CommandList* VulkanDevice::BeginAsync() {
+  FrameRing& frame = frames_[current_slot_];
+  if (!caps_.async_compute) return nullptr;
+  VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.async_cmd, &begin);
+  return frame.async_list.get();
+}
+
+void VulkanDevice::SubmitAsync(CommandList*) {
+  FrameRing& frame = frames_[current_slot_];
+  vkEndCommandBuffer(frame.async_cmd);
+
+  VkCommandBufferSubmitInfo cmd_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+  cmd_info.commandBuffer = frame.async_cmd;
+  VkSemaphoreSubmitInfo wait{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  wait.semaphore = frame.fork_sem;
+  wait.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  VkSemaphoreSubmitInfo signal{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  signal.semaphore = frame.async_sem;
+  signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  VkSubmitInfo2 submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  if (frame.fork_signaled) {
+    submit.waitSemaphoreInfoCount = 1;
+    submit.pWaitSemaphoreInfos = &wait;
+    frame.fork_signaled = false;  // consumed
+  }
+  submit.commandBufferInfoCount = 1;
+  submit.pCommandBufferInfos = &cmd_info;
+  submit.signalSemaphoreInfoCount = 1;
+  submit.pSignalSemaphoreInfos = &signal;
+  vkQueueSubmit2(compute_queue_, 1, &submit, VK_NULL_HANDLE);
+  frame.async_submitted = true;
+}
+
 PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) {
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
     if (candidate.list.get() == cmd) frame = &candidate;
+    for (const auto& seg : candidate.seg_lists) {
+      if (seg && seg.get() == cmd) frame = &candidate;
+    }
   }
   if (!frame) return PresentResult::kFailed;
 
-  vkEndCommandBuffer(frame->cmd);
+  VkCommandBuffer active =
+      frame->active_segment == 0 ? frame->cmd : frame->seg_cmds[frame->active_segment - 1];
+  vkEndCommandBuffer(active);
   // Only reset once the frame is guaranteed to submit, so an aborted record
   // cannot deadlock the next BeginFrame's wait.
   vkResetFences(device_, 1, &frame->in_flight);
 
-  VkSemaphoreSubmitInfo wait{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
-  wait.semaphore = frame->image_available;
-  wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  VkSemaphoreSubmitInfo waits[2];
+  waits[0] = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  waits[0].semaphore = frame->image_available;
+  waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  u32 wait_count = 1;
+  if (frame->async_submitted) {
+    // Join: the final segment consumes the async queue's results.
+    waits[1] = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    waits[1].semaphore = frame->async_sem;
+    waits[1].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    wait_count = 2;
+    frame->async_submitted = false;
+  }
   VkSemaphoreSubmitInfo signal{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
   signal.semaphore = vk_swapchain.render_finished(image_index);
   signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   VkCommandBufferSubmitInfo cmd_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
-  cmd_info.commandBuffer = frame->cmd;
+  cmd_info.commandBuffer = active;
 
   VkSubmitInfo2 submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
-  submit.waitSemaphoreInfoCount = 1;
-  submit.pWaitSemaphoreInfos = &wait;
+  submit.waitSemaphoreInfoCount = wait_count;
+  submit.pWaitSemaphoreInfos = waits;
   submit.commandBufferInfoCount = 1;
   submit.pCommandBufferInfos = &cmd_info;
   submit.signalSemaphoreInfoCount = 1;

@@ -178,6 +178,10 @@ struct RenderSettings {
   bool sss = true;
   f32 sss_width = 0.012f;  // world scattering radius, meters
 
+  // Async compute: overlap self-contained compute (DDGI) with the raster
+  // pipeline on a second queue. Needs device support; no-op otherwise.
+  bool async_compute = true;
+
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)
   f32 fog_density = 0.03f;
   f32 fog_height_falloff = 0.15f;
