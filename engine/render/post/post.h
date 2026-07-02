@@ -33,8 +33,14 @@ class PostPass {
     // 2 scrgb) + the nit level tonemapped white maps to in the HDR modes.
     u32 output_transfer = 0;
     f32 paper_white = 200.0f;
-    f32 pad0 = 0;
-    f32 pad1 = 0;
+    // Lens package (all 0 = off): flare ghosts, chromatic aberration px,
+    // vignette strength, film grain amplitude + per-frame seed.
+    f32 flare_intensity = 0;
+    f32 aberration = 0;
+    f32 vignette = 0;
+    f32 grain = 0;
+    f32 grain_seed = 0;
+    f32 pad_lens[3] = {0, 0, 0};
   };
 
   // Rebakes the grading strip LUT when the grade changes (no-op otherwise).

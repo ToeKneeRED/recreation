@@ -18,8 +18,14 @@ struct PushData {
   // grading is a later stage.
   uint output_transfer;
   float paper_white;  // nits of tonemapped 1.0 in the HDR modes
-  float pad0;
-  float pad1;
+  // Lens package: ghosts/halo feed off the bloom chain, aberration shifts the
+  // scene fetch radially, vignette+grain apply post-tonemap.
+  float flare_intensity;      // 0 disables the ghost/halo sampling
+  float aberration;           // px of radial r/b shift at the corners
+  float vignette;             // 0..1 corner darkening
+  float grain;                // 0..~0.06 film grain amplitude
+  float grain_seed;           // per-frame
+  float pad_lens[3];
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -94,11 +100,52 @@ float3 PqEncode(float3 n) {
   return pow((c1 + c2 * p) / (1.0 + c3 * p), m2);
 }
 
+// Cheap hash for the film grain.
+float GrainHash(float2 p) {
+  return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
 float4 main(float4 sv_position : SV_Position,
             [[vk::location(0)]] float2 uv : TEXCOORD0) : SV_Target0 {
-  float3 hdr = scene.Sample(scene_sampler, uv).rgb;
+  float3 hdr;
+  if (push.aberration > 0.0) {
+    // Radial chromatic aberration: r and b converge at different radii, most
+    // visible toward the corners like a real fast lens.
+    float2 dims;
+    scene.GetDimensions(dims.x, dims.y);
+    float2 from_center = uv - 0.5;
+    float2 shift = from_center * dot(from_center, from_center) * 4.0 *
+                   (push.aberration / dims.x);
+    hdr = float3(scene.Sample(scene_sampler, uv + shift).r,
+                 scene.Sample(scene_sampler, uv).g,
+                 scene.Sample(scene_sampler, uv - shift).b);
+  } else {
+    hdr = scene.Sample(scene_sampler, uv).rgb;
+  }
   if (push.bloom_enabled != 0u) {
     hdr = lerp(hdr, bloom.Sample(bloom_sampler, uv).rgb, push.bloom_intensity);
+  }
+  if (push.flare_intensity > 0.0) {
+    // Ghosts: bright sources mirrored through the lens center at a few
+    // characteristic scales, tinted cooler with distance; plus a halo ring.
+    // The bloom chain is already a clean prefiltered source.
+    float2 flipped = 1.0 - uv;
+    float3 ghosts = 0.0.xxx;
+    const float scales[4] = {-0.35, -0.65, 0.4, 0.8};
+    const float weights[4] = {0.5, 0.25, 0.35, 0.15};
+    [unroll]
+    for (int g = 0; g < 4; ++g) {
+      float2 guv = 0.5 + (flipped - 0.5) * scales[g];
+      float edge_fade = saturate(1.0 - 2.2 * length(guv - 0.5));
+      ghosts += bloom.Sample(bloom_sampler, guv).rgb * weights[g] * edge_fade;
+    }
+    float2 from_center = uv - 0.5;
+    float halo_r = length(from_center);
+    float2 halo_uv = 0.5 + normalize(from_center + 1e-5) * 0.45;
+    float halo_w = exp(-abs(halo_r - 0.42) * 18.0);
+    ghosts += bloom.Sample(bloom_sampler, halo_uv).rgb * halo_w * 0.4;
+    // Cool tint keeps the ghosts reading as glass, not fog.
+    hdr += ghosts * float3(0.7, 0.85, 1.0) * push.flare_intensity;
   }
   hdr *= exposure_buffer[0];
 
@@ -113,6 +160,18 @@ float4 main(float4 sv_position : SV_Position,
     ldr = saturate(hdr);
   }
   if (push.lut_enabled != 0u) ldr = ApplyColorLut(ldr);
+  if (push.vignette > 0.0) {
+    float2 vc = uv - 0.5;
+    float v = 1.0 - push.vignette * smoothstep(0.25, 0.85, dot(vc, vc) * 2.0);
+    ldr *= v;
+  }
+  if (push.grain > 0.0) {
+    // Luma-weighted grain: strongest in the midtones, fades in deep shadow
+    // and near white like negative stock.
+    float g = GrainHash(uv * 1237.0 + push.grain_seed) - 0.5;
+    float luma = dot(ldr, float3(0.2126, 0.7152, 0.0722));
+    ldr += g * push.grain * (1.0 - abs(luma * 2.0 - 1.0)) * 0.5 + g * push.grain * 0.5;
+  }
   if (push.output_transfer == 1u) {  // HDR10 PQ
     float3 nits = Rec709ToRec2020(ldr) * push.paper_white;
     return float4(PqEncode(nits / 10000.0), 1.0);

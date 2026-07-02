@@ -161,9 +161,16 @@ struct RenderSettings {
   bool motion_blur = true;
   f32 motion_blur_shutter = 0.5f;  // 180-degree shutter
 
+  // Lens package: flare ghosts + halo off the bloom chain, radial chromatic
+  // aberration, vignette and film grain. Subtle defaults; 0 disables each.
+  f32 lens_flare = 0.06f;
+  f32 chromatic_aberration = 1.2f;  // px at the corners
+  f32 vignette = 0.22f;
+  f32 film_grain = 0.015f;
+
   // Bokeh depth of field on the resolved frame. focus <= 0 = center autofocus.
   bool dof = true;
-  f32 dof_aperture = 6.0f;    // coc px per unit relative defocus (bigger = shallower)
+  f32 dof_aperture = 2.8f;    // coc px per unit relative defocus (bigger = shallower)
   f32 dof_focus = 0.0f;       // meters; <= 0 autofocus
 
   bool fog = false;  // ray-marched volumetric fog with shadowed sun shafts (needs ray query)

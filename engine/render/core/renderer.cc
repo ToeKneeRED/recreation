@@ -29,8 +29,10 @@ base::Option<const char*> Hdr{"hdr", nullptr, "REC_HDR"};
 base::Option<bool> HdrOutput{"hdr.output", false, "REC_HDR_OUTPUT"};
 base::Option<bool> MotionBlurOpt{"motion.blur", true, "REC_MOTION_BLUR"};
 base::Option<bool> DofOpt{"dof", true, "REC_DOF"};
+base::Option<double> LensFlareOpt{"lens.flare", 0.06, "REC_LENS_FLARE"};
+base::Option<double> GrainOpt{"film.grain", 0.015, "REC_FILM_GRAIN"};
 base::Option<double> DofFocus{"dof.focus", 0.0, "REC_DOF_FOCUS"};
-base::Option<double> DofAperture{"dof.aperture", 6.0, "REC_DOF_APERTURE"};
+base::Option<double> DofAperture{"dof.aperture", 2.8, "REC_DOF_APERTURE"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -402,6 +404,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (PathtraceReference.overridden()) settings_.path_trace_reference = PathtraceReference;
   if (MotionBlurOpt.overridden()) settings_.motion_blur = MotionBlurOpt;
   if (DofOpt.overridden()) settings_.dof = DofOpt;
+  if (LensFlareOpt.overridden()) settings_.lens_flare = static_cast<f32>(double(LensFlareOpt));
+  if (GrainOpt.overridden()) settings_.film_grain = static_cast<f32>(double(GrainOpt));
   if (DofFocus.overridden()) settings_.dof_focus = static_cast<f32>(double(DofFocus));
   if (DofAperture.overridden()) settings_.dof_aperture = static_cast<f32>(double(DofAperture));
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
@@ -2385,6 +2389,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     post_params.output_transfer = static_cast<u32>(forced);
   }
   post_params.paper_white = settings_.hdr_paper_white;
+  post_params.flare_intensity = settings_.lens_flare;
+  post_params.aberration = settings_.chromatic_aberration;
+  post_params.vignette = settings_.vignette;
+  post_params.grain = settings_.film_grain;
+  post_params.grain_seed = static_cast<f32>(frame_index_ % 1024) * 0.6180339f;
   graph_.AddPass(
       "post",
       [&](RenderGraph::PassBuilder& builder) {
