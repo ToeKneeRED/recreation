@@ -8,7 +8,7 @@
 
 namespace rec::render {
 
-enum class TonemapOperator : u8 { kAces, kReinhard, kNone };
+enum class TonemapOperator : u8 { kAces, kReinhard, kNone, kAgx };
 
 // Built-in display-space color grades, baked into a strip LUT and applied after
 // tonemapping. kNeutral is identity (the LUT is skipped entirely).
@@ -179,7 +179,9 @@ struct RenderSettings {
   f32 adaptation_speed = 3.0f;
   // Compensation multiplier under auto exposure, absolute exposure without.
   f32 exposure = 1.0f;
-  TonemapOperator tonemap = TonemapOperator::kAces;
+  // AgX default: hue-preserving highlight rolloff (sun-lit surfaces desaturate
+  // into white gradually instead of clipping per channel like the ACES fit).
+  TonemapOperator tonemap = TonemapOperator::kAgx;
   ColorGrade color_grade = ColorGrade::kNeutral;  // post-tonemap lut grade
 };
 
