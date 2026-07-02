@@ -50,6 +50,10 @@ struct Material {
   // (emissive). The shader tiles the layers at the native land repeat and
   // blends them by the weight map instead of the usual base-color sample.
   bool is_terrain = false;
+  // Height/displacement map (r channel, 1 = surface, 0 = deepest) for
+  // parallax occlusion mapping; scale is the depth in uv-tangent units.
+  AssetId height;
+  f32 height_scale = 0.05f;
   // Vertex wind sway (banners, curtains, foliage). Weight convention: uv.y
   // grows away from the attachment (0 = pinned edge).
   bool wind = false;

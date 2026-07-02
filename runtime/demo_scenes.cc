@@ -494,6 +494,127 @@ void DemoScenes::CreateGpuParticleDemoScene() {
   REC_INFO("gpu particle demo: {} compute-simulated embers", gpu_particle_count_);
 }
 
+void DemoScenes::CreateBrickDemoScene() {
+  // Parallax-occlusion showcase: a procedurally textured brick wall + floor
+  // under a grazing sun, so the mortar recesses parallax and self-shadow.
+  constexpr u32 kTex = 256;
+  auto brick_height = [](f32 u, f32 v) -> f32 {
+    // Two-course running bond with rounded mortar channels.
+    f32 row = v * 8.0f;
+    f32 col = u * 4.0f + (static_cast<int>(row) % 2 ? 0.5f : 0.0f);
+    f32 fy = row - std::floor(row);
+    f32 fx = col - std::floor(col);
+    auto channel = [](f32 t, f32 w) {
+      f32 d = std::min(t, 1.0f - t) / w;  // distance to the mortar line
+      return std::min(d, 1.0f);
+    };
+    f32 h = std::min(channel(fx, 0.06f), channel(fy, 0.10f));
+    h = h * h * (3.0f - 2.0f * h);  // rounded shoulder
+    // Slight per-brick height variation + surface grain.
+    u32 bx = static_cast<u32>(col), by = static_cast<u32>(row);
+    u32 seed = bx * 374761393u + by * 668265263u;
+    seed = (seed ^ (seed >> 13)) * 1274126177u;
+    f32 vary = 0.85f + 0.15f * static_cast<f32>(seed & 0xffu) / 255.0f;
+    return h * vary;
+  };
+  asset::Texture height;
+  height.id = asset::MakeAssetId("builtin/bricks/height");
+  height.format = asset::TextureFormat::kRgba8;
+  height.width = height.height = kTex;
+  height.data.resize(static_cast<size_t>(kTex) * kTex * 4);
+  asset::Texture albedo = height;
+  albedo.id = asset::MakeAssetId("builtin/bricks/albedo");
+  albedo.is_srgb = true;
+  asset::Texture normal = height;
+  normal.id = asset::MakeAssetId("builtin/bricks/normal");
+  for (u32 y = 0; y < kTex; ++y) {
+    for (u32 x = 0; x < kTex; ++x) {
+      f32 u = (x + 0.5f) / kTex, v = (y + 0.5f) / kTex;
+      f32 h = brick_height(u, v);
+      size_t o = (static_cast<size_t>(y) * kTex + x) * 4;
+      height.data[o] = height.data[o + 1] = height.data[o + 2] =
+          static_cast<u8>(h * 255.0f);
+      height.data[o + 3] = 255;
+      // Normal from height finite differences (tangent space, +z out).
+      f32 e = 1.0f / kTex;
+      f32 hx = brick_height(u + e, v) - brick_height(u - e, v);
+      f32 hy = brick_height(u, v + e) - brick_height(u, v - e);
+      f32 nx = -hx * 6.0f, ny = -hy * 6.0f, nz = 1.0f;
+      f32 len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      normal.data[o] = static_cast<u8>((nx / len * 0.5f + 0.5f) * 255.0f);
+      normal.data[o + 1] = static_cast<u8>((ny / len * 0.5f + 0.5f) * 255.0f);
+      normal.data[o + 2] = static_cast<u8>((nz / len * 0.5f + 0.5f) * 255.0f);
+      normal.data[o + 3] = 255;
+      // Brick red where raised, grey mortar in the channels.
+      f32 m = h < 0.55f ? 0.0f : 1.0f;
+      u32 bx = static_cast<u32>(u * 4.0f * 7919u), by = static_cast<u32>(v * 8.0f);
+      u32 seed = bx * 2654435761u + by * 40503u;
+      f32 tint = 0.85f + 0.15f * static_cast<f32>((seed >> 8) & 0xffu) / 255.0f;
+      f32 r = m * 0.58f * tint + (1.0f - m) * 0.42f;
+      f32 g = m * 0.25f * tint + (1.0f - m) * 0.40f;
+      f32 b = m * 0.20f * tint + (1.0f - m) * 0.38f;
+      albedo.data[o] = static_cast<u8>(r * 255.0f);
+      albedo.data[o + 1] = static_cast<u8>(g * 255.0f);
+      albedo.data[o + 2] = static_cast<u8>(b * 255.0f);
+      albedo.data[o + 3] = 255;
+    }
+  }
+  if (!config_.headless) {
+    renderer_.UploadTexture(height);
+    renderer_.UploadTexture(albedo);
+    renderer_.UploadTexture(normal);
+  }
+
+  asset::Material brick;
+  brick.id = asset::MakeAssetId("builtin/bricks/mat");
+  brick.base_color = albedo.id;
+  brick.normal = normal.id;
+  brick.height = height.id;
+  brick.height_scale = 0.06f;
+  brick.roughness_factor = 0.9f;
+  if (!config_.headless) renderer_.UploadMaterial(brick);
+  asset::Material brick_flat = brick;  // a/b: same look minus the pom march
+  brick_flat.id = asset::MakeAssetId("builtin/bricks/mat_flat");
+  brick_flat.height = {};
+  if (!config_.headless) renderer_.UploadMaterial(brick_flat);
+
+  // Two walls side by side (pom | flat) + a floor, sun grazing along them.
+  asset::Mesh wall = asset::MakeBox(3.0f, 2.0f, 0.15f, asset::MakeAssetId("builtin/bricks/wall"));
+  wall.lods[0].submeshes.push_back({0, static_cast<u32>(wall.lods[0].indices.size()), brick.id});
+  asset::Mesh wall_flat =
+      asset::MakeBox(3.0f, 2.0f, 0.15f, asset::MakeAssetId("builtin/bricks/wall_flat"));
+  wall_flat.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(wall_flat.lods[0].indices.size()), brick_flat.id});
+  asset::Mesh floor_mesh =
+      asset::MakeBox(14.0f, 0.15f, 8.0f, asset::MakeAssetId("builtin/bricks/floor"));
+  floor_mesh.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(floor_mesh.lods[0].indices.size()), brick.id});
+  if (!config_.headless) {
+    renderer_.UploadMesh(wall);
+    renderer_.UploadMesh(wall_flat);
+    renderer_.UploadMesh(floor_mesh);
+  }
+  ecs::Entity w0 = world_.Create();
+  world_.Add(w0, world::Transform{.position = {-3.2f, 2.0f, -2.0f}});
+  world_.Add(w0, world::Renderable{wall.id});
+  ecs::Entity w1 = world_.Create();
+  world_.Add(w1, world::Transform{.position = {3.2f, 2.0f, -2.0f}});
+  world_.Add(w1, world::Renderable{wall_flat.id});
+  ecs::Entity fl = world_.Create();
+  world_.Add(fl, world::Transform{.position = {0, -0.15f, 0}});
+  world_.Add(fl, world::Renderable{floor_mesh.id});
+
+  // Grazing warm sun to pop the relief.
+  renderer_.settings().sun_direction = {-0.85f, -0.18f, -0.49f};
+  renderer_.settings().sun_intensity = 3.0f;
+  renderer_.settings().sun_color = {1.0f, 0.85f, 0.7f};
+
+  camera_.set_position({-0.4f, 1.7f, 2.6f});
+  camera_.set_yaw_pitch(-0.25f, -0.10f);
+  camera_.speed = 3.0f;
+  REC_INFO("brick demo: pom wall (left) vs flat normal-mapped wall (right)");
+}
+
 void DemoScenes::CreateFireDemoScene() {
   // A campfire at dusk: stone ground, a log ring, gpu-simulated flames and
   // embers (additive hdr), and a flickering point light that the rt path
@@ -950,6 +1071,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "fire") {
     CreateFireDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "bricks") {
+    CreateBrickDemoScene();
     return;
   }
   if (config_.demo_scene == "autolod") {

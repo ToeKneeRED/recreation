@@ -41,6 +41,7 @@ class DemoScenes {
   void CreatePointLightDemoScene();
   void UpdateParticles(f32 dt, render::FrameView& view);
   void CreateFireDemoScene();
+  void CreateBrickDemoScene();
 
   struct DemoParticle {
     Vec3 position;

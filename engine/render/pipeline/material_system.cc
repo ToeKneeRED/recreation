@@ -74,7 +74,8 @@ std::unique_ptr<MaterialSystem> MaterialSystem::Create(Device& device,
                 {1, BindingType::kCombinedTextureSampler},
                 {2, BindingType::kCombinedTextureSampler},
                 {3, BindingType::kCombinedTextureSampler},
-                {4, BindingType::kCombinedTextureSampler}},
+                {4, BindingType::kCombinedTextureSampler},
+                {5, BindingType::kCombinedTextureSampler}},
   });
   if (!system->set_layout_) return nullptr;
 
@@ -276,22 +277,28 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
   } else if (material.normal && textures_.find(material.normal.hash ^ id_salt)) {
     params.flags |= kFlagHasNormalMap;
   }
+  if (material.height && textures_.find(material.height.hash ^ id_salt)) {
+    params.flags |= kFlagHasHeightMap;
+    params.height_scale = material.height_scale;
+  }
 
   GpuBuffer& buffer = param_buffers_.back();
   u64 offset = static_cast<u64>(param_index) * kParamStride;
   std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
 
-  const GpuImage* maps[4] = {
+  const GpuImage* maps[5] = {
       texture_or(material.base_color.hash ^ id_salt, white_),
       texture_or(material.normal.hash ^ id_salt, flat_normal_),
       texture_or(material.metallic_roughness.hash ^ id_salt, white_),
       texture_or(material.emissive.hash ^ id_salt, white_),
+      texture_or(material.height.hash ^ id_salt, white_),  // white = surface level
   };
   device_.UpdateBindingSet(set, {Bind::Uniform(0, buffer, offset, sizeof(Params)),
                                  Bind::Combined(1, maps[0]->view, sampler_),
                                  Bind::Combined(2, maps[1]->view, sampler_),
                                  Bind::Combined(3, maps[2]->view, sampler_),
-                                 Bind::Combined(4, maps[3]->view, sampler_)});
+                                 Bind::Combined(4, maps[3]->view, sampler_),
+                                 Bind::Combined(5, maps[4]->view, sampler_)});
   return true;
 }
 

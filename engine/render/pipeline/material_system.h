@@ -33,7 +33,7 @@ class MaterialSystem {
     f32 roughness_factor = 1;
     f32 alpha_cutoff = 0.5f;
     u32 flags = 0;
-    f32 pad = 0;
+    f32 height_scale = 0;  // pom depth (uv units); 0 skips the march
     // Extended pbr lobes, one 16-byte row each (matches std140 in mesh.ps).
     f32 clearcoat = 0;
     f32 clearcoat_roughness = 0;
@@ -53,6 +53,7 @@ class MaterialSystem {
   static constexpr u32 kFlagTerrain = 1u << 2;  // splat: slots are 3 layers + weight map
   static constexpr u32 kFlagWind = 1u << 3;     // vertex wind sway (cloth/foliage)
   static constexpr u32 kFlagWater = 1u << 4;    // gerstner vertex displacement
+  static constexpr u32 kFlagHasHeightMap = 1u << 5;  // parallax occlusion march
 
   // registry may be null (no raytracing); hit-shading tables are skipped.
   static std::unique_ptr<MaterialSystem> Create(Device& device, BindlessRegistry* registry);

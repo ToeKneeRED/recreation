@@ -33,7 +33,7 @@ struct MaterialParams {
   float roughness_factor;
   float alpha_cutoff;
   uint flags;
-  float pad;
+  float height_scale;  // pom depth, 0 = no march
   float clearcoat;
   float clearcoat_roughness;
   float anisotropy;
@@ -55,6 +55,8 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(2, 1)]] SamplerState normal_sampler : register(s2, space1);
 [[vk::combinedImageSampler]] [[vk::binding(3, 1)]] Texture2D metallic_roughness_map : register(t3, space1);
 [[vk::combinedImageSampler]] [[vk::binding(3, 1)]] SamplerState metallic_roughness_sampler : register(s3, space1);
+[[vk::combinedImageSampler]] [[vk::binding(5, 1)]] Texture2D height_map : register(t5, space1);
+[[vk::combinedImageSampler]] [[vk::binding(5, 1)]] SamplerState height_sampler : register(s5, space1);
 [[vk::combinedImageSampler]] [[vk::binding(4, 1)]] Texture2D emissive_map : register(t4, space1);
 [[vk::combinedImageSampler]] [[vk::binding(4, 1)]] SamplerState emissive_sampler : register(s4, space1);
 
@@ -94,6 +96,7 @@ struct CascadeData {
 static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
 static const uint kFlagTerrain = 4u;
+static const uint kFlagHasHeightMap = 32u;  // 1 << 5
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -247,6 +250,52 @@ float3 ThinFilm(float ndv, float thickness_nm, float film_ior) {
   return 0.5 + 0.5 * cos(phase);
 }
 
+
+
+// --- parallax occlusion mapping -----------------------------------------
+// Height map: r channel, 1 = surface, 0 = height_scale deep. The march digs
+// into the surface along the tangent-space view ray; grazing angles get more
+// steps. Gradients come from the undisplaced uv so mip selection stays sane.
+float2 ParallaxUv(float2 uv, float3 view_ts, float scale, float2 dx, float2 dy) {
+  float steps = lerp(28.0, 10.0, saturate(view_ts.z));
+  float layer = 1.0 / steps;
+  float2 delta = view_ts.xy / max(view_ts.z, 0.08) * scale * layer;
+  float depth = 0.0;
+  float2 cur = uv;
+  float h = 1.0 - height_map.SampleGrad(height_sampler, cur, dx, dy).r;
+  float prev_h = h;
+  [loop]
+  for (uint i = 0; i < 32u && depth < h; ++i) {
+    cur -= delta;
+    depth += layer;
+    prev_h = h;
+    h = 1.0 - height_map.SampleGrad(height_sampler, cur, dx, dy).r;
+  }
+  // Refine: intersect the last linear segment.
+  float after = h - depth;
+  float before = prev_h - (depth - layer);
+  float w = saturate(after / min(after - before, -1e-5));
+  return lerp(cur, cur + delta, w);
+}
+
+// Soft self-shadow: march from the displaced texel toward the sun and darken
+// by the deepest occlusion found (the bricks' mortar lines go dark at low sun).
+float ParallaxShadow(float2 uv, float3 light_ts, float scale, float2 dx, float2 dy) {
+  if (light_ts.z <= 0.05) return 0.35;
+  float h0 = height_map.SampleGrad(height_sampler, uv, dx, dy).r;
+  float2 delta = light_ts.xy / light_ts.z * scale / 12.0;
+  float occlusion = 0.0;
+  float2 cur = uv;
+  float ray_h = h0;
+  [unroll]
+  for (uint i = 0; i < 12u; ++i) {
+    cur += delta;
+    ray_h += 1.0 / 12.0;
+    float h = height_map.SampleGrad(height_sampler, cur, dx, dy).r;
+    occlusion = max(occlusion, h - ray_h);
+  }
+  return 1.0 - saturate(occlusion * 6.0) * 0.75;
+}
 
 // Specular anti-aliasing (Tokuyoshi/Kaplanyan-style): widen the GGX lobe by
 // the screen-space variance of the shaded normal, so minified normal maps and
@@ -498,6 +547,32 @@ float3 TerrainAlbedo(float2 uv) {
 }
 
 PsOut main(PsIn input) {
+  // Parallax occlusion: displace the uv along the view ray through the height
+  // field before anything samples, and self-shadow the sun against it.
+  float parallax_sun = 1.0;
+  {
+    float2 pom_dx = ddx(input.uv);
+    float2 pom_dy = ddy(input.uv);
+    if ((material.flags & kFlagHasHeightMap) != 0u && material.height_scale > 0.0) {
+      float3 gn = normalize(input.normal);
+      float3 gt = input.tangent.xyz - gn * dot(input.tangent.xyz, gn);
+      if (dot(gt, gt) > 1e-8) {
+        gt = normalize(gt);
+        float3 gb = cross(gn, gt) * input.tangent.w;
+        float3 pv = normalize(frame.camera_position.xyz - input.world_pos);
+        float3 view_ts = float3(dot(pv, gt), dot(pv, gb), dot(pv, gn));
+        if (view_ts.z > 0.02) {
+          input.uv = ParallaxUv(input.uv, view_ts, material.height_scale, pom_dx, pom_dy);
+          float3 pl = normalize(-frame.sun_direction.xyz);
+          float3 light_ts = float3(dot(pl, gt), dot(pl, gb), dot(pl, gn));
+          parallax_sun =
+              ParallaxShadow(input.uv, light_ts, material.height_scale, pom_dx, pom_dy);
+        }
+      }
+    }
+  }
+
+
   float4 base;
   if ((material.flags & kFlagTerrain) != 0u) {
     base = float4(TerrainAlbedo(input.uv), 1.0) * material.base_color_factor * input.color;
@@ -508,7 +583,7 @@ PsOut main(PsIn input) {
   if ((material.flags & kFlagAlphaMask) != 0u && base.a < material.alpha_cutoff) discard;
 
   float3 n = SurfaceNormal(input);
-  float shadow = SunShadow(input, n);
+  float shadow = SunShadow(input, n) * parallax_sun;
 
   float3 shaded = ShadeSurface(input, base.rgb, n, shadow);
   float alpha = base.a;
