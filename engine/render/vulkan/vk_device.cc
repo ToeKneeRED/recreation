@@ -433,7 +433,18 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
   device->caps_.raytracing = accel.accelerationStructure && rt_pipeline.rayTracingPipeline;
   device->caps_.ray_query = ray_query.rayQuery;
   device->caps_.mesh_shaders = mesh.meshShader;
-  device->caps_.fragment_shading_rate = shading_rate.pipelineFragmentShadingRate;
+  device->caps_.fragment_shading_rate =
+      want_shading_rate && shading_rate.attachmentFragmentShadingRate;
+  if (device->caps_.fragment_shading_rate) {
+    VkPhysicalDeviceFragmentShadingRatePropertiesKHR fsr_props{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR};
+    VkPhysicalDeviceProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props2.pNext = &fsr_props;
+    vkGetPhysicalDeviceProperties2(device->physical_device_, &props2);
+    device->caps_.shading_rate_texel =
+        std::max(fsr_props.minFragmentShadingRateAttachmentTexelSize.width, 1u);
+    device->caps_.shading_rate_max_size = std::max(fsr_props.maxFragmentSize.width, 1u);
+  }
   device->caps_.fill_mode_non_solid = features.features.fillModeNonSolid;
   if (features.features.samplerAnisotropy) {
     device->caps_.max_anisotropy = props.limits.maxSamplerAnisotropy;
@@ -1384,8 +1395,21 @@ PipelineHandle VulkanDevice::CreateGraphicsPipeline(const GraphicsPipelineDesc& 
   rendering.pColorAttachmentFormats = color_formats.data();
   rendering.depthAttachmentFormat = ToVkFormat(desc.depth.format);
 
+  // When attachment VRS is available every graphics pipeline honors an
+  // attached rate image (combiner REPLACE); passes without one shade at 1x1,
+  // so a single pipeline set serves both VRS-on and VRS-off render passes.
+  VkPipelineFragmentShadingRateStateCreateInfoKHR fsr_state{
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR};
+  fsr_state.fragmentSize = {1, 1};
+  fsr_state.combinerOps[0] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+  fsr_state.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
+  if (caps_.fragment_shading_rate) rendering.pNext = &fsr_state;
+
   VkGraphicsPipelineCreateInfo info{.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
   info.pNext = &rendering;
+  if (caps_.fragment_shading_rate) {
+    info.flags |= VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+  }
   info.stageCount = stage_count;
   info.pStages = stages;
   if (!mesh_path) {

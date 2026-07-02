@@ -45,7 +45,9 @@ struct DeviceCaps {
   bool raytracing = false;  // acceleration structures + ray tracing pipeline
   bool ray_query = false;
   bool mesh_shaders = false;
-  bool fragment_shading_rate = false;
+  bool fragment_shading_rate = false;  // attachment-based VRS (rate image)
+  u32 shading_rate_texel = 16;         // rate image texel size in pixels
+  u32 shading_rate_max_size = 1;       // largest fragment edge (4 = 4x4 allowed)
   bool fill_mode_non_solid = false;  // wireframe debug views
   f32 max_anisotropy = 1.0f;         // 1 = anisotropic filtering unavailable
   f32 timestamp_period = 0.0f;       // ns per timestamp tick, 0 = no gpu timing

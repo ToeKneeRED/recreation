@@ -97,6 +97,8 @@ VkImageUsageFlags ToVkImageUsage(TextureUsageFlags usage, Format format) {
   if (usage & kTextureUsageDepthTarget) result |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   if (usage & kTextureUsageTransferSrc) result |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if (usage & kTextureUsageTransferDst) result |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  if (usage & kTextureUsageShadingRate)
+    result |= VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
   (void)format;
   return result;
 }
@@ -178,6 +180,10 @@ StateInfo StateInfoOf(ResourceState state, bool as_source) {
     case ResourceState::kCopyDst:
       return {VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
               VK_ACCESS_2_TRANSFER_WRITE_BIT};
+    case ResourceState::kShadingRate:
+      return {VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR,
+              VK_ACCESS_2_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR};
     case ResourceState::kPresent:
       return {VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
               as_source ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT

@@ -256,6 +256,8 @@ void Engine::ApplyRenderPreset() {
   tuned.local_shadows = env.local_shadows;  // honor REC_LOCAL_SHADOWS
   tuned.froxel_fog = env.froxel_fog;  // honor REC_FROXEL
   tuned.froxel_density = env.froxel_density;
+  tuned.vrs = env.vrs;  // honor REC_VRS
+  tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
   tuned.cloud_coverage = env.cloud_coverage;

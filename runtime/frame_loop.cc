@@ -644,7 +644,11 @@ bool Engine::RunFrame() {
         // CaptureScreenshot is deferred: it is written by the NEXT RenderFrame.
         // Request at the target frame, then quit one frame later so the write
         // actually lands.
-        if (ui_shot_frames == ui_shot_target) renderer_.CaptureScreenshot(shot);
+        if (ui_shot_frames == ui_shot_target) {
+          renderer_.CaptureScreenshot(shot);
+          // Perf breadcrumb for headless A/B runs alongside the capture.
+          REC_INFO("gpu frame at capture: {:.2f} ms", renderer_.gpu_frame_ms());
+        }
         else if (ui_shot_frames > ui_shot_target) quit_.store(true, std::memory_order_relaxed);
       }
     } else {

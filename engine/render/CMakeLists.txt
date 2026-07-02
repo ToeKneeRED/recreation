@@ -34,6 +34,7 @@ recreation_add_module(render
   post/overdraw.cc
   post/ui_blur.cc
   post/motion_blur.cc
+  post/vrs_rate.cc
   post/depth_of_field.cc
   post/upscaler.cc
   geometry/water.cc
@@ -200,6 +201,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/post/bloom_up.cs.hlsl
   shaders/post/histogram.cs.hlsl
   shaders/post/exposure_resolve.cs.hlsl
+  shaders/post/vrs_rate.cs.hlsl
   shaders/gi/ddgi_rays.cs.hlsl
   shaders/gi/ddgi_blend.cs.hlsl
   shaders/gi/ddgi_border.cs.hlsl

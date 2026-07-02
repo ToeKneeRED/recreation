@@ -81,6 +81,10 @@ D3D12_RESOURCE_STATES ToResourceStates(ResourceState state) {
     // The offscreen ring has no display engine; PRESENT aliases COMMON in
     // D3D12 anyway, so the renderer's kPresent handoff maps cleanly.
     case ResourceState::kPresent: return D3D12_RESOURCE_STATE_COMMON;
+    // Unreachable while caps.fragment_shading_rate stays false on this
+    // backend (vkd3d 2.0 has no RSSetShadingRateImage), but the mapping is
+    // exact for a runtime that grows it.
+    case ResourceState::kShadingRate: return D3D12_RESOURCE_STATE_SHADING_RATE_SOURCE;
   }
   return D3D12_RESOURCE_STATE_COMMON;
 }

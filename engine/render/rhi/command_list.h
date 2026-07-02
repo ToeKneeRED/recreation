@@ -45,6 +45,9 @@ struct RenderingInfo {
   Extent2D extent;
   std::span<const ColorAttachment> colors;
   const DepthAttachment* depth = nullptr;  // null = no depth attachment
+  // Optional VRS rate image (kShadingRate state, R8Uint, one texel per
+  // caps().shading_rate_texel block). Null = full rate.
+  TextureView shading_rate;
 };
 
 struct BufferTextureCopy {

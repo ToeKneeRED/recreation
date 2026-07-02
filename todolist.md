@@ -33,9 +33,10 @@ streaming.
 
 ## Tier 2 — performance & production maturity
 
-- [ ] **VRS.** `caps().fragment_shading_rate` is detected and unused.
-      Content-adaptive shading-rate image (luminance + motion driven) is
-      typically a free 10-20% on the scene pass.
+- [x] **VRS.** (landed) Content-adaptive rate image on the scene pass:
+      luminance-detail scored per 16px block, motion-gated (static camera
+      stays near-full-rate - coarse fragments stripe glossy surfaces under
+      the temporal upscaler), 2x2 ceiling. REC_VRS / REC_VRS_THRESHOLD.
 - [ ] **Async compute, dedicated family.** The fork/join infra is in; on
       NVIDIA the same-family second queue does not overlap. Move to the
       compute-only family with queue-family ownership transfers (or

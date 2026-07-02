@@ -63,6 +63,15 @@ void VulkanCommandList::BeginRendering(const RenderingInfo& info) {
   }
 
   VkRenderingInfo rendering{.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
+  VkRenderingFragmentShadingRateAttachmentInfoKHR shading_rate{
+      .sType = VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR};
+  if (info.shading_rate) {
+    const u32 texel = device_.caps().shading_rate_texel;
+    shading_rate.imageView = View(info.shading_rate);
+    shading_rate.imageLayout = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+    shading_rate.shadingRateAttachmentTexelSize = {texel, texel};
+    rendering.pNext = &shading_rate;
+  }
   rendering.renderArea = {{0, 0}, {info.extent.width, info.extent.height}};
   rendering.layerCount = 1;
   rendering.colorAttachmentCount = static_cast<u32>(info.colors.size());

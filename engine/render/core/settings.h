@@ -189,6 +189,12 @@ struct RenderSettings {
   // fragment path keeps its exact per-light rays).
   bool local_shadows = true;
 
+  // Variable rate shading: content-adaptive per-block shading rates on the
+  // scene pass, rebuilt each frame from luminance detail + screen motion.
+  // Needs attachment VRS hardware; silently full-rate otherwise.
+  bool vrs = true;
+  f32 vrs_threshold = 0.06f;  // relative luma error allowed for half rate
+
   // Async compute: overlap self-contained compute (DDGI) with the raster
   // pipeline on a second queue. Needs device support; no-op otherwise.
   bool async_compute = true;

@@ -42,6 +42,8 @@ base::Option<bool> FrameGenOpt{"framegen", false, "REC_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "REC_LOCAL_SHADOWS"};
 base::Option<bool> FroxelOpt{"froxel.fog", true, "REC_FROXEL"};
 base::Option<double> FroxelDensity{"froxel.density", 0.005, "REC_FROXEL_DENSITY"};
+base::Option<bool> VrsOpt{"vrs", true, "REC_VRS"};
+base::Option<double> VrsThreshold{"vrs.threshold", 0.06, "REC_VRS_THRESHOLD"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -315,6 +317,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!froxel_fog_.Initialize(*device_)) {
     REC_WARN("froxel volumetrics unavailable");  // non-fatal: feature gates on available()
   }
+  vrs_.Initialize(*device_);  // non-fatal: needs attachment VRS hardware
   if (!particles_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!gaussians_.Initialize(*device_, kSceneColorFormat)) return false;
   if (!fur_.Initialize(*device_, kSceneColorFormat, kDepthFormat)) return false;
@@ -368,6 +371,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   surface_weather_.Initialize(*device_);     // rain wetness / snow accumulation
 
   UpdateRenderResolution();
+  vrs_.Resize(*device_, {render_width_, render_height_});
   taa_.Resize(*device_, {render_width_, render_height_});
   ssao_.Resize(*device_, {render_width_, render_height_});
   ssr_.Resize(*device_, {render_width_, render_height_});
@@ -471,6 +475,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (LocalShadowsOpt.overridden()) settings_.local_shadows = LocalShadowsOpt;
   if (FroxelOpt.overridden()) settings_.froxel_fog = FroxelOpt;
   if (FroxelDensity.overridden()) settings_.froxel_density = static_cast<f32>(double(FroxelDensity));
+  if (VrsOpt.overridden()) settings_.vrs = VrsOpt;
+  if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -620,6 +626,7 @@ void Renderer::UpdateRenderResolution() {
 }
 
 void Renderer::ResizeSizedPasses() {
+  vrs_.Resize(*device_, {render_width_, render_height_});
   taa_.Resize(*device_, {render_width_, render_height_});
   ssao_.Resize(*device_, {render_width_, render_height_});
   ssr_.Resize(*device_, {render_width_, render_height_});
@@ -1117,6 +1124,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
+  // Scene pass consumes last frame's rate image; the rebuild pass below the
+  // transparents keeps it fresh. Wireframe wants exact per-pixel lines.
+  vrs_active_ = settings_.vrs && vrs_.available() && !path_trace && !settings_.wireframe;
   // Foliage uploaded before path tracing was enabled has no blas (it was excluded
   // from the realtime tlas). Build it now so alpha-tested vegetation appears when
   // path tracing is toggled on at runtime, not only when set before content load.
@@ -1976,7 +1986,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                                          .clear = 0.0f};  // reversed z clears to far = 0
         ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                  .colors = {colors, 3},
-                                 .depth = &depth_attachment});
+                                 .depth = &depth_attachment,
+                                 .shading_rate =
+                                     vrs_active_ ? vrs_.rate_view() : TextureView{}});
 
         // Mesh-shader sub-pass: static opaque meshes, cluster-culled on the gpu.
         if (ms_active) {
@@ -2773,6 +2785,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                     kInvalidResource, false, 0u, tlas_slot, /*globals_written=*/true);
   }
 
+  // Rebuild next frame's shading rates from the finished render-res frame
+  // (post-transparency, pre-resolve: what the scene pass actually shades).
+  if (vrs_active_) {
+    vrs_.AddToGraph(graph_, lit, motion, {render_width_, render_height_},
+                    settings_.vrs_threshold, /*motion_scale=*/2.5f);
+  }
+
   // The path tracer already resolved antialiasing through accumulation; the
   // raster path runs its temporal/upscale resolve here.
   ResourceHandle post_input = lit;
@@ -3126,6 +3145,7 @@ void Renderer::Shutdown() {
 #endif
     bloom_.Destroy(*device_);
     exposure_.Destroy(*device_);
+    vrs_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);
     recon_path_tracer_.Destroy(*device_);

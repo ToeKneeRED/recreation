@@ -93,6 +93,7 @@ enum class ResourceState : u8 {
   kCopySrc,
   kCopyDst,
   kPresent,
+  kShadingRate,  // fragment shading rate attachment (vrs rate image)
 };
 
 // Coarse execution+memory scopes for global (non-image) barriers. Covers every
@@ -191,6 +192,7 @@ enum TextureUsage : u32 {
   kTextureUsageDepthTarget = 1u << 3,
   kTextureUsageTransferSrc = 1u << 4,
   kTextureUsageTransferDst = 1u << 5,
+  kTextureUsageShadingRate = 1u << 6,  // vrs rate image attachment
 };
 using TextureUsageFlags = u32;
 
