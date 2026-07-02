@@ -646,9 +646,43 @@ void DemoScenes::CreateBrickDemoScene() {
       }
     }
   }
+  // Channel atlas: matching normal (decal-box space) page. Blood stays flat
+  // (its story is the wet-glossy roughness override); moss gets bumpy
+  // clump normals from the height of the same grain function.
+  asset::Texture channels;
+  channels.id = asset::MakeAssetId("builtin/decals/atlas_normal");
+  channels.format = asset::TextureFormat::kRgba8;
+  channels.width = 512;
+  channels.height = 256;
+  channels.is_srgb = false;  // normals are linear data
+  channels.data.resize(static_cast<size_t>(channels.width) * channels.height * 4);
+  auto moss_height = [&](f32 u, f32 v) {
+    f32 m = blob(u, v, 11, 9);
+    f32 grain = 0.7f + 0.3f * blob(std::fmod(u * 5.0f, 1.0f), std::fmod(v * 5.0f, 1.0f), 5, 5);
+    return m * grain;
+  };
+  for (u32 y = 0; y < channels.height; ++y) {
+    for (u32 x = 0; x < channels.width; ++x) {
+      size_t o = (static_cast<size_t>(y) * channels.width + x) * 4;
+      f32 nx = 0.0f, ny = 0.0f;
+      if (x >= 256) {  // moss: finite-difference the clump height
+        f32 u = (x - 256 + 0.5f) / 256.0f;
+        f32 v = (y + 0.5f) / channels.height;
+        const f32 e = 1.0f / 256.0f;
+        nx = (moss_height(u - e, v) - moss_height(u + e, v)) * 3.0f;
+        ny = (moss_height(u, v - e) - moss_height(u, v + e)) * 3.0f;
+      }
+      f32 nz = std::sqrt(std::max(1.0f - nx * nx - ny * ny, 0.05f));
+      channels.data[o] = static_cast<u8>((nx * 0.5f + 0.5f) * 255.0f);
+      channels.data[o + 1] = static_cast<u8>((ny * 0.5f + 0.5f) * 255.0f);
+      channels.data[o + 2] = static_cast<u8>((nz * 0.5f + 0.5f) * 255.0f);
+      channels.data[o + 3] = 255;
+    }
+  }
   if (!config_.headless) {
     renderer_.UploadTexture(atlas);
-    renderer_.SetDecalAtlas(atlas.id);
+    renderer_.UploadTexture(channels);
+    renderer_.SetDecalAtlas(atlas.id, channels.id);
   }
   // A blood splat + moss patches projected onto the pom wall and the floor.
   auto make_decal = [](Vec3 pos, Vec3 normal, Vec3 up_hint, f32 w, f32 h, f32 depth,
@@ -670,6 +704,13 @@ void DemoScenes::CreateBrickDemoScene() {
     d.uv_rect[1] = 1.0f;
     d.uv_rect[2] = moss ? 0.5f : 0.0f;
     d.uv_rect[3] = 0.0f;
+    if (moss) {
+      d.params2[0] = 0.85f;  // bumpy clumps
+      d.params2[1] = 1.3f;   // rougher than the bricks
+    } else {
+      d.params2[0] = 0.0f;
+      d.params2[1] = 0.22f;  // wet blood: glossy
+    }
     return d;
   };
   demo_decals_.push_back(

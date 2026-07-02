@@ -57,6 +57,10 @@ struct Decal {
   f32 row2[4] = {0, 0, 1, 0};
   f32 uv_rect[4] = {1, 1, 0, 0};     // atlas uv scale.xy, offset.zw
   f32 tint_blend[4] = {1, 1, 1, 1};  // rgb tint, w albedo blend strength
+  // x: normal-map strength (0 = albedo only), y: roughness multiplier the
+  // decal's alpha blends toward (1 = unchanged), z: emissive strength
+  // (albedo * z adds to the surface emission), w: unused.
+  f32 params2[4] = {0, 1, 0, 0};
 };
 
 // Froxel grid for clustered lighting/decals (mirrored in the shaders).

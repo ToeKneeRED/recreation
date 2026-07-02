@@ -54,12 +54,19 @@ struct Decal {
   float4 row2;
   float4 uv_rect;     // atlas uv scale.xy offset.zw
   float4 tint_blend;  // rgb tint, w albedo blend
+  float4 params2;     // x normal strength, y roughness mult, z emissive
 };
 [[vk::binding(15, 2)]] StructuredBuffer<Decal> decal_buffer : register(t15, space2);
 [[vk::binding(16, 2)]] StructuredBuffer<uint> decal_cluster_indices : register(t16, space2);
 [[vk::combinedImageSampler]] [[vk::binding(17, 2)]] Texture2D decal_atlas : register(t17, space2);
 [[vk::combinedImageSampler]] [[vk::binding(17, 2)]] SamplerState decal_atlas_sampler : register(s17, space2);
 static const uint kMaxDecalsPerCluster = 16;
+
+// Decal channel atlas: rgb = normal in decal-box space, sharing the albedo
+// atlas's uv layout (the albedo alpha is the shared mask).
+[[vk::combinedImageSampler]] [[vk::binding(22, 2)]] Texture2D decal_normal_atlas : register(t22, space2);
+[[vk::combinedImageSampler]] [[vk::binding(22, 2)]] SamplerState decal_normal_sampler : register(s22, space2);
+
 
 // LTC fit tables for rect area lights (Heitz et al. 2016): 18 = inverse
 // transform matrix entries, 19 = (magnitude, fresnel, -, sphere factor).
@@ -79,9 +86,11 @@ struct LocalShadowFace {
 [[vk::combinedImageSampler]] [[vk::binding(21, 2)]] SamplerComparisonState local_shadow_sampler : register(s21, space2);
 
 
-// Blends clustered decal albedo over the surface. Runs after the base-color
-// fetch, before lighting, so decals shade like part of the material.
-float3 ApplyDecals(float3 albedo, float3 world_pos, float3 n, float2 sv_xy, float view_z) {
+// Clustered decals: albedo blend plus optional normal perturbation (decal-box
+// basis), roughness override and emissive add. Runs before lighting so decals
+// shade like part of the material.
+void ApplyDecals(inout float3 albedo, inout float3 n, inout float rough_mult,
+                 inout float3 emissive, float3 world_pos, float2 sv_xy, float view_z) {
   uint cluster = ClusterOf(sv_xy, view_z);
   uint dcount = min(cluster_counts[cluster] >> 16, kMaxDecalsPerCluster);
   for (uint i = 0; i < dcount; ++i) {
@@ -95,14 +104,25 @@ float3 ApplyDecals(float3 albedo, float3 world_pos, float3 n, float2 sv_xy, floa
     float facing = dot(n, proj_dir);
     if (facing < 0.25) continue;
     float2 uv = local.xy * 0.5 + 0.5;
-    float4 sample_c = decal_atlas.Sample(decal_atlas_sampler,
-                                         uv * d.uv_rect.xy + d.uv_rect.zw);
+    float2 atlas_uv = uv * d.uv_rect.xy + d.uv_rect.zw;
+    float4 sample_c = decal_atlas.Sample(decal_atlas_sampler, atlas_uv);
     float edge = saturate((1.0 - max(abs(local.x), abs(local.y))) * 6.0) *
                  saturate((1.0 - abs(local.z)) * 3.0);
-    float w = sample_c.a * d.tint_blend.w * edge * saturate((facing - 0.25) / 0.5);
-    albedo = lerp(albedo, sample_c.rgb * d.tint_blend.rgb, saturate(w));
+    float w = saturate(sample_c.a * d.tint_blend.w * edge * saturate((facing - 0.25) / 0.5));
+    if (w <= 0.001) continue;
+    float3 decal_color = sample_c.rgb * d.tint_blend.rgb;
+    albedo = lerp(albedo, decal_color, w);
+    // Normal channel: the second atlas holds a normal in the decal's box
+    // basis (x/y tangents, z the projection direction).
+    if (d.params2.x > 0.001) {
+      float3 tn = decal_normal_atlas.Sample(decal_normal_sampler, atlas_uv).rgb * 2.0 - 1.0;
+      float3 dn = normalize(tn.x * normalize(d.row0.xyz) + tn.y * normalize(d.row1.xyz) +
+                            tn.z * proj_dir);
+      n = normalize(lerp(n, dn, w * d.params2.x));
+    }
+    rough_mult = lerp(rough_mult, d.params2.y, w);
+    emissive += decal_color * d.params2.z * w;
   }
-  return albedo;
 }
 
 
@@ -486,15 +506,17 @@ float SpecularAaRoughness(float roughness, float3 n) {
 float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float3 v = normalize(frame.camera_position.xyz - input.world_pos);
   if (dot(n, v) < 0.0) n = -n;  // shade double sided geometry from both sides
-  albedo = ApplyDecals(albedo, input.world_pos, n, input.sv_position.xy,
-                       0.1 / max(input.sv_position.z, 1e-6));
+  float decal_rough_mult = 1.0;
+  float3 decal_emissive = float3(0.0, 0.0, 0.0);
+  ApplyDecals(albedo, n, decal_rough_mult, decal_emissive, input.world_pos,
+              input.sv_position.xy, 0.1 / max(input.sv_position.z, 1e-6));
 
   // glTF metallic roughness packing: g roughness, b metallic. Terrain reuses
   // this slot as a land layer, so it takes the neutral rough dielectric path.
   float2 mr = (material.flags & kFlagTerrain) != 0u
                   ? float2(1.0, 0.0)
                   : metallic_roughness_map.Sample(metallic_roughness_sampler, input.uv).gb;
-  float roughness = clamp(mr.x * material.roughness_factor, 0.045, 1.0);
+  float roughness = clamp(mr.x * material.roughness_factor * decal_rough_mult, 0.045, 1.0);
   roughness = SpecularAaRoughness(roughness, n);
   float metallic = clamp(mr.y * material.metallic_factor, 0.0, 1.0);
 
@@ -747,7 +769,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
                              1.5 - abs(4.0 * t - 1.0)));
     }
   }
-  return lit + ambient + emissive;
+  return lit + ambient + emissive + decal_emissive;
 }
 
 // Cascaded shadow map lookup: pick the tightest cascade that contains the

@@ -29,6 +29,7 @@ struct Decal {
   float4 row2;
   float4 uv_rect;
   float4 tint_blend;
+  float4 params2;  // normal strength, roughness mult, emissive, pad
 };
 [[vk::binding(0, 0)]] StructuredBuffer<Light> lights : register(t0, space0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> cluster_counts : register(u1, space0);

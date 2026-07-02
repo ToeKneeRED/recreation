@@ -177,7 +177,7 @@ class Renderer {
   // state and reconfigures, including full upscaler swaps.
   RenderSettings& settings() { return settings_; }
   // Points the clustered decal system at an uploaded texture (the atlas).
-  void SetDecalAtlas(asset::AssetId texture);
+  void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});
 
   const DeviceCaps* caps() const;
   Device* device() { return device_.get(); }
@@ -300,6 +300,7 @@ class Renderer {
   // Decal atlas: set once by the engine/demo via SetDecalAtlas (asset id of an
   // uploaded texture); empty binds white.
   TextureView decal_atlas_view_;
+  TextureView decal_normal_atlas_view_;
   SsaoPass ssao_;
   SsrPass ssr_;
   SsgiPass ssgi_;

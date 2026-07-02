@@ -24,7 +24,7 @@ streaming.
       temporally jittered, integrated front-to-back; fog composite samples it,
       and particles/translucents sample the same volume so a torch lights the
       smoke above it. The current fog pass only marches the sun.
-- [ ] **Decal channels.** Clustered decals blend albedo only; add
+- [x] **Decal channels.** (landed) Clustered decals blend albedo only; add
       normal/roughness/emissive perturbation (wet stains with glossy
       interiors, glowing runes, impact craters).
 - [ ] **Lit translucency.** Particles and WBOIT get sun+ambient only; loop

@@ -87,7 +87,8 @@ class EnvironmentSystem {
                    const GpuBuffer& decal_indices = {},
                    TextureView decal_atlas = {},
                    const GpuBuffer& local_shadow_faces = {},
-                   TextureView local_shadow_atlas = {}) const;
+                   TextureView local_shadow_atlas = {},
+                   TextureView decal_normal_atlas = {}) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}
@@ -116,6 +117,7 @@ class EnvironmentSystem {
   GpuImage white_;
   GpuImage black_array_;
   GpuImage shadow_dummy_;  // 1x1 depth cleared to 1.0 (fully lit)
+  GpuImage flat_normal_;   // 1x1 (0.5, 0.5, 1) for the decal channel atlas
   // LTC fit tables for GGX area lights (64x64 RGBA16F, uploaded once).
   GpuImage ltc_matrix_;
   GpuImage ltc_amplitude_;

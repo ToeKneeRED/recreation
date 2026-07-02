@@ -41,7 +41,7 @@ base::Option<bool> AsyncComputeOpt{"async.compute", true, "REC_ASYNC_COMPUTE"};
 base::Option<bool> FrameGenOpt{"framegen", false, "REC_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "REC_LOCAL_SHADOWS"};
 base::Option<bool> FroxelOpt{"froxel.fog", true, "REC_FROXEL"};
-base::Option<double> FroxelDensity{"froxel.density", 0.015, "REC_FROXEL_DENSITY"};
+base::Option<double> FroxelDensity{"froxel.density", 0.005, "REC_FROXEL_DENSITY"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "REC_MOTION_BLUR_DEBUG_VEL"};
@@ -912,10 +912,13 @@ void Renderer::EnsureRayTracingGeometry() {
   }
 }
 
-void Renderer::SetDecalAtlas(asset::AssetId texture) {
+void Renderer::SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas) {
   if (!material_system_) return;
   const GpuImage* img = material_system_->find_texture(texture.hash);
   decal_atlas_view_ = img ? img->view : TextureView{};
+  const GpuImage* normal_img =
+      normal_atlas ? material_system_->find_texture(normal_atlas.hash) : nullptr;
+  decal_normal_atlas_view_ = normal_img ? normal_img->view : TextureView{};
 }
 
 bool Renderer::UploadTexture(const asset::Texture& texture, u64 id_salt) {
@@ -1263,7 +1266,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               frame.lights, frame.lights.size, TextureView{}, cluster_counts_, cluster_indices_,
               frame.decals, decal_cluster_indices_, decal_atlas_view_,
               local_shadows_active_ ? local_shadows_.face_buffer(frame_slot) : GpuBuffer{},
-              local_shadows_active_ ? local_shadows_.atlas().view : TextureView{});
+              local_shadows_active_ ? local_shadows_.atlas().view : TextureView{},
+              decal_normal_atlas_view_);
 
           ColorAttachment colors[2];
           colors[0] = {.view = ctx.graph->image(composite).view, .load = LoadOp::kLoad};
@@ -2274,7 +2278,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             frame.lights.size, spec_refl_view, cluster_counts_, cluster_indices_,
             frame.decals, decal_cluster_indices_, decal_atlas_view_,
             local_shadows_active_ ? local_shadows_.face_buffer(frame_slot) : GpuBuffer{},
-            local_shadows_active_ ? local_shadows_.atlas().view : TextureView{});
+            local_shadows_active_ ? local_shadows_.atlas().view : TextureView{},
+            decal_normal_atlas_view_);
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(scene_color).view,
