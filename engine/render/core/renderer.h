@@ -267,6 +267,7 @@ class Renderer {
   ReflectionTrace reflection_trace_;
   MotionBlurPass motion_blur_;
   PipelineHandle light_cluster_pipeline_;
+  PipelineHandle contact_shadow_pipeline_;
   GpuBuffer cluster_counts_;
   GpuBuffer cluster_indices_;
   SsaoPass ssao_;

@@ -174,6 +174,7 @@ set(RECREATION_RENDER_SHADERS
   shaders/screenspace/ssr.cs.hlsl
   shaders/screenspace/ssgi.cs.hlsl
   shaders/screenspace/reflection_trace.cs.hlsl
+  shaders/screenspace/contact_shadow.cs.hlsl
   shaders/pipeline/cull.cs.hlsl
   shaders/pipeline/light_cluster.cs.hlsl
   shaders/pipeline/hiz_reduce.cs.hlsl

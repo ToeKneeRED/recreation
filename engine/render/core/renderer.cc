@@ -14,6 +14,7 @@
 #include "core/log.h"
 #include "render/util/exr_write.h"
 #include "shaders/hdr_capture_cs_hlsl.h"
+#include "shaders/contact_shadow_cs_hlsl.h"
 #include "shaders/light_cluster_cs_hlsl.h"
 
 namespace rec::render {
@@ -195,6 +196,26 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
         .debug_name = "light_cluster",
     });
     if (!light_cluster_pipeline_) return false;
+    struct ContactPush {
+      Mat4 view_proj;
+      Mat4 inv_view_proj;
+      f32 sun_dir[3];
+      f32 near_plane;
+      u32 size[2];
+      f32 range;
+      f32 thickness;
+      u32 steps;
+      u32 frame_index;
+      f32 pad[2];
+    };
+    contact_shadow_pipeline_ = device_->CreateComputePipeline({
+        .shader = REC_SHADER(k_contact_shadow_cs_hlsl),
+        .sets = {{.slots = {{0, BindingType::kStorageImage},
+                            {1, BindingType::kSampledImage}}}},
+        .push_constant_size = sizeof(ContactPush),
+        .debug_name = "contact_shadow",
+    });
+    if (!contact_shadow_pipeline_) return false;
     cluster_counts_ = device_->CreateBuffer(kClusterCount * sizeof(u32), kBufferUsageStorage);
     cluster_indices_ = device_->CreateBuffer(
         static_cast<u64>(kClusterCount) * kMaxLightsPerCluster * sizeof(u32),
@@ -1715,6 +1736,43 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                                    globals.jitter[0], globals.jitter[1]);
       sun_shadow = nrd_.DenoiseShadow(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z, motion,
                                       penumbra);
+      // Contact shadows: a short screen-space march folded into the denoised
+      // shadow, restoring the sub-30cm grounding the 1-spp ray blurs away.
+      graph_.AddPass(
+          "contact_shadow",
+          [&](RenderGraph::PassBuilder& b) {
+            b.Write(sun_shadow, ResourceUsage::kStorageWrite);
+            b.Read(depth_export, ResourceUsage::kSampledCompute);
+          },
+          [this, sun_shadow, depth_export, sun, view_proj = globals.view_proj,
+           inv_view_proj = globals.inv_view_proj](PassContext& ctx) {
+            struct ContactPush {
+              Mat4 view_proj;
+              Mat4 inv_view_proj;
+              f32 sun_dir[3];
+              f32 near_plane;
+              u32 size[2];
+              f32 range;
+              f32 thickness;
+              u32 steps;
+              u32 frame_index;
+              f32 pad[2];
+            } p{};
+            p.view_proj = view_proj;
+            p.inv_view_proj = inv_view_proj;
+            p.sun_dir[0] = sun.x; p.sun_dir[1] = sun.y; p.sun_dir[2] = sun.z;
+            p.near_plane = 0.1f;
+            p.size[0] = render_width_; p.size[1] = render_height_;
+            p.range = 0.35f;
+            p.thickness = 0.4f;
+            p.steps = 12;
+            p.frame_index = frame_index_;
+            ctx.cmd->BindPipeline(contact_shadow_pipeline_);
+            ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
+                                       Bind::Sampled(1, ctx.graph->image(depth_export))});
+            ctx.cmd->Push(p);
+            ctx.cmd->Dispatch2D({render_width_, render_height_});
+          });
     }
     if (spec_refl_active) {
       // 1-spp VNDF reflection radiance -> REBLUR_SPECULAR; the scene pass
@@ -2458,6 +2516,7 @@ void Renderer::Shutdown() {
     if (rt_available_) reflection_trace_.Destroy(*device_);
     motion_blur_.Destroy(*device_);
     if (light_cluster_pipeline_) device_->DestroyPipeline(light_cluster_pipeline_);
+    if (contact_shadow_pipeline_) device_->DestroyPipeline(contact_shadow_pipeline_);
     if (cluster_counts_) device_->DestroyBuffer(cluster_counts_);
     if (cluster_indices_) device_->DestroyBuffer(cluster_indices_);
 #if defined(RECREATION_HAS_NRD)
