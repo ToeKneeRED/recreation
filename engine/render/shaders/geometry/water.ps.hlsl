@@ -286,9 +286,26 @@ PsOut main(PsIn input) {
 
   float3 absorption = (1.0 - saturate(material.base_color_factor.rgb)) * 0.9;
   float3 transmittance = exp(-absorption * water_depth);
+
+  // Caustics on the refracted seafloor: two counter-scrolling ridge-noise
+  // sheets multiplied (the classic web pattern), attenuated by depth and sun.
+  float3 caustic = 0.0.xxx;
+  if (behind_depth > 1e-6 && water_depth < 12.0) {
+    float2 ndc_b = refracted_uv * 2.0 - 1.0;
+    float4 bw = mul(frame.inv_view_proj, float4(ndc_b, behind_depth, 1.0));
+    float2 floor_xz = bw.xyz.xz / bw.w;
+    float t = frame.time;
+    float c1 = 1.0 - abs(WaveHeight(floor_xz * 1.9 + float2(t * 0.31, t * 0.17), t * 0.6));
+    float c2 = 1.0 - abs(WaveHeight(floor_xz * 2.3 - float2(t * 0.23, t * 0.29), t * 0.7));
+    float web = pow(saturate(c1 * c2), 6.0);
+    float sun_up = saturate(-normalize(frame.sun_direction.xyz).y);
+    caustic = frame.sun_color.rgb * frame.sun_direction.w * web *
+              exp(-water_depth * 0.5) * sun_up * 0.6;
+  }
   float3 scatter = material.base_color_factor.rgb *
                    irradiance_cube.SampleLevel(irradiance_sampler, float3(0, 1, 0), 0).rgb;
-  float3 refracted = opaque_color.SampleLevel(opaque_color_sampler, refracted_uv, 0).rgb;
+  float3 refracted = opaque_color.SampleLevel(opaque_color_sampler, refracted_uv, 0).rgb +
+                     caustic;
   float3 below = lerp(scatter, refracted, transmittance);
 
   // Reflection, kept above the surface so the trace never self-hits.
