@@ -602,14 +602,22 @@ void RegisterConverters(asset::AssetDatabase& database, const GameProfile& profi
         if (conversion.skipped_shapes > 0) {
           REC_DEBUG("{}: skipped {} shapes", path, conversion.skipped_shapes);
         }
-        if (conversion.skinned_shapes > 0) {
-          REC_INFO("{}: baked {} skinned shapes", path, conversion.skinned_shapes);
+        if (conversion.refraction_shapes > 0) {
+          REC_INFO("{}: {} refraction shapes routed to transmission", path,
+                   conversion.refraction_shapes);
+        }
+        if (conversion.effect_shapes > 0) {
+          REC_INFO("vfx: {} effect-shader shapes {}", conversion.effect_shapes, path);
+        }
+        if (!conversion.mesh->emitters.empty()) {
+          REC_INFO("vfx: {} particle emitters {}", conversion.mesh->emitters.size(), path);
         }
         // Distant LOD proxies (.btr/.bto/.btt) must stay out of the tlas: they
         // would double the geometry the full-detail near meshes already provide
         // to ray queries (shadows, ao, reflections).
         if (path.ends_with(".btr") || path.ends_with(".bto") || path.ends_with(".btt")) {
           conversion.mesh->exclude_from_rt = true;
+          conversion.mesh->terrain_lod = path.ends_with(".btr");
         }
         return std::move(conversion.mesh);
       };

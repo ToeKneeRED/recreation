@@ -17,8 +17,9 @@ namespace rec::world {
 // instances roll on a deterministic jittered grid honoring the GRAS density,
 // slope and units-from-water limits. All instances merge into one mesh per
 // cell (vertices transformed on the CPU, submeshes grouped per source
-// material) that uploads and unloads like the land mesh. The GRAS wave
-// fields are ignored: wind animation is renderer work.
+// material) that uploads and unloads like the land mesh. The GRAS wave-period
+// field is not wired, but the model materials are flagged for the renderer's
+// vertex wind so grass sways.
 class GrassBaker {
  public:
   GrassBaker(const bethesda::RecordStore& records, asset::AssetDatabase& assets)

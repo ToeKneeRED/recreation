@@ -49,6 +49,9 @@ class AssetDatabase {
   const Mesh* AddMesh(Mesh mesh);
   const Texture* AddTexture(Texture texture);
   const Material* FindMaterial(AssetId id) const;
+  // Mutable handle for late tweaks to a synthesized material before it uploads
+  // (e.g. flagging a grass model's materials for vertex wind).
+  Material* FindMaterialMutable(AssetId id);
   const Texture* FindTexture(AssetId id) const;
   const Mesh* FindMesh(AssetId id) const;
 

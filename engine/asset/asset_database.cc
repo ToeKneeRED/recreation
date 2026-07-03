@@ -96,6 +96,11 @@ const Material* AssetDatabase::FindMaterial(AssetId id) const {
   return FindIn(materials_, id);
 }
 
+Material* AssetDatabase::FindMaterialMutable(AssetId id) {
+  auto* cached = materials_.find(id.hash);
+  return cached ? cached->Get_UseOnlyIfYouKnowWhatYouareDoing() : nullptr;
+}
+
 const Texture* AssetDatabase::FindTexture(AssetId id) const { return FindIn(textures_, id); }
 
 const Mesh* AssetDatabase::FindMesh(AssetId id) const { return FindIn(meshes_, id); }

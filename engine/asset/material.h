@@ -54,6 +54,11 @@ struct Material {
   // parallax occlusion mapping; scale is the depth in uv-tangent units.
   AssetId height;
   f32 height_scale = 0.05f;
+  // Animated texture scroll from a NIF shader float controller (U/V Offset),
+  // in uv units per second. The raster shaders add frame.time * this to the uv
+  // before sampling, so waterfalls/rivers/lava flow. 0 = static.
+  f32 uv_scroll_u = 0;
+  f32 uv_scroll_v = 0;
   // Vertex wind sway (banners, curtains, foliage). Weight convention: uv.y
   // grows away from the attachment (0 = pinned edge).
   bool wind = false;
@@ -68,6 +73,21 @@ struct Material {
   // Albedo comes from the engine's virtual-texture space instead of the
   // base_color texture (feedback-streamed page atlas; see VirtualTexture).
   bool virtual_albedo = false;
+  // BSEffectShaderProperty geometry (torch/campfire flames, glow planes, god
+  // rays, mist sheets, shrine glows): shaded unlit as source texture *
+  // base_color_factor (the emissive colour * multiple) * vertex colour, blended,
+  // no lighting/shadows/decals. base_color holds the source texture; emissive
+  // holds the optional greyscale-to-palette texture.
+  bool effect = false;
+  bool effect_additive = false;        // additive (fire) vs alpha (mist) blend
+  bool effect_grayscale_color = false; // remap source luminance through the palette
+  bool effect_grayscale_alpha = false; // source/palette alpha comes from luminance
+  bool effect_falloff = false;         // view-angle opacity fade (glow planes)
+  // start angle, stop angle, start opacity, stop opacity (dot-of-view thresholds).
+  f32 effect_falloff_params[4] = {1, 1, 1, 1};
+  // Emissive pulse from a shader emissive-multiple controller: x = frequency
+  // (Hz), y = amount (0..1 of the mean it swings). 0 = constant.
+  f32 emissive_pulse[2] = {0, 0};
 };
 
 }  // namespace rec::asset

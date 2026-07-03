@@ -47,7 +47,9 @@ struct NifConversion {
   base::Vector<std::string> material_files;
   // Normalized vfs paths ("textures/..."), deduplicated.
   base::Vector<std::string> texture_paths;
-  u32 skipped_shapes = 0;  // strip/effect/empty shapes we cannot use yet
+  u32 skipped_shapes = 0;  // strip/empty shapes we cannot use yet
+  u32 refraction_shapes = 0;  // refraction-flagged shapes routed to transmission
+  u32 effect_shapes = 0;  // effect-shader shapes routed to the unlit blend path
   u32 skinned_shapes = 0;  // shapes baked rigidly at their bind pose
   // Set by ConvertNifSkinnedMesh: mesh->skinned with mesh->skin populated.
   bool skinned = false;

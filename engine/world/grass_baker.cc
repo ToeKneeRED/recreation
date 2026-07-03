@@ -181,6 +181,13 @@ const GrassBaker::GrassType* GrassBaker::TypeFor(u64 gras_packed) {
     type->model = assets_.LoadMesh(path);
     if (type->model && type->model->lods.empty()) type->model = nullptr;
     if (!type->model) REC_WARN("grass model failed: {}", path);
+    // Flag the model's materials for the renderer's vertex wind (uv.y-weighted
+    // sway). Marked here, before EnsureUploaded pushes them to the gpu.
+    if (type->model) {
+      for (const asset::Submesh& submesh : type->model->lods[0].submeshes) {
+        if (asset::Material* m = assets_.FindMaterialMutable(submesh.material)) m->wind = true;
+      }
+    }
   }
   return type;
 }
