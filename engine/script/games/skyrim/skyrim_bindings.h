@@ -120,6 +120,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   bool HasKeyword(papyrus::ObjectRef form, papyrus::ObjectRef keyword) override;
   f32 GetWeight(papyrus::ObjectRef form) override;
   i32 GetGoldValue(papyrus::ObjectRef form) override;
+  i32 GetWeaponDamage(papyrus::ObjectRef weapon) override;
   i32 GetSex(papyrus::ObjectRef actor_base) override;
   bool IsUnique(papyrus::ObjectRef actor_base) override;
   bool IsEssential(papyrus::ObjectRef actor_base) override;

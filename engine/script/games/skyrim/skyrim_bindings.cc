@@ -221,6 +221,19 @@ i32 RecordBackedSkyrimBindings::GetGoldValue(ObjectRef form) {
   return 0;
 }
 
+i32 RecordBackedSkyrimBindings::GetWeaponDamage(ObjectRef weapon) {
+  if (!records_) return 0;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(weapon), &rec)) return 0;
+  if (rec.header.type != FourCc('W', 'E', 'A', 'P')) return 0;
+  // WEAP DATA = { uint32 value; float weight; uint16 damage; }.
+  const bethesda::Subrecord* data = rec.Find(FourCc('D', 'A', 'T', 'A'));
+  if (!data || data->data.size() < 10) return 0;
+  u16 damage;
+  std::memcpy(&damage, data->data.data() + 8, 2);
+  return damage;
+}
+
 std::string RecordBackedSkyrimBindings::GetName(ObjectRef form) {
   if (!records_) return "";
   bethesda::Record record;

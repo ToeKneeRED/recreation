@@ -34,6 +34,8 @@ class SkyrimBindings {
   // keys, potions); other forms report 0.
   virtual f32 GetWeight(papyrus::ObjectRef form) { return 0; }
   virtual i32 GetGoldValue(papyrus::ObjectRef form) { return 0; }
+  // Base physical damage of a weapon form (WEAP); 0 for non-weapons.
+  virtual i32 GetWeaponDamage(papyrus::ObjectRef weapon) { return 0; }
 
   // ActorBase (NPC_ record data).
   virtual i32 GetSex(papyrus::ObjectRef actor_base) { return 0; }  // 0 male, 1 female
