@@ -36,6 +36,8 @@ class SkyrimBindings {
   virtual i32 GetGoldValue(papyrus::ObjectRef form) { return 0; }
   // Base physical damage of a weapon form (WEAP); 0 for non-weapons.
   virtual i32 GetWeaponDamage(papyrus::ObjectRef weapon) { return 0; }
+  // Base armor rating of an armor form (ARMO); 0 for non-armor.
+  virtual f32 GetArmorRating(papyrus::ObjectRef armor) { return 0; }
 
   // ActorBase (NPC_ record data).
   virtual i32 GetSex(papyrus::ObjectRef actor_base) { return 0; }  // 0 male, 1 female

@@ -234,6 +234,19 @@ i32 RecordBackedSkyrimBindings::GetWeaponDamage(ObjectRef weapon) {
   return damage;
 }
 
+f32 RecordBackedSkyrimBindings::GetArmorRating(ObjectRef armor) {
+  if (!records_) return 0.0f;
+  bethesda::Record rec;
+  if (!records_->Parse(ToFormId(armor), &rec)) return 0.0f;
+  if (rec.header.type != FourCc('A', 'R', 'M', 'O')) return 0.0f;
+  // ARMO DNAM holds the base armor rating scaled by 100.
+  const bethesda::Subrecord* dnam = rec.Find(FourCc('D', 'N', 'A', 'M'));
+  if (!dnam || dnam->data.size() < 2) return 0.0f;
+  u16 scaled;
+  std::memcpy(&scaled, dnam->data.data(), 2);
+  return scaled / 100.0f;
+}
+
 std::string RecordBackedSkyrimBindings::GetName(ObjectRef form) {
   if (!records_) return "";
   bethesda::Record record;
