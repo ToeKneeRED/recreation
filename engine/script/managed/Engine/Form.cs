@@ -43,6 +43,9 @@ public class Form
     public float Weight => Call("GetWeight").AsFloat();
     public int GoldValue => Call("GetGoldValue").AsInt();
 
+    // Base physical damage if this form is a weapon, else 0.
+    public int WeaponDamage => Call("GetWeaponDamage").AsInt();
+
     // True if the engine resolves this handle to a script instance of typeName
     // or one of its ancestors.
     public bool Is(string typeName)

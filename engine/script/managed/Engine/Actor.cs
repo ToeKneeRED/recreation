@@ -2,6 +2,13 @@ using Recreation.Interop;
 
 namespace Recreation;
 
+// The biological sex recorded on an actor's base.
+public enum Sex
+{
+    Male,
+    Female,
+}
+
 // A living reference (Papyrus Actor): the player, NPCs and creatures. Adds
 // actor values, combat and faction state on top of ObjectReference.
 public class Actor : ObjectReference
@@ -38,6 +45,8 @@ public class Actor : ObjectReference
     // actors are one of a kind.
     public bool IsEssential => Native.CallMethod(BaseObject.Handle, "IsEssential", default).AsBool();
     public bool IsUnique => Native.CallMethod(BaseObject.Handle, "IsUnique", default).AsBool();
+    public Sex Sex => (Sex)Native.CallMethod(BaseObject.Handle, "GetSex", default).AsInt();
+    public Form Race => Form.From(Native.CallMethod(BaseObject.Handle, "GetRace", default).AsHandle());
 
     // --- state ----------------------------------------------------------------
     public int Level => Call("GetLevel").AsInt();
