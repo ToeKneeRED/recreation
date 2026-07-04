@@ -80,6 +80,7 @@ public static class ModHost
     {
         Scheduler.Advance(deltaTime);
         Coroutines.Advance(deltaTime);
+        Cooldowns.Advance(deltaTime);
         // Iterate a snapshot so a behaviour may register or unregister mid-frame.
         var snapshot = Behaviours.ToArray();
         foreach (GameBehaviour b in snapshot)
@@ -99,6 +100,7 @@ public static class ModHost
         Effects.Clear();
         Scheduler.Clear();
         Coroutines.Clear();
+        Cooldowns.Clear();
         EventBus.Clear();
         _booted = false;
     }
