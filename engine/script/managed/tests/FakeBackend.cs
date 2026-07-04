@@ -169,6 +169,22 @@ public sealed class FakeBackend : IEngineBackend
             case "GetItemCount":
                 return Value.Int(_inventory.TryGetValue(self, out var owned) &&
                                  owned.TryGetValue(args[0].AsHandle(), out int n) ? n : 0);
+            case "AddItem":
+                AddInventoryItem(self, args[0].AsHandle(), args.Length > 1 ? args[1].AsInt() : 1,
+                                 _weights.GetValueOrDefault(args[0].AsHandle()));
+                return Value.None;
+            case "RemoveItem":
+            {
+                if (_inventory.TryGetValue(self, out var inv2) &&
+                    inv2.TryGetValue(args[0].AsHandle(), out int cur))
+                {
+                    int take = args.Length > 1 ? args[1].AsInt() : 1;
+                    int left = cur - take;
+                    if (left > 0) inv2[args[0].AsHandle()] = left;
+                    else inv2.Remove(args[0].AsHandle());
+                }
+                return Value.None;
+            }
             case "GetWeight":
                 return Value.Float(_weights.GetValueOrDefault(self));
             case "GetSex":

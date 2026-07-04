@@ -29,6 +29,15 @@ public static class InventoryTests
         check.That("contains the added forms",
                    handles.Contains(0x11) && handles.Contains(0x22) && handles.Contains(0x33));
 
+        // Loot-all: move everything to the player, leaving the chest empty.
+        fake.AddInventoryItem(chest, 0x22, count: 4);  // 5 total of 0x22 now
+        const ulong player = 0x14;
+        reference.TransferAllItemsTo(ObjectReference.From(player));
+        check.Equal("source emptied after loot-all", 0, reference.ItemCount);
+        check.Equal("all distinct forms moved", 3, ObjectReference.From(player).ItemCount);
+        check.Equal("stacked count moved", 5,
+                    ObjectReference.From(player).GetItemCount(Form.From(0x22)));
+
         Native.Backend = null;
     }
 }
