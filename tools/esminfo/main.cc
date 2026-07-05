@@ -7,8 +7,12 @@
 #include <set>
 #include <string>
 
+#include "asset/vfs.h"
+#include "bethesda/archive.h"
+#include "bethesda/facegen.h"
 #include "bethesda/load_order.h"
 #include "bethesda/plugin.h"
+#include "bethesda/tri.h"
 
 namespace {
 
@@ -618,6 +622,171 @@ int DumpType(const std::string& data_dir, const std::string& type, int limit) {
   return 0;
 }
 
+// Lists every HDPT head part: editor id, PNAM type, model, its NAM0/NAM1 tri
+// files (race morph / chargen morph), texture set and valid-races formlist.
+// For seeing what parts and morph tris the chargen system has to work with.
+// esminfo <data-dir> hdpt [limit].
+int DumpHeadParts(const std::string& data_dir, int limit) {
+  const auto& profile = GameProfile::For(GameProfile::DetectFromDataDir(data_dir));
+  auto order = LoadOrder::FromPluginsTxt(data_dir + "/../plugins.txt", profile);
+  RecordStore records;
+  if (!records.LoadAll(data_dir, order, profile)) return 1;
+
+  const char* kTypes[] = {"misc", "face", "eyes", "hair", "facialhair", "scar", "eyebrows"};
+  int shown = 0, total = 0;
+  records.EachOfType(rec::FourCc('H', 'D', 'P', 'T'),
+                     [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+    ++total;
+    if (limit > 0 && shown >= limit) return;
+    std::optional<HeadPart> part = ResolveHeadPart(records, id);
+    if (!part) return;
+    ++shown;
+    rec::u32 t = static_cast<rec::u32>(part->type);
+    std::printf("HDPT %04x:%06x %-32s type=%s flags=%02x\n", id.plugin, id.local_id,
+                part->editor_id.c_str(), t < 7 ? kTypes[t] : "?", part->flags);
+    if (!part->model.empty()) std::printf("  MODL %s\n", part->model.c_str());
+    for (const HeadPartTri& tri : part->tris)
+      std::printf("  tri[type=%u] %s\n", tri.type, tri.path.c_str());
+    if (part->texture_set.plugin != 0xffff)
+      std::printf("  TNAM %04x:%06x\n", part->texture_set.plugin, part->texture_set.local_id);
+    if (part->valid_races.plugin != 0xffff)
+      std::printf("  RNAM %04x:%06x\n", part->valid_races.plugin, part->valid_races.local_id);
+    if (!part->extra_parts.empty()) {
+      std::printf("  HNAM extra:");
+      for (GlobalFormId e : part->extra_parts) std::printf(" %04x:%06x", e.plugin, e.local_id);
+      std::printf("\n");
+    }
+  });
+  std::printf("total HDPT: %d\n", total);
+  return 0;
+}
+
+// Fully resolves one NPC's face data: race, head parts (with names/types/tris),
+// NAM9 slider values, NAMA face-part indices, tint layers (index + rgba +
+// interpolation), skin tone and hair color. The query is an editor id substring
+// or a "plugin:local" / hex form id. esminfo <data-dir> npcface <query>.
+int DumpNpcFace(const std::string& data_dir, const std::string& query) {
+  const auto& profile = GameProfile::For(GameProfile::DetectFromDataDir(data_dir));
+  auto order = LoadOrder::FromPluginsTxt(data_dir + "/../plugins.txt", profile);
+  RecordStore records;
+  if (!records.LoadAll(data_dir, order, profile)) return 1;
+
+  GlobalFormId target{0xffff, 0};
+  if (size_t colon = query.find(':'); colon != std::string::npos) {
+    target.plugin = static_cast<rec::u16>(std::stoul(query.substr(0, colon), nullptr, 16));
+    target.local_id = static_cast<rec::u32>(std::stoul(query.substr(colon + 1), nullptr, 16));
+  } else {
+    records.EachOfType(rec::FourCc('N', 'P', 'C', '_'),
+                       [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+      if (target.plugin != 0xffff) return;
+      Record r;
+      if (!records.Parse(id, &r)) return;
+      if (r.GetString(kEdid) == query) target = id;
+    });
+    if (target.plugin == 0xffff) {  // fall back to substring match
+      records.EachOfType(rec::FourCc('N', 'P', 'C', '_'),
+                         [&](GlobalFormId id, const RecordStore::StoredRecord&) {
+        if (target.plugin != 0xffff) return;
+        Record r;
+        if (records.Parse(id, &r) && r.GetString(kEdid).find(query) != std::string::npos)
+          target = id;
+      });
+    }
+  }
+  if (target.plugin == 0xffff) {
+    std::printf("no NPC matched '%s'\n", query.c_str());
+    return 1;
+  }
+
+  std::optional<NpcFaceData> face = ResolveNpcFace(records, target);
+  if (!face) {
+    std::printf("%04x:%06x is not an NPC_\n", target.plugin, target.local_id);
+    return 1;
+  }
+  std::printf("NPC_ %04x:%06x %s\n", face->id.plugin, face->id.local_id, face->editor_id.c_str());
+  if (std::optional<RaceHeadData> race = ResolveRaceHead(records, face->race)) {
+    const RaceSexHead& m = race->male;
+    std::printf("  race %04x:%06x %s (male: %zu default parts, %zu tint layers, %zu presets; "
+                "female: %zu parts, %zu tint layers)\n",
+                face->race.plugin, face->race.local_id, race->editor_id.c_str(),
+                static_cast<size_t>(m.parts.size()), static_cast<size_t>(m.tint_layers.size()),
+                static_cast<size_t>(m.presets.size()),
+                static_cast<size_t>(race->female.parts.size()),
+                static_cast<size_t>(race->female.tint_layers.size()));
+  }
+
+  const char* kTypes[] = {"misc", "face", "eyes", "hair", "facialhair", "scar", "eyebrows"};
+  std::printf("  head parts (%zu):\n", static_cast<size_t>(face->head_parts.size()));
+  for (GlobalFormId hp : face->head_parts) {
+    std::optional<HeadPart> part = ResolveHeadPart(records, hp);
+    if (!part) {
+      std::printf("    %04x:%06x (unresolved)\n", hp.plugin, hp.local_id);
+      continue;
+    }
+    rec::u32 t = static_cast<rec::u32>(part->type);
+    std::printf("    %04x:%06x %-28s %s\n", hp.plugin, hp.local_id, part->editor_id.c_str(),
+                t < 7 ? kTypes[t] : "?");
+    for (const HeadPartTri& tri : part->tris)
+      std::printf("      tri[%u] %s\n", tri.type, tri.path.c_str());
+  }
+
+  if (face->has_face_morph) {
+    std::printf("  NAM9 face morphs:\n");
+    for (rec::u32 i = 0; i < kFaceMorphCount; ++i)
+      std::printf("    %-14s % .3f\n", FaceMorphName(i), face->face_morph[i]);
+  }
+  if (face->has_face_parts)
+    std::printf("  NAMA parts: nose=%d brows=%d eyes=%d mouth=%d\n", face->face_parts[0],
+                face->face_parts[1], face->face_parts[2], face->face_parts[3]);
+  if (face->has_skin_tone)
+    std::printf("  QNAM skin tone: %.3f %.3f %.3f\n", face->skin_tone[0], face->skin_tone[1],
+                face->skin_tone[2]);
+  if (face->hair_color.plugin != 0xffff) {
+    std::optional<ColorForm> c = ResolveColorForm(records, face->hair_color);
+    std::printf("  HCLF hair color %04x:%06x %s", face->hair_color.plugin, face->hair_color.local_id,
+                c ? c->editor_id.c_str() : "");
+    if (c) std::printf(" rgba=%u,%u,%u,%u", c->rgba[0], c->rgba[1], c->rgba[2], c->rgba[3]);
+    std::printf("\n");
+  }
+  if (face->face_texture_set.plugin != 0xffff)
+    std::printf("  FTST face texture set %04x:%06x\n", face->face_texture_set.plugin,
+                face->face_texture_set.local_id);
+  if (!face->tint_layers.empty()) {
+    std::printf("  tint layers (%zu):\n", static_cast<size_t>(face->tint_layers.size()));
+    for (const NpcTintLayer& t : face->tint_layers)
+      std::printf("    index=%u rgba=%u,%u,%u,%u alpha=%u preset=%d\n", t.index, t.color[0],
+                  t.color[1], t.color[2], t.color[3], t.interpolation, t.preset);
+  }
+  return 0;
+}
+
+// Parses a .tri morph file from the vfs and lists its vertex count and named
+// morphs (+ scale and delta count). esminfo <data-dir> tri <vfs-path>.
+int DumpTri(const std::string& data_dir, const std::string& path) {
+  rec::asset::Vfs vfs;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(data_dir, ec))
+    if (auto p = OpenArchive(entry.path().string())) vfs.Mount(std::move(p));
+  vfs.Mount(rec::asset::MakeLooseFileProvider(data_dir));
+
+  auto bytes = vfs.Read(path);
+  if (!bytes) {
+    std::printf("not in vfs: %s\n", path.c_str());
+    return 1;
+  }
+  std::optional<TriMorphSet> tri = ParseTri(rec::ByteSpan(bytes->data(), bytes->size()));
+  if (!tri) {
+    std::printf("not a valid FRTRI003 file: %s\n", path.c_str());
+    return 1;
+  }
+  std::printf("%s\n  %u vertices, %zu morphs, %zu modifiers\n", path.c_str(), tri->vertex_count,
+              static_cast<size_t>(tri->morphs.size()), static_cast<size_t>(tri->modifiers.size()));
+  for (const TriMorph& m : tri->morphs)
+    std::printf("  %-24s scale=%.6g deltas=%zu\n", m.name.c_str(), m.scale,
+                static_cast<size_t>(m.deltas.size()));
+  return 0;
+}
+
 }  // namespace
 
 // Dumps header info and record counts of a plugin. Handy for checking the
@@ -660,6 +829,15 @@ int main(int argc, char** argv) {
 
   if (argc >= 3 && std::string(argv[2]) == "lgtm")
     return DumpLightingTemplates(argv[1], argc >= 4 ? std::stoi(argv[3]) : 0);
+
+  if (argc >= 3 && std::string(argv[2]) == "hdpt")
+    return DumpHeadParts(argv[1], argc >= 4 ? std::stoi(argv[3]) : 0);
+
+  if (argc >= 4 && std::string(argv[2]) == "npcface")
+    return DumpNpcFace(argv[1], argv[3]);
+
+  if (argc >= 4 && std::string(argv[2]) == "tri")
+    return DumpTri(argv[1], argv[3]);
 
   if (argc >= 4 && std::string(argv[2]) == "dump")
     return DumpType(argv[1], argv[3], argc >= 5 ? std::stoi(argv[4]) : 0);
