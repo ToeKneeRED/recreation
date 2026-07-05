@@ -55,7 +55,7 @@ void BloomPass::Destroy(Device& device) {
 }
 
 ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u32 width,
-                                     u32 height) {
+                                     u32 height, ResourceHandle* flare_src) {
   ResourceHandle mips[kMips];
   u32 widths[kMips];
   u32 heights[kMips];
@@ -101,6 +101,29 @@ ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u
           dispatch(ctx, down_pipeline_, dst, src, dst_width, dst_height, src_width, src_height,
                    first);
         });
+  }
+
+  // Tent-filtered snapshot of the 1/4-res mip for the lens flare, before the
+  // up chain accumulates the wider mips into it (`first` = the up shader's
+  // replace flag, so this writes a fresh copy rather than blending).
+  if (flare_src) {
+    ResourceHandle flare = graph.CreateTexture({.name = "flare_src",
+                                                .format = Format::kRGBA16Float,
+                                                .width = widths[1],
+                                                .height = heights[1]});
+    graph.AddPass(
+        "flare_src",
+        [&](RenderGraph::PassBuilder& builder) {
+          builder.Read(mips[1], ResourceUsage::kSampledCompute);
+          builder.Write(flare, ResourceUsage::kStorageWrite);
+        },
+        [this, dispatch, src = mips[1], flare, dst_width = widths[1], dst_height = heights[1],
+         src_width = static_cast<f32>(widths[1]),
+         src_height = static_cast<f32>(heights[1])](PassContext& ctx) {
+          dispatch(ctx, up_pipeline_, flare, src, dst_width, dst_height, src_width, src_height,
+                   true);
+        });
+    *flare_src = flare;
   }
 
   for (u32 i = kMips - 1; i > 0; --i) {

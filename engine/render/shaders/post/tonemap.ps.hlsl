@@ -6,6 +6,10 @@
 [[vk::binding(2, 0)]] StructuredBuffer<float> exposure_buffer : register(t2, space0);  // [0] resolved exposure
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D color_lut : register(t3, space0);  // 1024x32 strip lut
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState color_lut_sampler : register(s3, space0);
+// Tight 1/4-res highlight snapshot off the bloom down chain (pre up-chain
+// widening); the lens-flare ghosts sample this, not the wide final bloom.
+[[vk::combinedImageSampler]] [[vk::binding(4, 0)]] Texture2D flare_src : register(t4, space0);
+[[vk::combinedImageSampler]] [[vk::binding(4, 0)]] SamplerState flare_src_sampler : register(s4, space0);
 
 struct PushData {
   uint tonemap;  // 0 aces, 1 reinhard, 2 none, 3 agx
@@ -128,7 +132,13 @@ float4 main(float4 sv_position : SV_Position,
   if (push.flare_intensity > 0.0) {
     // Ghosts: bright sources mirrored through the lens center at a few
     // characteristic scales, tinted cooler with distance; plus a halo ring.
-    // The bloom chain is already a clean prefiltered source.
+    // Sampled from the tight flare_src snapshot (the wide final bloom smears
+    // every ghost into a screen-filling halo), and highpassed so only the
+    // excess above display white flares: the source is threshold-free, so raw
+    // it mirrors the whole scene back as a milky wash. The threshold is in
+    // pre-exposure space, scaled by the resolved exposure so it tracks
+    // auto-exposure.
+    float flare_thresh = 1.0 / max(exposure_buffer[0], 1e-4);
     float2 flipped = 1.0 - uv;
     float3 ghosts = 0.0.xxx;
     const float scales[4] = {-0.35, -0.65, 0.4, 0.8};
@@ -137,15 +147,19 @@ float4 main(float4 sv_position : SV_Position,
     for (int g = 0; g < 4; ++g) {
       float2 guv = 0.5 + (flipped - 0.5) * scales[g];
       float edge_fade = saturate(1.0 - 2.2 * length(guv - 0.5));
-      ghosts += bloom.Sample(bloom_sampler, guv).rgb * weights[g] * edge_fade;
+      float3 hot = max(flare_src.Sample(flare_src_sampler, guv).rgb - flare_thresh, 0.0);
+      ghosts += hot * weights[g] * edge_fade;
     }
     float2 from_center = uv - 0.5;
     float halo_r = length(from_center);
     float2 halo_uv = 0.5 + normalize(from_center + 1e-5) * 0.45;
     float halo_w = exp(-abs(halo_r - 0.42) * 18.0);
-    ghosts += bloom.Sample(bloom_sampler, halo_uv).rgb * halo_w * 0.4;
-    // Cool tint keeps the ghosts reading as glass, not fog.
-    hdr += ghosts * float3(0.7, 0.85, 1.0) * push.flare_intensity;
+    ghosts +=
+        max(flare_src.Sample(flare_src_sampler, halo_uv).rgb - flare_thresh, 0.0) * halo_w * 0.4;
+    // Soft-clip so a blown-out source (the 220x sun disk) cannot dump unbounded
+    // energy back onto the frame; cool tint keeps the ghosts reading as glass.
+    ghosts = ghosts / (1.0 + ghosts);
+    hdr += ghosts * float3(0.7, 0.85, 1.0) * (push.flare_intensity * 8.0);
   }
   hdr *= exposure_buffer[0];
 

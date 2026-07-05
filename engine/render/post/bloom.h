@@ -19,8 +19,13 @@ class BloomPass {
   void Destroy(Device& device);
 
   // Builds the chain off `input` (output resolution hdr) and returns the
-  // full resolution bloom texture.
-  ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle input, u32 width, u32 height);
+  // full resolution bloom texture. If `flare_src` is non-null it receives a
+  // snapshot of the 1/4-res down-chain mip, taken before the up chain widens
+  // it in place: a tight prefiltered highlight source for the lens-flare
+  // ghosts (ghosts sampled from the final wide bloom smear into a screen-wide
+  // halo).
+  ResourceHandle AddToGraph(RenderGraph& graph, ResourceHandle input, u32 width, u32 height,
+                            ResourceHandle* flare_src = nullptr);
 
  private:
   SamplerHandle sampler_;

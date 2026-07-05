@@ -28,7 +28,8 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, Format output_format)
       .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kCombinedTextureSampler}},  // grading strip lut
+                          {3, BindingType::kCombinedTextureSampler},  // grading strip lut
+                          {4, BindingType::kCombinedTextureSampler}},  // tight flare source
                 .stages = kShaderStageFragment}},
       .push_constant_size = sizeof(Params),
       .debug_name = "post_tonemap",
@@ -249,7 +250,7 @@ PostPass::~PostPass() {
   device_.DestroyImage(lut_);
 }
 
-void PostPass::Record(PassContext& ctx, TextureView input, TextureView bloom,
+void PostPass::Record(PassContext& ctx, TextureView input, TextureView bloom, TextureView flare,
                       const GpuBuffer& exposure, u64 exposure_size, TextureView output,
                       Extent2D output_extent, const Params& params) {
   ColorAttachment color{.view = output, .load = LoadOp::kDontCare,  // fully overwritten
@@ -259,7 +260,8 @@ void PostPass::Record(PassContext& ctx, TextureView input, TextureView bloom,
   ctx.cmd->BindTransient(0, {Bind::Combined(0, input, sampler_),
                              Bind::Combined(1, bloom, sampler_),
                              Bind::StorageBuffer(2, exposure, 0, exposure_size),
-                             Bind::Combined(3, lut_.view, sampler_)});
+                             Bind::Combined(3, lut_.view, sampler_),
+                             Bind::Combined(4, flare, sampler_)});
   ctx.cmd->Push(params);
   ctx.cmd->Draw(3);
   ctx.cmd->EndRendering();

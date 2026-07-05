@@ -3179,8 +3179,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   exposure_.AddToGraph(graph_, post_input, post_width, post_height, view.frame_delta_seconds);
   ResourceHandle bloom = kInvalidResource;
+  ResourceHandle flare_src = kInvalidResource;
   if (settings_.bloom) {
-    bloom = bloom_.AddToGraph(graph_, post_input, post_width, post_height);
+    bloom = bloom_.AddToGraph(graph_, post_input, post_width, post_height,
+                              settings_.lens_flare > 0.0f ? &flare_src : nullptr);
   }
 
   ResourceHandle backbuffer = graph_.ImportBackbuffer(swapchain_->image(image_index));
@@ -3198,7 +3200,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     post_params.output_transfer = static_cast<u32>(forced);
   }
   post_params.paper_white = settings_.hdr_paper_white;
-  post_params.flare_intensity = settings_.lens_flare;
+  // Flare needs its prefiltered highlight source from the bloom chain; without
+  // bloom the ghosts would mirror the raw scene.
+  post_params.flare_intensity = flare_src != kInvalidResource ? settings_.lens_flare : 0.0f;
   post_params.aberration = settings_.chromatic_aberration;
   post_params.vignette = settings_.vignette;
   post_params.grain = settings_.film_grain;
@@ -3208,12 +3212,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       [&](RenderGraph::PassBuilder& builder) {
         builder.Read(post_input, ResourceUsage::kSampledFragment);
         if (bloom != kInvalidResource) builder.Read(bloom, ResourceUsage::kSampledFragment);
+        if (flare_src != kInvalidResource)
+          builder.Read(flare_src, ResourceUsage::kSampledFragment);
         builder.Write(backbuffer, ResourceUsage::kColorAttachment);
       },
-      [this, post_input, bloom, backbuffer, post_params](PassContext& ctx) {
+      [this, post_input, bloom, flare_src, backbuffer, post_params](PassContext& ctx) {
         TextureView bloom_view = bloom != kInvalidResource ? ctx.graph->image(bloom).view
                                                            : ctx.graph->image(post_input).view;
-        post_->Record(ctx, ctx.graph->image(post_input).view, bloom_view,
+        TextureView flare_view = flare_src != kInvalidResource ? ctx.graph->image(flare_src).view
+                                                               : bloom_view;
+        post_->Record(ctx, ctx.graph->image(post_input).view, bloom_view, flare_view,
                       exposure_.exposure_buffer(), exposure_.exposure_buffer_size(),
                       ctx.graph->image(backbuffer).view, ctx.graph->image(backbuffer).extent,
                       post_params);

@@ -51,10 +51,13 @@ class PostPass {
   // false (and keeps the current lut) on a parse or read error.
   bool LoadCubeLut(const std::string& path);
 
-  // bloom may be the input view when bloom is off (still bound, not read).
-  void Record(PassContext& ctx, TextureView input, TextureView bloom, const GpuBuffer& exposure,
-              u64 exposure_size, TextureView output, Extent2D output_extent,
-              const Params& params);
+  // bloom/flare may be the input view when bloom is off (still bound, not
+  // read; flare_intensity is zeroed alongside). `flare` is the tight 1/4-res
+  // highlight snapshot from the bloom down chain that the ghost/halo sampling
+  // reads.
+  void Record(PassContext& ctx, TextureView input, TextureView bloom, TextureView flare,
+              const GpuBuffer& exposure, u64 exposure_size, TextureView output,
+              Extent2D output_extent, const Params& params);
 
  private:
   explicit PostPass(Device& device) : device_(device) {}

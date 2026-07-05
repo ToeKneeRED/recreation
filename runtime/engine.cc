@@ -246,6 +246,8 @@ void Engine::ApplyRenderPreset() {
   // re-drives these per frame; this keeps them working in the demo/glTF scenes.
   tuned.fog = env.fog;  // honor REC_FOG over the preset (fog params are defaults)
   tuned.motion_blur = env.motion_blur;  // honor REC_MOTION_BLUR over the preset
+  tuned.lens_flare = env.lens_flare;    // honor REC_LENS_FLARE over the preset
+  tuned.film_grain = env.film_grain;    // honor REC_FILM_GRAIN over the preset
   tuned.dof = env.dof;
   tuned.dof_focus = env.dof_focus;
   tuned.dof_aperture = env.dof_aperture;
