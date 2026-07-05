@@ -38,6 +38,7 @@ recreation_add_module(render
   gi/restir_di.cc
   texturing/virtual_texture.cc
   pipeline/virtual_geometry.cc
+  geometry/hair_groom.cc
   geometry/hair_strands.cc
   geometry/ocean_fft.cc
   geometry/imposters.cc

@@ -801,6 +801,32 @@ void Renderer::SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 str
   hair_.SeedCap(*device_, head_center, head_radius, strands, length);
 }
 
+u32 Renderer::CreateHairGroom(const asset::Mesh& hair_mesh, const GroomParams& params,
+                              const Mat4& transform) {
+  if (!device_ || device_->is_stub()) return 0;
+  GroomData data;
+  if (!BuildHairGroom(hair_mesh, params, &data)) {
+    REC_WARN("hair groom build failed for mesh");
+    return 0;
+  }
+  return hair_.CreateGroom(*device_, data, params, transform);
+}
+
+void Renderer::SetHairGroomTransform(u32 id, const Mat4& transform) {
+  hair_.SetGroomTransform(id, transform);
+}
+
+void Renderer::SetHairGroomTint(u32 id, const Vec3& tint) { hair_.SetGroomTint(id, tint); }
+
+void Renderer::DestroyHairGroom(u32 id) {
+  if (!device_ || device_->is_stub()) return;
+  hair_.DestroyGroom(*device_, id);
+}
+
+bool Renderer::HairGroomHead(u32 id, Vec3* center, f32* radius) {
+  return hair_.GroomHead(id, center, radius);
+}
+
 void Renderer::BakeImposter(const asset::Mesh& mesh,
                             std::span<const ImposterPass::Instance> instances) {
   if (!device_ || device_->is_stub()) return;

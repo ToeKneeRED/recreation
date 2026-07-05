@@ -189,6 +189,16 @@ class Renderer {
   void UploadVirtualGeometryMesh(const asset::Mesh& mesh);
   // Seeds simulated hair strands on a head sphere (--demo strands).
   void SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands, f32 length);
+  // Builds simulated guide strands from a real hair mesh and places the groom
+  // via `transform` (later: a head bone). Returns a handle (0 = failure). The
+  // groom-local frame has the scalp at the origin, engine units, Y-up.
+  u32 CreateHairGroom(const asset::Mesh& hair_mesh, const GroomParams& params,
+                      const Mat4& transform);
+  void SetHairGroomTransform(u32 id, const Mat4& transform);
+  void SetHairGroomTint(u32 id, const Vec3& tint);
+  void DestroyHairGroom(u32 id);
+  // World-space head collision sphere of a groom, for aligning a head mesh.
+  bool HairGroomHead(u32 id, Vec3* center, f32* radius);
   // Bakes an octahedral imposter of the mesh and sets the distant instances
   // drawn as billboards (--demo imposters).
   void BakeImposter(const asset::Mesh& mesh, std::span<const ImposterPass::Instance> instances);
