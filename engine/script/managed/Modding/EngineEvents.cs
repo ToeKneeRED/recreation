@@ -18,6 +18,9 @@ public static class EngineEvents
             case ManagedEventId.ItemAdded:
                 EventBus.Publish(new ItemAdded(e.A, e.B, e.I));
                 break;
+            case ManagedEventId.ItemRemoved:
+                EventBus.Publish(new ItemRemoved(e.A, e.B, e.I));
+                break;
             case ManagedEventId.QuestStageChanged:
                 EventBus.Publish(new QuestStageChanged(e.A, e.I));
                 break;

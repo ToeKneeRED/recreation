@@ -43,6 +43,17 @@ public readonly struct ItemAdded(ulong containerHandle, ulong itemHandle, int co
     public Form Item => Form.From(ItemHandle);
 }
 
+// Raised when items leave a container's inventory (dropped, used, sold, moved).
+public readonly struct ItemRemoved(ulong containerHandle, ulong itemHandle, int count) : IGameEvent
+{
+    public ulong ContainerHandle { get; } = containerHandle;
+    public ulong ItemHandle { get; } = itemHandle;
+    public int Count { get; } = count;
+
+    public ObjectReference Container => ObjectReference.From(ContainerHandle);
+    public Form Item => Form.From(ItemHandle);
+}
+
 // Raised when a form goes live in the world (its scripts attach as it streams
 // in). The hook a mod uses to attach its own behaviour to matching forms, the
 // analog of gmod's OnEntityCreated.
