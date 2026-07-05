@@ -3,9 +3,13 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 
 #include "core/log.h"
 #include "core/window.h"
+#if defined(RECREATION_HAS_WAYLAND_KDE_HDR)
+#include "core/wayland_kde_hdr.h"
+#endif
 
 namespace rec {
 namespace {
@@ -240,10 +244,20 @@ class Sdl3Window final : public Window {
   }
 
   bool hdr_enabled() const override {
-    // SDL tracks the live compositor state per window (DXGI advanced color on
-    // Windows, wp_color_management on Wayland, EDR on macOS) and updates it on
-    // SDL_EVENT_WINDOW_HDR_STATE_CHANGED. False on X11 and on HDR-capable
-    // displays whose system toggle is off.
+#if defined(RECREATION_HAS_WAYLAND_KDE_HDR)
+    // On KWin the authoritative signal is the kde_output_device_v2 HDR toggle:
+    // SDL's property is luminance-headroom-derived, and KWin reports headroom
+    // > 1 even for SDR outputs (brightness-dimmed panels), so it reads true
+    // with system HDR off. Lazy: only probed once, null off-KDE.
+    if (!kde_hdr_checked_) {
+      kde_hdr_checked_ = true;
+      kde_hdr_ = KdeOutputHdrMonitor::Create();
+    }
+    if (kde_hdr_) return kde_hdr_->AnyHdrEnabled();
+#endif
+    // Elsewhere SDL's per-window state is trustworthy (DXGI advanced color on
+    // Windows, EDR on macOS; false on X11), updated on
+    // SDL_EVENT_WINDOW_HDR_STATE_CHANGED.
     return SDL_GetBooleanProperty(SDL_GetWindowProperties(window_),
                                   SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
   }
@@ -323,6 +337,11 @@ class Sdl3Window final : public Window {
   SDL_Window* window_;
   SDL_Gamepad* pad_ = nullptr;
   SDL_JoystickID pad_id_ = 0;
+#if defined(RECREATION_HAS_WAYLAND_KDE_HDR)
+  // Lazily created by hdr_enabled() (a const query), hence mutable.
+  mutable bool kde_hdr_checked_ = false;
+  mutable std::unique_ptr<KdeOutputHdrMonitor> kde_hdr_;
+#endif
 };
 
 }  // namespace

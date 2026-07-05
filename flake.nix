@@ -96,7 +96,9 @@
           nativeBuildInputs = with pkgs; [ cmake ninja directx-shader-compiler pkg-config ];
           # ffmpeg supplies libav* for the compressed game audio codecs (xWMA,
           # Wwise, the WMA inside FUZ voice files), enabled below.
-          buildInputs = with pkgs; [ sdl3 openssl freetype harfbuzz ffmpeg ];
+          # wayland: libwayland-client for the KDE HDR-toggle monitor (linux).
+          buildInputs = with pkgs; [ sdl3 openssl freetype harfbuzz ffmpeg ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.wayland ];
 
           cmakeFlags = fetchContentFlags ++ [
             "-DRECREATION_ZETANET_DIR=${zetanet-src}"
@@ -207,6 +209,7 @@
               glib                     # harfbuzz.pc requires glib-2.0
               fontconfig               # fc-match for the hud font
               sdl3
+              wayland                  # libwayland-client, KDE HDR-toggle monitor
               ffmpeg                   # libav* for compressed audio (xWMA/Wwise/FUZ)
               openssl  # zetanet crypto backend
               dotnet-sdk_9             # .net core clr host + managed build
