@@ -97,6 +97,11 @@ class DemoScenes {
   // pointers into it) and one editable FaceState per assembled head.
   std::unique_ptr<FaceBuilder> face_builder_;
   std::vector<FaceState> faces_;
+
+  base::Vector<u32> hair_grooms_;      // strand-hair demo groom handles
+  u32 hair_orbit_groom_ = 0;           // the groom driven on a slow orbit
+  Vec3 hair_orbit_center_{0, 0, 0};
+  f32 hair_time_ = 0;
 };
 
 }  // namespace rec
