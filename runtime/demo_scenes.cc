@@ -34,6 +34,10 @@ static base::Option<const char*> Mtlx{"mtlx", nullptr, "REC_MTLX"};
 static base::Option<const char*> HairData{
     "hair.data", "/speed/SteamLibrary/steamapps/common/Skyrim Special Edition/Data",
     "REC_HAIR_DATA"};
+// Faces-demo camera: 0 = the full six-head lineup, 1 = a 3/4 portrait of the
+// first head (head ~60% of frame), 2 = a straight-on pair (Nazeem + Ysolda).
+static base::Option<int> FaceShot{"faces.shot", 0, "REC_FACE_SHOT",
+                                  "faces demo camera: 0 lineup, 1 hero 3/4, 2 front pair"};
 
 DemoScenes::DemoScenes(EngineContext& ctx, ActorSystem* actors)
     : ctx_(ctx),
@@ -1312,14 +1316,23 @@ void DemoScenes::CreateFacesDemoScene() {
           }
           const f32* hc = built_face.hair_color();
           render::GroomParams params;
-          params.recenter = false;
+          params.recenter = true;  // scalp -> groom origin; anchored on the head below
           params.tint = {hc[0], hc[1], hc[2]};
           params.diffuse = diffuse;
-          params.guide_count = 7000;
-          params.children_per_guide = 18;
-          params.strand_width = 0.0013f;
+          params.guide_count = 9000;
+          params.children_per_guide = 26;
+          params.strand_width = 0.0015f;
           params.clump_radius = 0.005f;
-          u32 id = renderer_.CreateHairGroom(*conv.mesh, params, MakeTranslation({x, 0.0f, 0.0f}));
+          params.frizz = 0.22f;  // groomed, not the demo's wind-blown fuzzball
+          // Standalone hair NIFs are authored head-local at the origin, but the
+          // facegen face part carries the body-height offset, so drop the groom
+          // onto the face's crown (bounds centre + up*radius in game units, then
+          // the same Rx(-90)*scale placement the head parts use).
+          const f32* fc = built_face.head_center();
+          const f32 fr = built_face.head_radius();
+          const f32 s = 0.01428f;
+          Vec3 crown{x + fc[0] * s, (fc[2] + 0.42f * fr) * s, -fc[1] * s};
+          u32 id = renderer_.CreateHairGroom(*conv.mesh, params, MakeTranslation(crown));
           if (id) hair_grooms_.push_back(id);
         }
       }
@@ -1339,9 +1352,30 @@ void DemoScenes::CreateFacesDemoScene() {
   renderer_.settings().ambient = 0.35f;
   renderer_.settings().dof = false;
 
-  camera_.set_position({0.0f, 1.63f, -2.35f});
-  camera_.set_yaw_pitch(3.14159f, -0.01f);
   camera_.speed = 1.5f;
+  // Look-at from the fly-camera forward convention (see camera_input.cc).
+  auto look_at = [&](Vec3 eye, Vec3 target) {
+    Vec3 d = Normalize(target - eye);
+    camera_.set_position(eye);
+    camera_.set_yaw_pitch(std::atan2(d.x, -d.z), std::asin(std::clamp(d.y, -1.0f, 1.0f)));
+  };
+  const f32 head_y = 1.72f;  // face centre floats here; necks hang below
+  switch (FaceShot.get()) {
+    case 1: {  // 3/4 hero portrait of the first head (Balgruuf), head ~60% tall
+      const f32 hx = x0;  // first head's x
+      look_at({hx + 0.13f, head_y + 0.02f, -0.37f}, {hx, head_y - 0.03f, 0.02f});
+      break;
+    }
+    case 2: {  // straight-on pair: Nazeem (idx 4) + Ysolda (idx 5)
+      const f32 cx = x0 + spacing * 4.5f;
+      look_at({cx, head_y, -0.60f}, {cx, head_y - 0.02f, 0.0f});
+      break;
+    }
+    default:  // the full six-head lineup
+      camera_.set_position({0.0f, head_y, -2.35f});
+      camera_.set_yaw_pitch(3.14159f, -0.02f);
+      break;
+  }
 }
 
 void DemoScenes::CreateFireDemoScene() {
