@@ -35,6 +35,10 @@ static base::Option<const char*> AnimClipPathB{"anim.clip_b", nullptr, "REC_ANIM
 // REC_ANIM_ADDITIVE=<internal .hkx path>: an additive clip layered on top of the
 // base pose each tick over its own mapped bones. Kinema-only.
 static base::Option<const char*> AnimAdditivePath{"anim.additive", nullptr, "REC_ANIM_ADDITIVE"};
+// REC_PIN_ROOT=1 discards a clip's root-motion translation so a locomotion clip
+// (e.g. a walk cycle) marches in place instead of striding out of frame. Handy
+// for demos/screenshots of the pose.
+static base::Option<bool> PinRoot{"anim.pin_root", false, "REC_PIN_ROOT"};
 static base::Option<bool> Player{"player", false, "REC_PLAYER"};
 // Strand hair on actors: build a simulated groom from the NPC's hair nif and ride
 // it on the head bone. Off falls back to the flat card the hair part uploads.
@@ -1010,7 +1014,7 @@ void ActorSystem::UpdateOneActor(Actor& actor, f32 dt) {
     // Root motion: the sidecar's cumulative offsets become a per-tick world
     // delta, through the same Z-up-game-units -> Y-up-metres basis the mesh
     // uses, then the actor's facing.
-    if (clip.has_motion) {
+    if (clip.has_motion && !PinRoot) {
       Vec3 d;
       if (kin) {
         kinema::Vec3 kd = clip.kinema->RootDelta(prev_time, actor.havok_time);

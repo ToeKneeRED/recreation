@@ -408,12 +408,22 @@ class Renderer {
   Vec3 applied_sun_color_{};
   bool environment_dirty_ = true;
 
+  void WriteBackbufferPng(const std::string& path, u32 image_index);
   void WriteScreenshot(u32 image_index);
   void DumpFgImage(const GpuImage& image, ResourceState state, bool bgra, const char* path);
   void WriteHdr();  // reads back the captured linear hdr buffer to a .hdr file
 
   std::string screenshot_path_;
   f64 screenshot_at_ = -1;  // seconds; <0 means immediately when armed
+
+  // Frame-burst capture (REC_SEQ=prefix:startsec:count[:stride]) for stitching
+  // an animation clip from the inbuilt framebuffer capture.
+  std::string seq_prefix_;
+  f64 seq_at_ = -1;
+  int seq_count_ = 0;
+  int seq_written_ = 0;
+  int seq_stride_ = 1;
+  int seq_frame_ctr_ = 0;
 
   // Linear-hdr frame export (radiance .hdr). REC_HDR=<path>[:seconds].
   std::string hdr_path_;

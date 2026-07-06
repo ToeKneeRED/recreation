@@ -28,6 +28,11 @@ namespace {
 // ColorGrade options take an Opt suffix to avoid shadowing the enums of the same
 // name used in the casts below.
 base::Option<const char*> Screenshot{"screenshot", nullptr, "REC_SCREENSHOT"};
+// REC_SEQ=prefix:startsec:count[:stride] dumps a burst of `count` composited
+// frames (every `stride`-th presented frame, default 1) starting at startsec,
+// named prefix_0000.png ... for stitching into a clip. Inbuilt framebuffer
+// capture, same path as the single screenshot.
+base::Option<const char*> Sequence{"screenshot.seq", nullptr, "REC_SEQ"};
 base::Option<const char*> Hdr{"hdr", nullptr, "REC_HDR"};
 base::Option<bool> HdrOutput{"hdr.output", false, "REC_HDR_OUTPUT"};
 base::Option<bool> MotionBlurOpt{"motion.blur", true, "REC_MOTION_BLUR"};
@@ -445,6 +450,27 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     screenshot_path_ = value;
   }
 
+  // REC_SEQ=prefix:startsec:count[:stride] dumps a burst of composited frames.
+  if (const char* spec = Sequence.get()) {
+    std::string value = spec;
+    base::Vector<std::string> fields;
+    size_t start = 0;
+    for (size_t i = 0; i <= value.size(); ++i) {
+      if (i == value.size() || value[i] == ':') {
+        fields.push_back(value.substr(start, i - start));
+        start = i + 1;
+      }
+    }
+    if (fields.size() >= 3) {
+      seq_prefix_ = fields[0];
+      seq_at_ = std::atof(fields[1].c_str());
+      seq_count_ = std::atoi(fields[2].c_str());
+      seq_stride_ = fields.size() >= 4 ? std::max(1, std::atoi(fields[3].c_str())) : 1;
+    } else {
+      REC_WARN("REC_SEQ ignored, expected prefix:startsec:count[:stride], got '{}'", spec);
+    }
+  }
+
   // REC_HDR=/tmp/frame.hdr:12 exports the linear-hdr frame (radiance rgbe) at t=12s.
   if (const char* spec = Hdr.get()) {
     std::string value = spec;
@@ -613,7 +639,7 @@ void Renderer::DumpFgImage(const GpuImage& image, ResourceState state, bool bgra
   }
 }
 
-void Renderer::WriteScreenshot(u32 image_index) {
+void Renderer::WriteBackbufferPng(const std::string& path, u32 image_index) {
   device_->WaitIdle();
   Extent2D extent = swapchain_->extent();
   u64 size = static_cast<u64>(extent.width) * extent.height * 4;
@@ -636,13 +662,17 @@ void Renderer::WriteScreenshot(u32 image_index) {
     pixels[i * 3 + 2] = src[i * 4 + 0];
   }
   device_->DestroyBuffer(staging);
-  if (stbi_write_png(screenshot_path_.c_str(), static_cast<int>(extent.width),
+  if (stbi_write_png(path.c_str(), static_cast<int>(extent.width),
                      static_cast<int>(extent.height), 3, pixels.data(),
                      static_cast<int>(extent.width) * 3)) {
-    REC_INFO("screenshot written: {}", screenshot_path_);
+    REC_INFO("screenshot written: {}", path);
   } else {
-    REC_WARN("screenshot write failed: {}", screenshot_path_);
+    REC_WARN("screenshot write failed: {}", path);
   }
+}
+
+void Renderer::WriteScreenshot(u32 image_index) {
+  WriteBackbufferPng(screenshot_path_, image_index);
   screenshot_path_.clear();
 }
 
@@ -1259,6 +1289,15 @@ void Renderer::RenderFrame(const FrameView& view) {
 
   if (!screenshot_path_.empty() && time_seconds_ >= screenshot_at_) {
     WriteScreenshot(image_index);
+  }
+  if (!seq_prefix_.empty() && seq_written_ < seq_count_ && time_seconds_ >= seq_at_) {
+    if (seq_frame_ctr_ % seq_stride_ == 0) {
+      char path[512];
+      std::snprintf(path, sizeof(path), "%s_%04d.png", seq_prefix_.c_str(), seq_written_);
+      WriteBackbufferPng(path, image_index);
+      ++seq_written_;
+    }
+    ++seq_frame_ctr_;
   }
   if (hdr_pending_) {
     WriteHdr();
