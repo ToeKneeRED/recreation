@@ -21,6 +21,7 @@
 #include "asset/vfs.h"
 #include "bethesda/archive.h"
 #include "bethesda/hkx.h"
+#include "bethesda/hkx_physics.h"
 
 namespace {
 
@@ -142,6 +143,71 @@ int main(int argc, char** argv) {
         count = std::strtoull(args[++i].c_str(), nullptr, 0);
       }
       PrintHex(*hkx, offset, count);
+    } else if (args[i] == "--skeleton") {
+      auto physics = rec::bethesda::DecodePhysics(*hkx);
+      for (const auto& skeleton : physics.skeletons) {
+        std::printf("skeleton '%s': %zu bones\n", skeleton.name.c_str(), skeleton.bones.size());
+        for (size_t b = 0; b < skeleton.bones.size(); ++b) {
+          const auto& bone = skeleton.bones[b];
+          std::printf("  [%3zu] parent %3d  t(%7.2f %7.2f %7.2f)  %s\n", b, bone.parent,
+                      bone.translation.x, bone.translation.y, bone.translation.z,
+                      bone.name.c_str());
+        }
+      }
+    } else if (args[i] == "--physics") {
+      auto physics = rec::bethesda::DecodePhysics(*hkx);
+      std::printf("%zu bodies, %zu constraints%s\n", physics.bodies.size(),
+                  physics.constraints.size(), physics.ragdoll ? ", ragdoll" : "");
+      auto shape_desc = [](const rec::bethesda::HkxShape& s) {
+        char buf[160];
+        switch (s.kind) {
+          case rec::bethesda::HkxShape::Kind::kCapsule:
+            std::snprintf(buf, sizeof(buf), "capsule r=%.2f a(%.1f %.1f %.1f) b(%.1f %.1f %.1f)",
+                          s.radius, s.a.x, s.a.y, s.a.z, s.b.x, s.b.y, s.b.z);
+            break;
+          case rec::bethesda::HkxShape::Kind::kSphere:
+            std::snprintf(buf, sizeof(buf), "sphere r=%.2f", s.radius);
+            break;
+          case rec::bethesda::HkxShape::Kind::kBox:
+            std::snprintf(buf, sizeof(buf), "box (%.2f %.2f %.2f)", s.half_extents.x,
+                          s.half_extents.y, s.half_extents.z);
+            break;
+          case rec::bethesda::HkxShape::Kind::kConvexVertices:
+            std::snprintf(buf, sizeof(buf), "convex %zu verts", s.vertices.size());
+            break;
+          case rec::bethesda::HkxShape::Kind::kList:
+            std::snprintf(buf, sizeof(buf), "list of %zu", s.children.size());
+            break;
+          case rec::bethesda::HkxShape::Kind::kTransform:
+            std::snprintf(buf, sizeof(buf), "transform of %zu", s.children.size());
+            break;
+          default:
+            std::snprintf(buf, sizeof(buf), "unknown(%s)", s.class_name.c_str());
+        }
+        return std::string(buf);
+      };
+      for (size_t b = 0; b < physics.bodies.size(); ++b) {
+        const auto& body = physics.bodies[b];
+        std::printf("  body[%2zu] '%s' motion %u mass %.2f fric %.2f pos(%.1f %.1f %.1f) %s\n",
+                    b, body.name.c_str(), body.motion_type, body.mass, body.friction,
+                    body.position.x, body.position.y, body.position.z,
+                    shape_desc(body.shape).c_str());
+      }
+      constexpr double kRad2Deg = 57.29577951;
+      for (const auto& c : physics.constraints) {
+        if (c.kind == rec::bethesda::HkxConstraint::Kind::kRagdoll) {
+          std::printf(
+              "  ragdoll '%s' %d<->%d twist[%.0f..%.0f] cone %.0f plane[%.0f..%.0f] deg\n",
+              c.name.c_str(), c.body_a, c.body_b, c.twist_min * kRad2Deg,
+              c.twist_max * kRad2Deg, c.cone_max * kRad2Deg, c.plane_min * kRad2Deg,
+              c.plane_max * kRad2Deg);
+        } else if (c.kind == rec::bethesda::HkxConstraint::Kind::kLimitedHinge) {
+          std::printf("  hinge   '%s' %d<->%d angle[%.0f..%.0f] deg\n", c.name.c_str(),
+                      c.body_a, c.body_b, c.hinge_min * kRad2Deg, c.hinge_max * kRad2Deg);
+        } else {
+          std::printf("  other   '%s' %d<->%d\n", c.name.c_str(), c.body_a, c.body_b);
+        }
+      }
     } else if (args[i] == "--sections") {
       // Header line above already covers the summary.
     } else {

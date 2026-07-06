@@ -11,6 +11,7 @@ recreation_add_module(bethesda
   ba2.cc
   nif.cc
   hkx.cc
+  hkx_physics.cc
   starfield_mesh.cc
   material_db.cc
   converters.cc
