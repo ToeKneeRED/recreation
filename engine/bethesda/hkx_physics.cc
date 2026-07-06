@@ -41,9 +41,15 @@ constexpr u64 kConvexRotatedVerts = 0x50;  // hkArray<hkFourTransposedPoints>
 constexpr u64 kConvexNumVerts = 0x60;
 // hkpListShape / hkpTransformShape / hkpMoppBvTreeShape
 constexpr u64 kListChildren = 0x30;     // hkArray<ChildInfo{shape*, u32, u32, u32}> (24B?)
-constexpr u64 kTransformChild = 0x20;   // hkpSingleShapeContainer child
-constexpr u64 kTransformXf = 0x30;      // hkTransform (64B)
-constexpr u64 kMoppChild = 0x28;        // hkpSingleShapeContainer within tree shape
+// hkpConvexTransform/TranslateShape: convex radius +0x20, child shape ptr
+// +0x30, then the placement (full hkTransform / translate float4) at +0x40
+// (verified: dragon wing membranes).
+constexpr u64 kCvxTransformChild = 0x30;
+constexpr u64 kCvxTransformXf = 0x40;
+// hkpMoppBvTreeShape: code* at +0x20, then mopp data blob members; the
+// hkpSingleShapeContainer's shape pointer sits at +0x58 (verified: dragon
+// skeleton wing membranes).
+constexpr u64 kMoppChild = 0x58;
 // hkpConstraintInstance
 constexpr u64 kConstraintData = 0x18;
 constexpr u64 kConstraintEntityA = 0x28;
@@ -121,18 +127,28 @@ HkxShape DecodeShape(const HkxFile& hkx, u64 at, u32 depth) {
     shape.kind = HkxShape::Kind::kList;
     u32 count = 0;
     u64 children = hkx.Array(at + off::kListChildren, &count);
-    // ChildInfo stride: shape*, collisionFilterInfo, shapeSize, numChildShapes.
-    constexpr u64 kChildStride = 24;
+    // ChildInfo: shape*, collisionFilterInfo, shapeSize, numChildShapes +
+    // padding = 32 bytes (verified: dragon skeleton list of 8).
+    constexpr u64 kChildStride = 32;
     for (u32 i = 0; i < count && children != HkxFile::kNull; ++i) {
       u64 child = hkx.Pointer(children + i * kChildStride);
       if (child != HkxFile::kNull) shape.children.push_back(DecodeShape(hkx, child, depth + 1));
     }
-  } else if (cls == "hkpTransformShape" || cls == "hkpConvexTransformShape" ||
-             cls == "hkpConvexTranslateShape") {
+  } else if (cls == "hkpConvexTransformShape" || cls == "hkpConvexTranslateShape") {
     shape.kind = HkxShape::Kind::kTransform;
-    u64 child = hkx.Pointer(at + off::kTransformChild);
+    u64 child = hkx.Pointer(at + off::kCvxTransformChild);
     if (child != HkxFile::kNull) shape.children.push_back(DecodeShape(hkx, child, depth + 1));
-    for (u32 i = 0; i < 16; ++i) shape.transform[i] = hkx.F32(at + off::kTransformXf + i * 4);
+    if (cls == "hkpConvexTransformShape") {
+      // Four float4 columns: basis c0,c1,c2 then the origin.
+      for (u32 i = 0; i < 16; ++i) shape.transform[i] = hkx.F32(at + off::kCvxTransformXf + i * 4);
+    } else {
+      // Translate-only: identity basis + stored offset.
+      shape.transform[0] = shape.transform[5] = shape.transform[10] = 1.0f;
+      for (u32 i = 0; i < 3; ++i) {
+        shape.transform[12 + i] = hkx.F32(at + off::kCvxTransformXf + i * 4);
+      }
+      shape.transform[15] = 1.0f;
+    }
   } else if (cls == "hkpMoppBvTreeShape") {
     // The mopp code is an acceleration structure over its child; Jolt builds
     // its own BVH, so only the child matters.

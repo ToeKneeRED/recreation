@@ -44,7 +44,9 @@ struct HkxShape {
   Vec3 half_extents{};     // box
   std::vector<Vec3> vertices;      // convex hull
   std::vector<HkxShape> children;  // list / transform
-  f32 transform[16] = {};          // kTransform child placement (row basis + trans)
+  // kTransform child placement: four float4 COLUMNS (basis c0, c1, c2,
+  // origin), i.e. havok hkTransform memory order.
+  f32 transform[16] = {};
 };
 
 struct HkxRigidBody {
