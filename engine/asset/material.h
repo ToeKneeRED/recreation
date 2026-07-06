@@ -14,6 +14,11 @@ struct Material {
   AssetId id;
   AssetId base_color;
   AssetId normal;
+  // Model-space normal map (_msn): the map stores the surface normal in the
+  // mesh's object space (Bethesda head/face maps), not a tangent-space delta.
+  // The shader rotates it straight to world by the model matrix instead of
+  // building a TBN; sampling an _msn map as tangent-space smears the lighting.
+  bool normal_model_space = false;
   AssetId metallic_roughness;
   AssetId emissive;
   f32 base_color_factor[4] = {1, 1, 1, 1};

@@ -294,6 +294,7 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
     params.flags |= kFlagTerrain;
   } else if (material.normal && textures_.find(material.normal.hash ^ id_salt)) {
     params.flags |= kFlagHasNormalMap;
+    if (material.normal_model_space) params.flags |= kFlagNormalModelSpace;
   }
   if (material.height && textures_.find(material.height.hash ^ id_salt)) {
     params.flags |= kFlagHasHeightMap;

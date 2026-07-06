@@ -74,6 +74,7 @@ class MaterialSystem {
   static constexpr u32 kFlagEffectGrayColor = 1u << 11;  // remap luminance through the palette
   static constexpr u32 kFlagEffectGrayAlpha = 1u << 12;  // coverage from luminance
   static constexpr u32 kFlagEffectFalloff = 1u << 13;    // view-angle opacity fade
+  static constexpr u32 kFlagNormalModelSpace = 1u << 14;  // _msn object-space normal map
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).

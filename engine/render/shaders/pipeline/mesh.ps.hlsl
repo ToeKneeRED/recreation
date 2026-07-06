@@ -1,6 +1,21 @@
 // Generated alongside mesh_rt.ps.hlsl from one body; the rt variant adds
 // a ray queried shadow toward the sun.
 
+#include "rhi_bindings.hlsli"
+
+// Object->world transform, read only for the model-space (_msn) normal path.
+// Mirrors the vertex MeshPushConstants layout; only `model` is used here (the
+// push range already covers the fragment stage).
+struct MeshPush {
+  column_major float4x4 model;
+  column_major float4x4 prev_model;
+  uint2 pad_bone;
+  uint pad_skin;
+  uint pad_tint;
+  float4 detail_rect;
+};
+PUSH_CONSTANTS(MeshPush, push);
+
 struct FrameGlobals {
   column_major float4x4 view_proj;
   column_major float4x4 prev_view_proj;
@@ -262,6 +277,7 @@ struct CascadeData {
 
 static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
+static const uint kFlagNormalModelSpace = 16384u;  // 1 << 14, _msn object-space normal
 static const uint kFlagTerrain = 4u;
 static const uint kFlagHasHeightMap = 32u;  // 1 << 5
 static const uint kFlagSkin = 64u;          // 1 << 6, exports diffuse for screen-space sss
@@ -310,12 +326,20 @@ static float3 g_skin_diffuse = float3(0.0, 0.0, 0.0);
 float3 SurfaceNormal(PsIn input) {
   float3 n = normalize(input.normal);
   if ((material.flags & kFlagHasNormalMap) != 0u) {
-    float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);
-    if (dot(t, t) > 1e-8) {
-      t = normalize(t);
-      float3 b = cross(n, t) * input.tangent.w;
-      float3 tn = normal_map.Sample(normal_sampler, input.uv).xyz * 2.0 - 1.0;
-      n = normalize(tn.x * t + tn.y * b + tn.z * n);
+    float3 sampled = normal_map.Sample(normal_sampler, input.uv).xyz * 2.0 - 1.0;
+    if ((material.flags & kFlagNormalModelSpace) != 0u) {
+      // Object-space (_msn) normal: rotate straight to world by the model
+      // matrix (uniform scale drops out on normalize), replacing the vertex
+      // normal. No TBN, so seam-broken tangents can't smear the shading.
+      float3 mn = mul((float3x3)push.model, sampled);
+      if (dot(mn, mn) > 1e-8) n = normalize(mn);
+    } else {
+      float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);
+      if (dot(t, t) > 1e-8) {
+        t = normalize(t);
+        float3 b = cross(n, t) * input.tangent.w;
+        n = normalize(sampled.x * t + sampled.y * b + sampled.z * n);
+      }
     }
   }
   return n;
