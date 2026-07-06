@@ -24,6 +24,9 @@
 namespace rec {
 
 static base::Option<bool> Autowalk{"autowalk", false, "REC_AUTOWALK"};
+// REC_ANIM=<internal .hkx path> selects the clip the actor bringup scene
+// plays (default: a long idle fidget).
+static base::Option<const char*> AnimClipPath{"anim.clip", nullptr, "REC_ANIM"};
 static base::Option<bool> Player{"player", false, "REC_PLAYER"};
 // Strand hair on actors: build a simulated groom from the NPC's hair nif and ride
 // it on the head bone. Off falls back to the flat card the hair part uploads.
@@ -76,6 +79,10 @@ void ActorSystem::SetNpcGait(ecs::Entity npc, f32 speed, bool set_yaw, f32 yaw) 
 
 void ActorSystem::MovePlayer(const Vec3& velocity, bool jump, f32 yaw, bool moving, f32 speed,
                              f32 dt, Vec3* out_body) {
+  if (std::getenv("REC_SKEL_DUMP")) {
+    static int calls = 0;
+    if (calls++ < 3) REC_INFO("MovePlayer called (vel {:.2f} {:.2f} {:.2f})", velocity.x, velocity.y, velocity.z);
+  }
   if (player_actor_ < 0) return;
   Actor& actor = actors_[player_actor_];
   if (moving) actor.yaw = yaw;  // the biped's +Z faces movement
@@ -160,6 +167,11 @@ void ActorSystem::CreateTestCharacter() {
 }
 
 void ActorSystem::TeleportPlayer(f32 x, f32 y, f32 z) {
+  // The actor bringup scene owns its stage: background start-game quests
+  // (which move the player on real saves) must not yank the showcase actor
+  // out of frame.
+  if (config_.demo_scene == "actor") return;
+  if (std::getenv("REC_SKEL_DUMP")) REC_INFO("TeleportPlayer({:.2f}, {:.2f}, {:.2f})", x, y, z);
   if (player_actor_ < 0) return;
   Actor& a = actors_[player_actor_];
   if (a.character) physics_.SetCharacterPosition(a.character, Vec3{x, y, z});
@@ -267,6 +279,14 @@ bool ActorSystem::LoadActorTemplate(Actor* out, int soldier_kind) {
     return false;
   }
   out->skeleton = std::move(skeleton);
+  if (std::getenv("REC_SKEL_DUMP")) {
+    for (u32 i = 0; i < out->skeleton.bones.size(); ++i) {
+      const asset::Bone& bone = out->skeleton.bones[i];
+      REC_INFO("nif bone [{:3}] parent {:3} t({:7.2f} {:7.2f} {:7.2f}) {}", i, bone.parent,
+               bone.bind_translation.x, bone.bind_translation.y, bone.bind_translation.z,
+               bone.name);
+    }
+  }
   out->pose.ResetToBind(out->skeleton);
   // Bethesda game space (Z-up, ~70 units/m) -> engine space (Y-up, metres).
   constexpr f32 s = 0.01428f;
@@ -545,6 +565,75 @@ void ActorSystem::MaybeSpawnWorldPlayer(const Vec3& ground_pos) {
            ground_pos.y, ground_pos.z);
 }
 
+bool ActorSystem::LoadHavokSkeleton() {
+  if (havok_skeleton_) return true;
+  const char* path = "meshes/actors/character/character assets/skeleton.hkx";
+  auto bytes = vfs_.Read(asset::NormalizePath(path));
+  if (!bytes) {
+    REC_ERROR("skeleton.hkx not found in the mounted archives");
+    return false;
+  }
+  auto hkx = bethesda::HkxFile::Parse(bytes->data(), bytes->size());
+  if (!hkx) {
+    REC_ERROR("skeleton.hkx is not a supported havok packfile");
+    return false;
+  }
+  bethesda::HkxPhysics physics = bethesda::DecodePhysics(*hkx);
+  const bethesda::HkxSkeleton* full = nullptr;
+  for (const auto& skeleton : physics.skeletons) {
+    if (!full || skeleton.bones.size() > full->bones.size()) full = &skeleton;
+  }
+  if (!full || full->bones.empty()) {
+    REC_ERROR("skeleton.hkx carries no skeleton");
+    return false;
+  }
+  havok_skeleton_ = std::make_unique<bethesda::HkxSkeleton>(*full);
+  return true;
+}
+
+bool ActorSystem::PlayHavokClip(Actor& actor, const std::string& animation_path) {
+  if (!LoadHavokSkeleton()) return false;
+  auto bytes = vfs_.Read(asset::NormalizePath(animation_path));
+  if (!bytes) {
+    REC_ERROR("animation not found: {}", animation_path);
+    return false;
+  }
+  auto hkx = bethesda::HkxFile::Parse(bytes->data(), bytes->size());
+  if (!hkx) {
+    REC_ERROR("{} is not a supported havok packfile", animation_path);
+    return false;
+  }
+  auto animation = bethesda::DecodeAnimation(*hkx);
+  if (!animation) {
+    REC_ERROR("{} has no decodable spline-compressed animation", animation_path);
+    return false;
+  }
+
+  auto clip = std::make_shared<HavokClip>();
+  clip->track_to_skeleton.resize(animation->num_tracks);
+  u32 matched = 0;
+  for (u32 t = 0; t < animation->num_tracks; ++t) {
+    // The binding maps tracks to havok-skeleton bones (empty = identity);
+    // names then bridge into the NIF skeleton, which shares the rig.
+    u32 havok_bone = t < animation->track_to_bone.size()
+                         ? static_cast<u32>(animation->track_to_bone[t])
+                         : t;
+    i32 bone = -1;
+    if (havok_bone < havok_skeleton_->bones.size()) {
+      bone = actor.skeleton.Find(havok_skeleton_->bones[havok_bone].name);
+    }
+    clip->track_to_skeleton[t] = bone;
+    if (bone >= 0) ++matched;
+  }
+  REC_INFO("havok clip {}: {:.2f}s, {} tracks ({} matched to the skeleton)", animation_path,
+           animation->duration, animation->num_tracks, matched);
+  if (matched == 0) return false;
+  clip->animation = std::move(*animation);
+  actor.foot_ik = false;  // the clip owns the feet
+  actor.havok_clip = std::move(clip);
+  return true;
+}
+
 bool ActorSystem::CreateSkyrimActor() {
   if (!SpawnPlayerActor({0, 0, 0})) return false;
   REC_INFO("loaded skyrim skeleton: {} bones", actors_[player_actor_].skeleton.bones.size());
@@ -558,17 +647,27 @@ bool ActorSystem::CreateSkyrimActor() {
   ecs::Entity ground = world_.Create();
   world_.Add(ground, world::Transform{.position = {0, -10.0f, 0}});
   world_.Add(ground, world::Renderable{slab.id});
+  // Clear of the spawn capsule (radius 0.3): with real physics the character
+  // controller depenetrates from anything it overlaps and the actor drifts
+  // out of frame.
   ecs::Entity step_e = world_.Create();
-  world_.Add(step_e, world::Transform{.position = {0.5f, -0.33f, 0}});
+  world_.Add(step_e, world::Transform{.position = {0.9f, -0.33f, 0}});
   world_.Add(step_e, world::Renderable{step.id});
   if (physics_.initialized()) {
     physics_.AddStaticBox({0, -10.0f, 0}, {10, 10, 10});
-    physics_.AddStaticBox({0.5f, -0.33f, 0}, {0.45f, 0.45f, 0.45f});
+    physics_.AddStaticBox({0.9f, -0.33f, 0}, {0.45f, 0.45f, 0.45f});
   }
 
   // The skeleton faces -Z in engine space, so frame it from the front.
   camera_.set_position({0.0f, 0.95f, -3.0f});
   camera_.set_yaw_pitch(3.14159f, -0.08f);
+  // Real Havok animation on the bringup actor; REC_ANIM overrides the clip,
+  // and a failed load falls back to the procedural gait.
+  const char* clip_override = AnimClipPath.get();
+  std::string clip_path = clip_override && clip_override[0]
+                              ? clip_override
+                              : "meshes/actors/character/animations/mt_idle_b_long_left.hkx";
+  PlayHavokClip(actors_[player_actor_], clip_path);
   REC_INFO("skyrim actor ready ({} body parts); press T to walk it",
            actors_[player_actor_].parts.size());
   if (Autowalk) {
@@ -596,8 +695,25 @@ void ActorSystem::UpdateOneActor(Actor& actor, f32 dt) {
   if (const net::ReplicatedGait* gait = world_.Get<net::ReplicatedGait>(actor.entity))
     actor.speed = gait->speed;
 #endif
-  actor.locomotion.phase = anim::AdvancePhase(actor.locomotion.phase, actor.speed, dt);
-  actor.locomotion.Apply(actor.skeleton, actor.speed, &actor.pose);
+  if (actor.havok_clip) {
+    const HavokClip& clip = *actor.havok_clip;
+    f32 duration = std::max(clip.animation.duration, 1.0f / 30.0f);
+    actor.havok_time = std::fmod(actor.havok_time + dt, duration);
+    bethesda::SampleAnimation(clip.animation, actor.havok_time, &havok_sample_);
+    actor.pose.ResetToBind(actor.skeleton);
+    for (u32 t = 0; t < havok_sample_.size() && t < clip.track_to_skeleton.size(); ++t) {
+      i32 bone = clip.track_to_skeleton[t];
+      if (bone < 0) continue;
+      const bethesda::HkxTrackPose& sample = havok_sample_[t];
+      actor.pose.translation[bone] = sample.translation;
+      actor.pose.rotation[bone] = Quat{sample.rotation[0], sample.rotation[1],
+                                       sample.rotation[2], sample.rotation[3]};
+      actor.pose.scale[bone] = sample.scale;
+    }
+  } else {
+    actor.locomotion.phase = anim::AdvancePhase(actor.locomotion.phase, actor.speed, dt);
+    actor.locomotion.Apply(actor.skeleton, actor.speed, &actor.pose);
+  }
 
   if (actor.foot_ik && physics_.initialized()) {
     const world::Transform* t = world_.Get<world::Transform>(actor.entity);
@@ -640,6 +756,22 @@ void ActorSystem::EmitOneActor(Actor& actor, render::FrameView& view) {
   if (const world::CombatTeam* ct = world_.Get<world::CombatTeam>(actor.entity)) {
     if (ct->team == 1) tint = 0xC85040u;       // imperial-side red
     else if (ct->team == 2) tint = 0x4078C8u;  // stormcloak-side blue
+  }
+  if (std::getenv("REC_SKEL_DUMP") && actor.parts.size() > 2) {
+    static bool logged = false;
+    if (!logged) {
+      logged = true;
+      REC_INFO("actor emit: model t=({:.2f} {:.2f} {:.2f}) scale col0=({:.4f} {:.4f} {:.4f})",
+               model.m[12], model.m[13], model.m[14], model.m[0], model.m[1], model.m[2]);
+      i32 com = actor.skeleton.Find("NPC COM [COM ]");
+      if (com >= 0 && com < static_cast<i32>(actor.bone_model.size())) {
+        const Mat4& b = actor.bone_model[com];
+        REC_INFO("actor emit: bone_model[COM] t=({:.2f} {:.2f} {:.2f})", b.m[12], b.m[13],
+                 b.m[14]);
+      }
+      REC_INFO("actor emit: {} parts, first mesh hash {:x}", actor.parts.size(),
+               actor.parts[0].mesh.hash);
+    }
   }
   for (ActorPart& part : actor.parts) {
     render::DrawItem item;

@@ -10,6 +10,8 @@
 #include <memory>
 
 #include "anim/locomotion.h"
+#include "bethesda/hkx_anim.h"
+#include "bethesda/hkx_physics.h"
 #include "anim/pose.h"
 #include "asset/asset_database.h"
 #include "asset/skeleton.h"
@@ -75,11 +77,21 @@ class ActorSystem {
     i32 attach_bone = -1;
     Mat4 attach_inverse_bind = Mat4::Identity();
   };
+  // A decoded Havok clip: the spline animation plus the per-track remap into
+  // the actor's (NIF) skeleton, resolved by bone name through the Havok
+  // skeleton the animation was authored against. Shared immutably so
+  // template-copied NPCs reuse one decode; playback time lives per actor.
+  struct HavokClip {
+    bethesda::HkxAnimation animation;
+    base::Vector<i32> track_to_skeleton;
+  };
   struct Actor {
     ecs::Entity entity;
     asset::Skeleton skeleton;
     anim::Locomotion locomotion;
     anim::SkeletonPose pose;
+    std::shared_ptr<const HavokClip> havok_clip;  // when set, replaces the gait
+    f32 havok_time = 0;
     base::Vector<Mat4> bone_model;  // model-space per skeleton bone
     base::Vector<ActorPart> parts;
     bool animate = true;  // false = hold the bind pose
@@ -104,6 +116,11 @@ class ActorSystem {
   // soldier_kind: 0 = bare civilian body, 1 = imperial-side soldier (worn
   // cuirass in the body slot), 2 = stormcloak-side soldier.
   bool LoadActorTemplate(Actor* out, int soldier_kind = 0);
+  // Plays a spline-compressed .hkx clip on the actor (replacing the
+  // procedural gait). Resolves tracks to bones through the character
+  // skeleton.hkx (cached). False when the file is missing or undecodable.
+  bool PlayHavokClip(Actor& actor, const std::string& animation_path);
+  bool LoadHavokSkeleton();
   // Lazily builds + caches the worn-armour template for a battle side (team 1
   // imperial, team 2 stormcloak), falling back to the bare body template.
   const Actor* SoldierTemplate(int team);
@@ -133,6 +150,10 @@ class ActorSystem {
   const EngineConfig& config_;
   asset::Vfs& vfs_;
   bethesda::RecordStore& records_;
+  // Cached character skeleton.hkx (the animation track name source) and a
+  // per-tick sampling scratch buffer.
+  std::unique_ptr<bethesda::HkxSkeleton> havok_skeleton_;
+  std::vector<bethesda::HkxTrackPose> havok_sample_;
 
   base::Vector<Actor> actors_;
   i32 player_actor_ = -1;  // index into actors_ the walk mode drives, -1 = none
