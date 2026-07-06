@@ -23,6 +23,9 @@
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/GroupFilterTable.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -98,6 +101,7 @@ struct PhysicsWorld::Impl {
   std::unique_ptr<JPH::PhysicsSystem> system;
   base::Vector<JPH::BodyID> dynamic_bodies;
   base::UnorderedMap<u64, JPH::RefConst<JPH::Shape>> mesh_shapes;
+  base::Vector<JPH::Ref<JPH::GroupFilterTable>> filter_groups;
   struct CharacterEntry {
     JPH::Ref<JPH::CharacterVirtual> character;
     f32 vy = 0;  // tracked vertical velocity (gravity + jump)
@@ -389,9 +393,20 @@ BodyId PhysicsWorld::AddStaticShape(const ShapeDesc& desc, const Vec3& position,
   return id.GetIndexAndSequenceNumber() + 1;
 }
 
+i32 PhysicsWorld::CreateBodyFilterGroup(u32 subgroup_count) {
+  if (!impl_) return -1;
+  impl_->filter_groups.push_back(new JPH::GroupFilterTable(subgroup_count));
+  return static_cast<i32>(impl_->filter_groups.size()) - 1;
+}
+
+void PhysicsWorld::DisableFilterPair(i32 group, u32 sub_a, u32 sub_b) {
+  if (!impl_ || group < 0 || group >= static_cast<i32>(impl_->filter_groups.size())) return;
+  impl_->filter_groups[group]->DisableCollision(sub_a, sub_b);
+}
+
 BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc& desc, const Vec3& position,
                                      const f32 rotation[4], f32 scale, f32 mass, f32 friction,
-                                     f32 restitution) {
+                                     f32 restitution, i32 filter_group, u32 subgroup) {
   if (!impl_) return 0;
   JPH::Ref<JPH::Shape> shape = BuildShape(desc, scale);
   if (!shape) return 0;
@@ -401,6 +416,11 @@ BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc& desc, const Vec3& position
                                      JPH::EMotionType::Dynamic, layers::kDynamic);
   settings.mFriction = friction;
   settings.mRestitution = restitution;
+  if (filter_group >= 0 && filter_group < static_cast<i32>(impl_->filter_groups.size())) {
+    settings.mCollisionGroup = JPH::CollisionGroup(
+        impl_->filter_groups[filter_group], static_cast<JPH::CollisionGroup::GroupID>(filter_group),
+        static_cast<JPH::CollisionGroup::SubGroupID>(subgroup));
+  }
   if (mass > 0.0f) {
     settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     settings.mMassPropertiesOverride.mMass = mass;
@@ -410,6 +430,94 @@ BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc& desc, const Vec3& position
   impl_->dynamic_bodies.push_back(id);
   ++dynamic_count_;
   return id.GetIndexAndSequenceNumber() + 1;
+}
+
+namespace {
+
+struct JointFrame {
+  JPH::RVec3 position;   // world-space pivot
+  JPH::Vec3 twist_axis;  // world-space column-0 axis
+  JPH::Vec3 plane_axis;  // world-space column-1 axis
+};
+
+// Converts a 3x4 row-major body-local frame (basis rows, origin in column 3)
+// into world space through the body's current transform.
+JointFrame FrameToWorld(JPH::BodyInterface& bodies, JPH::BodyID body, const f32 frame[12],
+                        f32 scale) {
+  JPH::RVec3 body_pos;
+  JPH::Quat body_rot;
+  bodies.GetPositionAndRotation(body, body_pos, body_rot);
+  JPH::Vec3 local_origin(frame[3], frame[7], frame[11]);
+  JPH::Vec3 twist(frame[0], frame[4], frame[8]);
+  JPH::Vec3 plane(frame[1], frame[5], frame[9]);
+  JointFrame out;
+  out.position = body_pos + body_rot * (local_origin * scale);
+  out.twist_axis = (body_rot * twist).NormalizedOr(JPH::Vec3::sAxisX());
+  out.plane_axis = (body_rot * plane).NormalizedOr(JPH::Vec3::sAxisY());
+  return out;
+}
+
+JPH::Body* LockBody(JPH::PhysicsSystem& system, JPH::BodyID id) {
+  return system.GetBodyLockInterfaceNoLock().TryGetBody(id);
+}
+
+}  // namespace
+
+bool PhysicsWorld::AddSwingTwistJoint(BodyId a, BodyId b, const f32 frame_a[12],
+                                      const f32 frame_b[12], f32 scale, f32 twist_min,
+                                      f32 twist_max, f32 cone_max, f32 plane_min,
+                                      f32 plane_max) {
+  if (!impl_ || a == 0 || b == 0) return false;
+  JPH::BodyID body_a(static_cast<JPH::uint32>(a - 1));
+  JPH::BodyID body_b(static_cast<JPH::uint32>(b - 1));
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+
+  // Both frames describe the same joint; body A's is the authoritative
+  // world anchor at setup time (bodies are spawned in their bind pose).
+  JointFrame world = FrameToWorld(bodies, body_a, frame_a, scale);
+  (void)frame_b;
+
+  JPH::SwingTwistConstraintSettings settings;
+  settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+  settings.mPosition1 = settings.mPosition2 = world.position;
+  settings.mTwistAxis1 = settings.mTwistAxis2 = world.twist_axis;
+  settings.mPlaneAxis1 = settings.mPlaneAxis2 = world.plane_axis;
+  settings.mTwistMinAngle = twist_min;
+  settings.mTwistMaxAngle = twist_max;
+  settings.mNormalHalfConeAngle = JPH::max(cone_max, 0.01f);
+  settings.mPlaneHalfConeAngle =
+      JPH::max(JPH::max(JPH::abs(plane_min), JPH::abs(plane_max)), 0.01f);
+
+  JPH::Body* pa = LockBody(*impl_->system, body_a);
+  JPH::Body* pb = LockBody(*impl_->system, body_b);
+  if (!pa || !pb) return false;
+  impl_->system->AddConstraint(settings.Create(*pa, *pb));
+  return true;
+}
+
+bool PhysicsWorld::AddHingeJoint(BodyId a, BodyId b, const f32 frame_a[12],
+                                 const f32 frame_b[12], f32 scale, f32 angle_min,
+                                 f32 angle_max) {
+  if (!impl_ || a == 0 || b == 0) return false;
+  JPH::BodyID body_a(static_cast<JPH::uint32>(a - 1));
+  JPH::BodyID body_b(static_cast<JPH::uint32>(b - 1));
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  JointFrame world = FrameToWorld(bodies, body_a, frame_a, scale);
+  (void)frame_b;
+
+  JPH::HingeConstraintSettings settings;
+  settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+  settings.mPoint1 = settings.mPoint2 = world.position;
+  settings.mHingeAxis1 = settings.mHingeAxis2 = world.twist_axis;
+  settings.mNormalAxis1 = settings.mNormalAxis2 = world.plane_axis;
+  settings.mLimitsMin = JPH::min(angle_min, angle_max);
+  settings.mLimitsMax = JPH::max(angle_min, angle_max);
+
+  JPH::Body* pa = LockBody(*impl_->system, body_a);
+  JPH::Body* pb = LockBody(*impl_->system, body_b);
+  if (!pa || !pb) return false;
+  impl_->system->AddConstraint(settings.Create(*pa, *pb));
+  return true;
 }
 
 BodyId PhysicsWorld::AddDynamicBox(const Vec3& position, const Vec3& half_extent, f32 density,

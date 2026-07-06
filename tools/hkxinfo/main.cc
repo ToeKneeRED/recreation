@@ -24,6 +24,7 @@
 #include "bethesda/hkx_physics.h"
 #include "bethesda/hkx_to_physics.h"
 #include "physics/physics_world.h"
+#include <cmath>
 
 namespace {
 
@@ -99,6 +100,16 @@ int main(int argc, char** argv) {
       }
     }
     std::printf("mounted %zu archives\n", vfs.mount_count());
+    if (args[2].rfind("--list", 0) == 0 && args.size() > 3) {
+      // hkxinfo --data <dir> --list <substring>: enumerate matching paths.
+      std::string needle = args[3];
+      vfs.Enumerate([&](std::string_view path) {
+        if (path.find(needle) != std::string_view::npos) {
+          std::printf("%.*s\n", static_cast<int>(path.size()), path.data());
+        }
+      });
+      return 0;
+    }
     auto data = vfs.Read(args[2]);
     if (!data) {
       std::fprintf(stderr, "not found in archives: %s\n", args[2].c_str());
@@ -210,6 +221,100 @@ int main(int argc, char** argv) {
           std::printf("  other   '%s' %d<->%d\n", c.name.c_str(), c.body_a, c.body_b);
         }
       }
+    } else if (args[i] == "--ragdoll") {
+      // Full ragdoll drop test: spawn the bodies in bind pose (rotated from
+      // the data's Z-up into the engine's Y-up), joint them per the decoded
+      // constraints, drop onto a floor for 4 simulated seconds, then check
+      // the doll stayed in one piece: no NaNs, every joint's two world-space
+      // pivots (computed independently through body A and body B) still
+      // coincide, nothing fell through the floor.
+      auto physics = rec::bethesda::DecodePhysics(*hkx);
+      rec::physics::PhysicsWorld world;
+      if (!world.Initialize()) {
+        std::fprintf(stderr, "jolt world init failed (stub linked?)\n");
+        return 1;
+      }
+      constexpr rec::f32 kScale = 0.01428f;  // game units -> meters
+      const rec::Quat kZupToYup{-0.70710678f, 0.0f, 0.0f, 0.70710678f};  // -90 deg about X
+      world.AddStaticBox({0.0f, -0.5f, 0.0f}, {50.0f, 0.5f, 50.0f});
+
+      std::vector<rec::physics::BodyId> ids(physics.bodies.size(), 0);
+      rec::i32 filter = world.CreateBodyFilterGroup(static_cast<rec::u32>(physics.bodies.size()));
+      int spawned = 0;
+      for (size_t b = 0; b < physics.bodies.size(); ++b) {
+        const auto& body = physics.bodies[b];
+        if (body.mass <= 0.0f) continue;  // keyframed helpers (CharacterBumper)
+        rec::physics::ShapeDesc desc = rec::bethesda::ToShapeDesc(body.shape);
+        rec::Vec3 pos = rec::Rotate(kZupToYup, body.position * kScale);
+        pos.y += 1.0f;  // drop height
+        rec::Quat body_rot{body.rotation[0], body.rotation[1], body.rotation[2],
+                           body.rotation[3]};
+        rec::Quat rot = kZupToYup * body_rot;
+        rec::f32 rot4[4] = {rot.x, rot.y, rot.z, rot.w};
+        ids[b] = world.AddDynamicShape(desc, pos, rot4, kScale, body.mass, body.friction,
+                                       body.restitution, filter, static_cast<rec::u32>(b));
+        if (ids[b] != 0) ++spawned;
+      }
+      // Skyrim's authored per-shape collision filter info governs ragdoll
+      // self-collision; until that is decoded, disable it wholesale (folded
+      // dragon wings overlap torso parts they are not jointed to).
+      for (size_t x = 0; x < physics.bodies.size(); ++x) {
+        for (size_t y = x + 1; y < physics.bodies.size(); ++y) {
+          world.DisableFilterPair(filter, static_cast<rec::u32>(x), static_cast<rec::u32>(y));
+        }
+      }
+      int joints = 0;
+      for (const auto& c : physics.constraints) {
+        if (c.body_a < 0 || c.body_b < 0) continue;
+        if (ids[c.body_a] == 0 || ids[c.body_b] == 0) continue;
+        bool ok = false;
+        if (c.kind == rec::bethesda::HkxConstraint::Kind::kRagdoll) {
+          ok = world.AddSwingTwistJoint(ids[c.body_a], ids[c.body_b], c.frame_a, c.frame_b,
+                                        kScale, c.twist_min, c.twist_max, c.cone_max,
+                                        c.plane_min, c.plane_max);
+        } else if (c.kind == rec::bethesda::HkxConstraint::Kind::kLimitedHinge) {
+          ok = world.AddHingeJoint(ids[c.body_a], ids[c.body_b], c.frame_a, c.frame_b, kScale,
+                                   c.hinge_min, c.hinge_max);
+        }
+        if (ok) ++joints;
+      }
+      for (int step = 0; step < 240; ++step) world.Update(1.0f / 60.0f);
+
+      auto world_pivot = [&](int body, const rec::f32 frame[12]) {
+        rec::Vec3 pos;
+        rec::f32 rot4[4];
+        world.GetBodyTransform(ids[body], &pos, rot4);
+        rec::Quat rot{rot4[0], rot4[1], rot4[2], rot4[3]};
+        rec::Vec3 local{frame[3] * kScale, frame[7] * kScale, frame[11] * kScale};
+        return pos + rec::Rotate(rot, local);
+      };
+      rec::f32 max_separation = 0.0f, min_y = 1e9f, max_y = -1e9f;
+      bool nan = false;
+      for (size_t b = 0; b < physics.bodies.size(); ++b) {
+        if (ids[b] == 0) continue;
+        rec::Vec3 pos;
+        rec::f32 rot4[4];
+        world.GetBodyTransform(ids[b], &pos, rot4);
+        if (pos.x != pos.x || pos.y != pos.y || pos.z != pos.z) nan = true;
+        min_y = std::min(min_y, pos.y);
+        max_y = std::max(max_y, pos.y);
+      }
+      for (const auto& c : physics.constraints) {
+        if (c.kind == rec::bethesda::HkxConstraint::Kind::kOther) continue;
+        if (c.body_a < 0 || c.body_b < 0 || ids[c.body_a] == 0 || ids[c.body_b] == 0) continue;
+        rec::Vec3 pa = world_pivot(c.body_a, c.frame_a);
+        rec::Vec3 pb = world_pivot(c.body_b, c.frame_b);
+        rec::Vec3 d = pa - pb;
+        rec::f32 sep = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+        max_separation = std::max(max_separation, sep);
+      }
+      bool pass = !nan && max_separation < 0.05f && min_y > -0.1f;
+      std::printf(
+          "ragdoll: %d bodies, %d joints, 240 steps; max joint separation %.1f mm, "
+          "rest height %.2f..%.2f m, nan %s -> %s\n",
+          spawned, joints, max_separation * 1000.0f, min_y, max_y, nan ? "YES" : "no",
+          pass ? "PASS" : "FAIL");
+      if (!pass) return 1;
     } else if (args[i] == "--jolt") {
       // Smoke test: lower every decoded body's shape into a live Jolt world
       // (game-unit scale) and report what stuck.

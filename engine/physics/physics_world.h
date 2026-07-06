@@ -57,8 +57,25 @@ class PhysicsWorld {
   // mass in kg; 0 falls back to Jolt's density-derived mass.
   BodyId AddStaticShape(const ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
                         f32 scale);
+  // filter_group/subgroup: bodies sharing a filter group collide unless the
+  // pair of subgroups was disabled - how a ragdoll's jointed limbs overlap
+  // at the hips/shoulders without fighting their constraints.
   BodyId AddDynamicShape(const ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
-                         f32 scale, f32 mass, f32 friction, f32 restitution);
+                         f32 scale, f32 mass, f32 friction, f32 restitution,
+                         i32 filter_group = -1, u32 subgroup = 0);
+  i32 CreateBodyFilterGroup(u32 subgroup_count);
+  void DisableFilterPair(i32 group, u32 sub_a, u32 sub_b);
+
+  // Ragdoll joints between two dynamic bodies. Frames are 3x4 row-major
+  // (basis rows + origin column) in each body's LOCAL space, column 0 = the
+  // twist/hinge axis, column 1 = the plane/normal axis, in desc units
+  // (scaled by `scale` like the shapes). Angles in radians. The swing-twist
+  // joint approximates Havok's asymmetric plane limit with a symmetric one.
+  bool AddSwingTwistJoint(BodyId a, BodyId b, const f32 frame_a[12], const f32 frame_b[12],
+                          f32 scale, f32 twist_min, f32 twist_max, f32 cone_max,
+                          f32 plane_min, f32 plane_max);
+  bool AddHingeJoint(BodyId a, BodyId b, const f32 frame_a[12], const f32 frame_b[12], f32 scale,
+                     f32 angle_min, f32 angle_max);
 
   // Dynamic bodies; density in kg/m^3 (wood floats, stone sinks).
   BodyId AddDynamicBox(const Vec3& position, const Vec3& half_extent, f32 density,

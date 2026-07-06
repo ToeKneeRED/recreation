@@ -22,8 +22,17 @@ BodyId PhysicsWorld::AddStaticShape(const ShapeDesc&, const Vec3&, const f32[4],
   return 0;
 }
 BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc&, const Vec3&, const f32[4], f32, f32, f32,
-                                     f32) {
+                                     f32, i32, u32) {
   return 0;
+}
+i32 PhysicsWorld::CreateBodyFilterGroup(u32) { return -1; }
+void PhysicsWorld::DisableFilterPair(i32, u32, u32) {}
+bool PhysicsWorld::AddSwingTwistJoint(BodyId, BodyId, const f32[12], const f32[12], f32, f32,
+                                      f32, f32, f32, f32) {
+  return false;
+}
+bool PhysicsWorld::AddHingeJoint(BodyId, BodyId, const f32[12], const f32[12], f32, f32, f32) {
+  return false;
 }
 BodyId PhysicsWorld::AddDynamicSphere(const Vec3&, f32, f32, const Vec3&) { return 0; }
 BodyId PhysicsWorld::AddKinematicCapsule(const Vec3&, f32, f32) { return 0; }
