@@ -8,6 +8,7 @@
 #include <base/containers/vector.h>
 
 #include <memory>
+#include <unordered_map>
 
 #include "anim/locomotion.h"
 #include "bethesda/hkx_anim.h"
@@ -119,8 +120,10 @@ class ActorSystem {
   // Plays a spline-compressed .hkx clip on the actor (replacing the
   // procedural gait). Resolves tracks to bones through the character
   // skeleton.hkx (cached). False when the file is missing or undecodable.
-  bool PlayHavokClip(Actor& actor, const std::string& animation_path);
-  bool LoadHavokSkeleton();
+  bool CreateCreatureActor(const std::string& name, const std::string& clip_override);
+  bool PlayHavokClip(Actor& actor, const std::string& animation_path,
+                     const std::string& skeleton_hkx_path);
+  const bethesda::HkxSkeleton* LoadHavokSkeleton(const std::string& skeleton_hkx_path);
   // Lazily builds + caches the worn-armour template for a battle side (team 1
   // imperial, team 2 stormcloak), falling back to the bare body template.
   const Actor* SoldierTemplate(int team);
@@ -150,9 +153,9 @@ class ActorSystem {
   const EngineConfig& config_;
   asset::Vfs& vfs_;
   bethesda::RecordStore& records_;
-  // Cached character skeleton.hkx (the animation track name source) and a
-  // per-tick sampling scratch buffer.
-  std::unique_ptr<bethesda::HkxSkeleton> havok_skeleton_;
+  // Cached havok skeletons by path (the animation track name source; one per
+  // creature rig) and a per-tick sampling scratch buffer.
+  std::unordered_map<std::string, std::unique_ptr<bethesda::HkxSkeleton>> havok_skeletons_;
   std::vector<bethesda::HkxTrackPose> havok_sample_;
 
   base::Vector<Actor> actors_;

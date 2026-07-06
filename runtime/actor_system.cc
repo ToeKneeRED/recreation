@@ -565,18 +565,19 @@ void ActorSystem::MaybeSpawnWorldPlayer(const Vec3& ground_pos) {
            ground_pos.y, ground_pos.z);
 }
 
-bool ActorSystem::LoadHavokSkeleton() {
-  if (havok_skeleton_) return true;
-  const char* path = "meshes/actors/character/character assets/skeleton.hkx";
-  auto bytes = vfs_.Read(asset::NormalizePath(path));
+const bethesda::HkxSkeleton* ActorSystem::LoadHavokSkeleton(
+    const std::string& skeleton_hkx_path) {
+  auto it = havok_skeletons_.find(skeleton_hkx_path);
+  if (it != havok_skeletons_.end()) return it->second.get();
+  auto bytes = vfs_.Read(asset::NormalizePath(skeleton_hkx_path));
   if (!bytes) {
-    REC_ERROR("skeleton.hkx not found in the mounted archives");
-    return false;
+    REC_ERROR("{} not found in the mounted archives", skeleton_hkx_path);
+    return nullptr;
   }
   auto hkx = bethesda::HkxFile::Parse(bytes->data(), bytes->size());
   if (!hkx) {
-    REC_ERROR("skeleton.hkx is not a supported havok packfile");
-    return false;
+    REC_ERROR("{} is not a supported havok packfile", skeleton_hkx_path);
+    return nullptr;
   }
   bethesda::HkxPhysics physics = bethesda::DecodePhysics(*hkx);
   const bethesda::HkxSkeleton* full = nullptr;
@@ -584,15 +585,19 @@ bool ActorSystem::LoadHavokSkeleton() {
     if (!full || skeleton.bones.size() > full->bones.size()) full = &skeleton;
   }
   if (!full || full->bones.empty()) {
-    REC_ERROR("skeleton.hkx carries no skeleton");
-    return false;
+    REC_ERROR("{} carries no skeleton", skeleton_hkx_path);
+    return nullptr;
   }
-  havok_skeleton_ = std::make_unique<bethesda::HkxSkeleton>(*full);
-  return true;
+  auto owned = std::make_unique<bethesda::HkxSkeleton>(*full);
+  const bethesda::HkxSkeleton* result = owned.get();
+  havok_skeletons_[skeleton_hkx_path] = std::move(owned);
+  return result;
 }
 
-bool ActorSystem::PlayHavokClip(Actor& actor, const std::string& animation_path) {
-  if (!LoadHavokSkeleton()) return false;
+bool ActorSystem::PlayHavokClip(Actor& actor, const std::string& animation_path,
+                                const std::string& skeleton_hkx_path) {
+  const bethesda::HkxSkeleton* havok_skeleton = LoadHavokSkeleton(skeleton_hkx_path);
+  if (!havok_skeleton) return false;
   auto bytes = vfs_.Read(asset::NormalizePath(animation_path));
   if (!bytes) {
     REC_ERROR("animation not found: {}", animation_path);
@@ -619,8 +624,8 @@ bool ActorSystem::PlayHavokClip(Actor& actor, const std::string& animation_path)
                          ? static_cast<u32>(animation->track_to_bone[t])
                          : t;
     i32 bone = -1;
-    if (havok_bone < havok_skeleton_->bones.size()) {
-      bone = actor.skeleton.Find(havok_skeleton_->bones[havok_bone].name);
+    if (havok_bone < havok_skeleton->bones.size()) {
+      bone = actor.skeleton.Find(havok_skeleton->bones[havok_bone].name);
     }
     clip->track_to_skeleton[t] = bone;
     if (bone >= 0) ++matched;
@@ -634,7 +639,78 @@ bool ActorSystem::PlayHavokClip(Actor& actor, const std::string& animation_path)
   return true;
 }
 
+// Spawns a creature rig (its own skeleton.nif + skinned mesh + skeleton.hkx)
+// on the bringup stage and plays a clip from its animation set.
+bool ActorSystem::CreateCreatureActor(const std::string& name, const std::string& clip_override) {
+  const std::string base = "meshes/actors/" + name + "/";
+  const std::string skel_path = base + "character assets/skeleton.nif";
+  auto skel_bytes = vfs_.Read(asset::NormalizePath(skel_path));
+  if (!skel_bytes) {
+    REC_ERROR("{} not found in the mounted archives", skel_path);
+    return false;
+  }
+  Actor actor;
+  if (!bethesda::ConvertNifSkeleton(ByteSpan(skel_bytes->data(), skel_bytes->size()),
+                                    asset::MakeAssetId(skel_path), &actor.skeleton)) {
+    REC_ERROR("failed to parse {}", skel_path);
+    return false;
+  }
+  actor.pose.ResetToBind(actor.skeleton);
+  constexpr f32 s = 0.01428f;  // Bethesda Z-up game units -> engine Y-up metres
+  Mat4 basis{};
+  basis.m[0] = s;
+  basis.m[6] = -s;
+  basis.m[9] = s;
+  basis.m[15] = 1.0f;
+  actor.skeleton_to_local = basis;
+  anim::ComputeModelMatrices(actor.skeleton, actor.pose, &actor.bone_model);
+  if (!LoadActorPart(base + "character assets/" + name + ".nif", actor)) return false;
+
+  actor.entity = world_.Create();
+  world_.Add(actor.entity, world::Transform{.position = {0, 0, 0}});
+  actor.animate = true;
+  actor.foot_ik = false;
+
+  // Clip: explicit override, else the creature's common locomotion/idle names.
+  base::Vector<std::string> candidates;
+  if (!clip_override.empty()) candidates.push_back(clip_override);
+  candidates.push_back(base + "animations/mtwalkforward.hkx");
+  candidates.push_back(base + "animations/mt_walkforward.hkx");
+  candidates.push_back(base + "animations/mt_idle.hkx");
+  candidates.push_back(base + "animations/h2hidle.hkx");
+  candidates.push_back(base + "animations/idle_pet.hkx");
+  bool playing = false;
+  for (const std::string& clip : candidates) {
+    if (!vfs_.Contains(asset::NormalizePath(clip))) continue;
+    if (PlayHavokClip(actor, clip, base + "character assets/skeleton.hkx")) {
+      playing = true;
+      break;
+    }
+  }
+  if (!playing) REC_WARN("{}: no playable clip found, holding bind pose", name);
+
+  REC_INFO("creature actor '{}': {} bones, {} parts", name, actor.skeleton.bones.size(),
+           actor.parts.size());
+  actors_.push_back(std::move(actor));
+  return true;
+}
+
 bool ActorSystem::CreateSkyrimActor() {
+  // REC_CREATURE=<troll|horse|...> swaps the human for a creature rig.
+  if (const char* creature = std::getenv("REC_CREATURE")) {
+    const char* clip = AnimClipPath.get();
+    if (!CreateCreatureActor(creature, clip ? clip : "")) return false;
+    asset::Mesh slab = asset::MakeCube(10.0f, asset::MakeAssetId("builtin/actor_ground"));
+    renderer_.UploadMesh(slab);
+    ecs::Entity ground = world_.Create();
+    world_.Add(ground, world::Transform{.position = {0, -10.0f, 0}});
+    world_.Add(ground, world::Renderable{slab.id});
+    if (physics_.initialized()) physics_.AddStaticBox({0, -10.0f, 0}, {10, 10, 10});
+    // Creatures are bigger than people; frame from further back.
+    camera_.set_position({0.0f, 1.4f, -4.5f});
+    camera_.set_yaw_pitch(3.14159f, -0.08f);
+    return true;
+  }
   if (!SpawnPlayerActor({0, 0, 0})) return false;
   REC_INFO("loaded skyrim skeleton: {} bones", actors_[player_actor_].skeleton.bones.size());
 
@@ -667,7 +743,8 @@ bool ActorSystem::CreateSkyrimActor() {
   std::string clip_path = clip_override && clip_override[0]
                               ? clip_override
                               : "meshes/actors/character/animations/mt_idle_b_long_left.hkx";
-  PlayHavokClip(actors_[player_actor_], clip_path);
+  PlayHavokClip(actors_[player_actor_], clip_path,
+                "meshes/actors/character/character assets/skeleton.hkx");
   REC_INFO("skyrim actor ready ({} body parts); press T to walk it",
            actors_[player_actor_].parts.size());
   if (Autowalk) {
