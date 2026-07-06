@@ -25,6 +25,9 @@ namespace rec {
 
 static base::Option<bool> Autowalk{"autowalk", false, "REC_AUTOWALK"};
 static base::Option<bool> Player{"player", false, "REC_PLAYER"};
+// Strand hair on actors: build a simulated groom from the NPC's hair nif and ride
+// it on the head bone. Off falls back to the flat card the hair part uploads.
+static base::Option<bool> StrandHair{"strand_hair", true, "REC_STRAND_HAIR"};
 static base::Option<bool> Mq101Demo{"mq101.demo", false, "REC_MQ101_DEMO"};
 static base::Option<bool> Mq101Scene{"mq101.scene", false, "REC_MQ101_SCENE"};
 
@@ -302,12 +305,13 @@ bool ActorSystem::LoadActorTemplate(Actor* out, int soldier_kind) {
   return true;
 }
 
-void ActorSystem::AttachHead(Actor& actor, bethesda::GlobalFormId npc) {
+void ActorSystem::AttachHead(Actor& actor, bethesda::GlobalFormId npc, bool allow_groom) {
   i32 head_bone = actor.skeleton.Find("NPC Head [Head]");
   if (head_bone < 0) return;
   const Mat4 inv = head_bone < static_cast<i32>(actor.bone_model.size())
                        ? Inverse(actor.bone_model[head_bone])
                        : Mat4::Identity();
+  const bool groom = allow_groom && StrandHair;
 
   // A named NPC: assemble + morph its real FaceGen head, attach every built part
   // rigidly to the head bone. The FaceState is transient (the GPU owns the
@@ -318,11 +322,17 @@ void ActorSystem::AttachHead(Actor& actor, bethesda::GlobalFormId npc) {
     if (face_builder_->AssembleNpc(npc, &fs)) {
       fs.RebuildAndUpload();
       for (const BuiltFacePart& p : fs.parts()) {
+        // The flat card hair part is replaced by the simulated groom below.
+        if (groom && p.type == bethesda::HeadPartType::kHair) continue;
         ActorPart part;
         part.mesh = p.mesh;
         part.attach_bone = head_bone;
         part.attach_inverse_bind = inv;
         actor.parts.push_back(std::move(part));
+      }
+      if (groom && !fs.hair_model().empty()) {
+        const f32* hc = fs.hair_color();
+        AttachHairGroom(actor, fs.hair_model(), {hc[0], hc[1], hc[2]}, head_bone, inv);
       }
       return;
     }
@@ -331,9 +341,44 @@ void ActorSystem::AttachHead(Actor& actor, bethesda::GlobalFormId npc) {
   // Player, soldiers, or a face that failed to resolve: the default male head
   // and a hairstyle, unmorphed.
   LoadActorPart("meshes/actors/character/character assets/malehead.nif", actor, head_bone);
-  for (const std::string& hair : FindHeadPartModels(/*hair=*/3, 24)) {
-    if (LoadActorPart(hair, actor, head_bone)) break;
+  base::Vector<std::string> hairs = FindHeadPartModels(/*hair=*/3, 24);
+  if (groom && !hairs.empty()) {
+    AttachHairGroom(actor, hairs[0], {0.32f, 0.24f, 0.18f}, head_bone, inv);
+  } else {
+    for (const std::string& hair : hairs)
+      if (LoadActorPart(hair, actor, head_bone)) break;
   }
+}
+
+void ActorSystem::AttachHairGroom(Actor& actor, const std::string& hair_model, const Vec3& tint,
+                                  i32 head_bone, const Mat4& inverse_bind) {
+  if (actor.hair_groom) return;  // one groom per actor
+  std::string path = asset::NormalizePath(hair_model);
+  if (!path.starts_with("meshes/")) path = "meshes/" + path;
+  auto bytes = vfs_.Read(path);
+  if (!bytes) return;
+  bethesda::NifConversion conv = bethesda::ConvertNifRigid(
+      ByteSpan(bytes->data(), bytes->size()), asset::MakeAssetId(path), path);
+  if (!conv.mesh || conv.mesh->lods.empty() || conv.mesh->lods[0].vertices.empty()) return;
+  // Per-strand colour source: the hair nif's own diffuse.
+  const asset::Texture* diffuse = nullptr;
+  for (const std::string& tp : conv.texture_paths) {
+    diffuse = ctx_.assets->LoadTexture(tp);
+    if (diffuse) break;
+  }
+  render::GroomParams params;
+  params.recenter = false;  // keep authored head-local coords; ride the head bone
+  params.tint = tint;
+  params.diffuse = diffuse;
+  params.guide_count = 1600;
+  params.children_per_guide = 6;
+  params.strand_width = 0.0009f;
+  params.clump_radius = 0.004f;
+  u32 id = renderer_.CreateHairGroom(*conv.mesh, params, Mat4::Identity());
+  if (!id) return;
+  actor.hair_groom = id;
+  actor.hair_bone = head_bone;
+  actor.hair_inverse_bind = inverse_bind;
 }
 
 bool ActorSystem::LoadStarfieldActorPart(const std::string& path, Actor& actor,
@@ -615,6 +660,14 @@ void ActorSystem::EmitOneActor(Actor& actor, render::FrameView& view) {
     }
     view.draws.push_back(item);
   }
+  // Ride the strand groom on the head bone. The groom keeps its authored, engine-
+  // scaled head-local coordinates (built with recenter off), so the head part's
+  // own transform, with the skeleton->local scale peeled back off, places it.
+  if (actor.hair_groom && actor.hair_bone >= 0 &&
+      actor.hair_bone < static_cast<i32>(actor.bone_model.size())) {
+    Mat4 head = model * actor.bone_model[actor.hair_bone] * actor.hair_inverse_bind;
+    renderer_.SetHairGroomTransform(actor.hair_groom, head * Inverse(actor.skeleton_to_local));
+  }
   actor.prev_model = model;
 }
 
@@ -624,7 +677,9 @@ const ActorSystem::Actor* ActorSystem::SoldierTemplate(int team) {
   if (!slot) {
     Actor tmpl;
     if (!LoadActorTemplate(&tmpl, team)) return nullptr;  // fall back to the bare body
-    AttachHead(tmpl, bethesda::GlobalFormId{0xffff, 0});  // default head for battle soldiers
+    // No groom on a shared template: the copies would alias one GPU groom. Battle
+    // soldiers keep the flat card hair.
+    AttachHead(tmpl, bethesda::GlobalFormId{0xffff, 0}, /*allow_groom=*/false);
     tmpl.animate = true;
     tmpl.speed = 0.0f;
     tmpl.foot_ik = false;
@@ -682,7 +737,10 @@ void ActorSystem::SyncNpcActors() {
   scratch_dead_actors_.clear();
   for (auto entry : npc_actors_)
     if (!world_.IsAlive(entry.value.entity)) scratch_dead_actors_.push_back(entry.key);
-  for (u64 key : scratch_dead_actors_) npc_actors_.erase(key);
+  for (u64 key : scratch_dead_actors_) {
+    if (Actor* a = npc_actors_.find(key); a && a->hair_groom) renderer_.DestroyHairGroom(a->hair_groom);
+    npc_actors_.erase(key);
+  }
 }
 
 void ActorSystem::SyncSolidBodies() {

@@ -1287,22 +1287,56 @@ void DemoScenes::CreateFacesDemoScene() {
 
     const f32 x = x0 + spacing * i;
     for (const BuiltFacePart& part : faces_.back().parts()) {
+      if (part.type == bethesda::HeadPartType::kHair) continue;  // groom replaces the card
       ecs::Entity e = world_.Create();
       world_.Add(e, world::Transform{.position = {x, 0.0f, 0.0f},
                                      .rotation = {basis.x, basis.y, basis.z, basis.w},
                                      .scale = 0.01428f});
       world_.Add(e, world::Renderable{part.mesh});
     }
+    // Strand hair on the scalp. The groom keeps its authored (engine-scaled)
+    // head-local coordinates, and the head placement here is a pure translate
+    // times that same scale, so a translation to the head position drops it on.
+    const FaceState& built_face = faces_.back();
+    if (!built_face.hair_model().empty()) {
+      std::string hair_path = asset::NormalizePath(built_face.hair_model());
+      if (!hair_path.starts_with("meshes/")) hair_path = "meshes/" + hair_path;
+      if (auto bytes = ctx_.vfs->Read(hair_path)) {
+        bethesda::NifConversion conv = bethesda::ConvertNifRigid(
+            ByteSpan(bytes->data(), bytes->size()), asset::MakeAssetId(hair_path), hair_path);
+        if (conv.mesh && !conv.mesh->lods.empty() && !conv.mesh->lods[0].vertices.empty()) {
+          const asset::Texture* diffuse = nullptr;
+          for (const std::string& tp : conv.texture_paths) {
+            diffuse = ctx_.assets->LoadTexture(tp);
+            if (diffuse) break;
+          }
+          const f32* hc = built_face.hair_color();
+          render::GroomParams params;
+          params.recenter = false;
+          params.tint = {hc[0], hc[1], hc[2]};
+          params.diffuse = diffuse;
+          params.guide_count = 7000;
+          params.children_per_guide = 18;
+          params.strand_width = 0.0013f;
+          params.clump_radius = 0.005f;
+          u32 id = renderer_.CreateHairGroom(*conv.mesh, params, MakeTranslation({x, 0.0f, 0.0f}));
+          if (id) hair_grooms_.push_back(id);
+        }
+      }
+    }
     ++built;
   }
   REC_INFO("faces demo: {} heads assembled", built);
 
   // Soft frontal key light so every face reads; the heads face -Z, so frame
-  // them from -Z looking +Z (like the actor bringup).
+  // them from -Z looking +Z (like the actor bringup). A gentle key plus a raised
+  // ambient fill keeps the skin lit without blowing out the highlights or
+  // dropping the necks to black (a portrait light, not the harsh midday sun).
   ctx_.scene_owns_sun = true;
-  renderer_.settings().sun_direction = {-0.35f, -0.55f, 0.75f};
-  renderer_.settings().sun_intensity = 3.4f;
-  renderer_.settings().sun_color = {1.0f, 0.96f, 0.92f};
+  renderer_.settings().sun_direction = {-0.3f, -0.5f, 0.8f};
+  renderer_.settings().sun_intensity = 2.4f;
+  renderer_.settings().sun_color = {1.0f, 0.97f, 0.94f};
+  renderer_.settings().ambient = 0.35f;
   renderer_.settings().dof = false;
 
   camera_.set_position({0.0f, 1.63f, -2.35f});

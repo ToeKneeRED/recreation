@@ -93,6 +93,12 @@ class ActorSystem {
     physics::CharacterId character = 0;
     f32 yaw = 0;             // facing, radians about engine up (+Y)
     f32 capsule_offset = 0;  // entity origin to capsule centre, along up
+    // Strand-hair groom riding the head bone (0 = none). hair_bone/hair_inv are
+    // the head bone + its inverse bind, so EmitOneActor can re-derive the head
+    // transform each frame and feed it to the groom.
+    u32 hair_groom = 0;
+    i32 hair_bone = -1;
+    Mat4 hair_inverse_bind = Mat4::Identity();
   };
 
   // soldier_kind: 0 = bare civilian body, 1 = imperial-side soldier (worn
@@ -107,7 +113,12 @@ class ActorSystem {
   // Attaches head-part meshes riding the head bone. With a valid `npc` it
   // assembles + morphs that NPC's FaceGen head (face/eyes/brows/beard/hair);
   // otherwise (player, soldiers) it falls back to the default male head + hair.
-  void AttachHead(Actor& actor, bethesda::GlobalFormId npc);
+  void AttachHead(Actor& actor, bethesda::GlobalFormId npc, bool allow_groom = true);
+  // Builds a strand groom from a hair nif and rides it on the head bone. Replaces
+  // the flat card hair when REC_STRAND_HAIR is on. No-op if the nif has no usable
+  // geometry.
+  void AttachHairGroom(Actor& actor, const std::string& hair_model, const Vec3& tint,
+                       i32 head_bone, const Mat4& inverse_bind);
   bool LoadStarfieldActorPart(const std::string& path, Actor& actor,
                               const bethesda::StarfieldMaterialDb& mat_db);
   base::Vector<std::string> FindHeadPartModels(u32 part_type, u32 max);

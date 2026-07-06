@@ -24,6 +24,11 @@ struct GroomParams {
   Vec3 tint{1, 1, 1};             // multiplies the sampled diffuse colour
   const asset::Texture* diffuse = nullptr;  // hair diffuse for per-strand colour
   u32 seed = 1;
+  // When true (the default) the groom is recentred so the scalp sits at the local
+  // origin, ready for a translation. Bone-attached hair keeps its authored
+  // (engine-scaled, head-local) coordinates instead, so the caller can drop it on
+  // the head bone with the head part's own transform.
+  bool recenter = true;
 };
 
 // A CPU-built groom in a groom-local frame: engine units, Y-up, recentred so the
@@ -37,6 +42,7 @@ struct GroomData {
   Vec3 collision_center{0, 0, 0};
   f32 collision_radius = 0;
   f32 mean_length = 0;  // average strand length, for diagnostics
+  Vec3 authored_scalp{0, 0, 0};  // scalp mean before recentring (local engine units)
 };
 
 // Traces guide strands along the hair cards. Returns false when the mesh has no

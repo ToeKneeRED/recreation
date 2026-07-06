@@ -547,22 +547,28 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
   cols.resize(static_cast<size_t>(emitted) * 3);
 
   // Recentre on the scalp (mean root) so a rigid transform drops the groom onto
-  // a head bone, and fit a head collision sphere just inside the scalp cap.
+  // a head bone, and fit a head collision sphere just inside the scalp cap. A
+  // bone-attached groom skips the recentre and keeps its authored coordinates, so
+  // the caller can ride it on the head bone with the head part's transform.
   Vec3 scalp = root_sum * (1.0f / emitted);
+  out->authored_scalp = scalp;
   f32 head_r = 0;
   for (u32 i = 0; i < emitted; ++i) {
     Vec3 rp{roots[i * 3], roots[i * 3 + 1], roots[i * 3 + 2]};
     f32 horiz = std::sqrt((rp.x - scalp.x) * (rp.x - scalp.x) + (rp.z - scalp.z) * (rp.z - scalp.z));
     head_r = std::max(head_r, horiz);
   }
-  for (size_t i = 0; i < pts.size(); i += 3) {
-    pts[i] -= scalp.x; pts[i + 1] -= scalp.y; pts[i + 2] -= scalp.z;
-  }
-  for (size_t i = 0; i < roots.size(); i += 3) {
-    roots[i] -= scalp.x; roots[i + 1] -= scalp.y; roots[i + 2] -= scalp.z;
+  if (params.recenter) {
+    for (size_t i = 0; i < pts.size(); i += 3) {
+      pts[i] -= scalp.x; pts[i + 1] -= scalp.y; pts[i + 2] -= scalp.z;
+    }
+    for (size_t i = 0; i < roots.size(); i += 3) {
+      roots[i] -= scalp.x; roots[i + 1] -= scalp.y; roots[i + 2] -= scalp.z;
+    }
   }
   out->guide_count = emitted;
-  out->collision_center = {0.0f, -0.35f * head_r, 0.0f};
+  Vec3 head_center = params.recenter ? Vec3{0, 0, 0} : scalp;
+  out->collision_center = {head_center.x, head_center.y - 0.35f * head_r, head_center.z};
   out->collision_radius = 0.78f * head_r;
   out->mean_length = static_cast<f32>(length_sum / emitted);
   REC_INFO("hair groom: {} cards, {} guides, mean len {:.3f}, head r {:.3f}", comps.size(),
