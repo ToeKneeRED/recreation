@@ -23,6 +23,7 @@
 #include "bethesda/hkx.h"
 #include "bethesda/hkx_physics.h"
 #include "bethesda/hkx_to_physics.h"
+#include "bethesda/hkx_anim.h"
 #include "physics/physics_world.h"
 #include <cmath>
 
@@ -220,6 +221,36 @@ int main(int argc, char** argv) {
         } else {
           std::printf("  other   '%s' %d<->%d\n", c.name.c_str(), c.body_a, c.body_b);
         }
+      }
+    } else if (args[i] == "--anim") {
+      // Decode + sample the spline-compressed animation. Optional arg: time.
+      rec::f32 at_time = 0.0f;
+      if (i + 1 < args.size() && args[i + 1][0] != '-') {
+        at_time = std::strtof(args[++i].c_str(), nullptr);
+      }
+      auto anim = rec::bethesda::DecodeAnimation(*hkx);
+      if (!anim) {
+        std::fprintf(stderr, "no decodable spline-compressed animation\n");
+        return 1;
+      }
+      std::printf("animation: %.2fs, %u tracks, %u frames, %zu blocks, skeleton '%s'%s\n",
+                  anim->duration, anim->num_tracks, anim->num_frames, anim->blocks.size(),
+                  anim->skeleton_name.c_str(),
+                  anim->track_to_bone.empty() ? " (identity track map)" : "");
+      std::vector<rec::bethesda::HkxTrackPose> pose;
+      rec::bethesda::SampleAnimation(*anim, at_time, &pose);
+      int bad_quats = 0;
+      for (const auto& p : pose) {
+        rec::f32 len = std::sqrt(p.rotation[0] * p.rotation[0] + p.rotation[1] * p.rotation[1] +
+                                 p.rotation[2] * p.rotation[2] + p.rotation[3] * p.rotation[3]);
+        if (std::fabs(len - 1.0f) > 0.02f) ++bad_quats;
+      }
+      std::printf("sampled t=%.2f: %d non-unit quats\n", at_time, bad_quats);
+      for (size_t t = 0; t < pose.size() && t < 8; ++t) {
+        std::printf("  track[%2zu] t(%7.2f %7.2f %7.2f) q(%.3f %.3f %.3f %.3f) s %.2f\n", t,
+                    pose[t].translation.x, pose[t].translation.y, pose[t].translation.z,
+                    pose[t].rotation[0], pose[t].rotation[1], pose[t].rotation[2],
+                    pose[t].rotation[3], pose[t].scale);
       }
     } else if (args[i] == "--ragdoll") {
       // Full ragdoll drop test: spawn the bodies in bind pose (rotated from

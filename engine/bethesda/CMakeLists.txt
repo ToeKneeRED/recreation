@@ -13,6 +13,7 @@ recreation_add_module(bethesda
   hkx.cc
   hkx_physics.cc
   hkx_to_physics.cc
+  hkx_anim.cc
   starfield_mesh.cc
   material_db.cc
   converters.cc
