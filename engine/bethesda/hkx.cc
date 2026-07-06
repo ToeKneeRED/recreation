@@ -42,17 +42,20 @@ std::optional<HkxFile> HkxFile::Parse(const u8* bytes, size_t size) {
   file.content_version_.assign(reinterpret_cast<const char*>(bytes + 40),
                                strnlen(reinterpret_cast<const char*>(bytes + 40), 16));
   if (!little_endian) return std::nullopt;  // big-endian consoles: not ours
-  if (file_version != 8 && file_version != 9) return std::nullopt;  // hk2010-era packfiles
+  // v8/v9 are the hk2010-2013 era (Skyrim LE/SE and most mod toolchains);
+  // v11 is hk2014 (Fallout 4/76). v11 pads every section header to 64 bytes.
+  if (file_version != 8 && file_version != 9 && file_version != 11) return std::nullopt;
+  const size_t section_stride = file_version >= 11 ? 64 : sizeof(SectionHeader);
   if (file.pointer_size_ != 4 && file.pointer_size_ != 8) return std::nullopt;
   if (num_sections == 0 || num_sections > 8) return std::nullopt;
-  if (64 + static_cast<size_t>(num_sections) * sizeof(SectionHeader) > size) return std::nullopt;
+  if (64 + static_cast<size_t>(num_sections) * section_stride > size) return std::nullopt;
 
   const SectionHeader* classnames = nullptr;
   const SectionHeader* data = nullptr;
   std::vector<const SectionHeader*> sections(num_sections);
   for (u32 i = 0; i < num_sections; ++i) {
     const auto* section =
-        reinterpret_cast<const SectionHeader*>(bytes + 64 + i * sizeof(SectionHeader));
+        reinterpret_cast<const SectionHeader*>(bytes + 64 + i * section_stride);
     sections[i] = section;
     std::string_view tag(section->tag, strnlen(section->tag, 19));
     if (tag == "__classnames__") classnames = section;

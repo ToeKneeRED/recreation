@@ -28,7 +28,8 @@ constexpr u64 kData = 0x98;           // hkArray<u8>
 constexpr u64 kBindingSkeletonName = 0x10;
 constexpr u64 kBindingAnimation = 0x18;
 constexpr u64 kBindingTrackToBone = 0x20;  // hkArray<i16>
-constexpr u64 kBindingBlendHint = 0x40;    // 0 normal, 1 additive
+constexpr u64 kBindingBlendHint = 0x40;      // 0 normal, 1 additive (hk2010)
+constexpr u64 kBindingBlendHint2014 = 0x50;  // after 2014's partitionIndices
 }  // namespace off
 
 constexpr int kSplineAnimationType = 3;  // hkaAnimation::TYPE_SPLINE_COMPRESSED (2010)
@@ -74,6 +75,27 @@ void UnpackThreeComp40(const u8* bytes, f32 out[4]) {
   }
   u32 shift = static_cast<u32>((v >> 36) & 0x3);
   bool invert = ((v >> 38) & 0x1) != 0;
+  f32 missing = 1.0f - c[0] * c[0] - c[1] * c[1] - c[2] * c[2];
+  missing = missing > 0.0f ? std::sqrt(missing) : 0.0f;
+  if (invert) missing = -missing;
+  u32 j = 0;
+  for (u32 i = 0; i < 4; ++i) out[i] = (i == shift) ? missing : c[j++];
+}
+
+// THREECOMP48: 6 bytes = three u16, each carrying a 15-bit component over the
+// same [-sqrt(1/2), +sqrt(1/2)] span; the MSBs of items 0/1 name the omitted
+// component and the MSB of item 2 is its sign. Verified against HavokLib's
+// hk2014 samples (same clip in 40- and 48-bit agrees to quantization error).
+void UnpackThreeComp48(const u8* bytes, f32 out[4]) {
+  u16 item[3];
+  std::memcpy(item, bytes, 6);
+  constexpr f32 kFrac = 1.41421356f / 32766.0f;
+  f32 c[3];
+  for (int i = 0; i < 3; ++i) {
+    c[i] = static_cast<f32>(item[i] & 0x7FFF) * kFrac - 0.70710678f;
+  }
+  u32 shift = static_cast<u32>(((item[0] >> 15) & 1) | ((item[1] >> 14) & 2));
+  bool invert = (item[2] >> 15) != 0;
   f32 missing = 1.0f - c[0] * c[0] - c[1] * c[1] - c[2] * c[2];
   missing = missing > 0.0f ? std::sqrt(missing) : 0.0f;
   if (invert) missing = -missing;
@@ -141,28 +163,32 @@ bool ReadRotationChannel(Cursor* cursor, u8 mask, u8 quant, HkxAnimation::Channe
   out->stride = 4;
   out->static_value[0] = out->static_value[1] = out->static_value[2] = 0.0f;
   out->static_value[3] = 1.0f;
-  if (quant != 1) {  // only THREECOMP40 (=1) appears in Skyrim data
+  // THREECOMP40 (=1) is all Bethesda ships; THREECOMP48 (=2) shows up in
+  // HCT-exported mod content. POLAR32/24-bit stay unsupported.
+  if (quant != 1 && quant != 2) {
     if ((mask & 0xF0) != 0 || (mask & 0x0F) != 0) return false;
     return true;
   }
+  const size_t point_bytes = quant == 1 ? 5 : 6;
+  auto unpack = quant == 1 ? UnpackThreeComp40 : UnpackThreeComp48;
   if (mask & 0xF0) {
     u16 num_items = 0;
     u8 degree = 0;
     ReadSplineHeader(cursor, &num_items, &degree, &out->knots);
-    // THREECOMP40 packs to bytes; no alignment before the payload.
+    // The packed quats follow the knots directly; no alignment first.
     out->has_spline = true;
     out->degree = degree;
     out->control_points.resize(static_cast<size_t>(num_items + 1) * 4);
     for (u32 p = 0; p <= num_items; ++p) {
-      const u8* bytes = cursor->Bytes(5);
+      const u8* bytes = cursor->Bytes(point_bytes);
       if (!bytes) return false;
-      UnpackThreeComp40(bytes, &out->control_points[p * 4]);
+      unpack(bytes, &out->control_points[p * 4]);
     }
     cursor->Align(4);
   } else if (mask & 0x0F) {
-    const u8* bytes = cursor->Bytes(5);
+    const u8* bytes = cursor->Bytes(point_bytes);
     if (!bytes) return false;
-    UnpackThreeComp40(bytes, out->static_value);
+    unpack(bytes, out->static_value);
     cursor->Align(4);
   }
   return true;
@@ -293,7 +319,10 @@ std::optional<HkxAnimation> DecodeAnimation(const HkxFile& hkx) {
     for (u32 i = 0; i < map_count && map != HkxFile::kNull; ++i) {
       animation.track_to_bone.push_back(hkx.I16(map + static_cast<u64>(i) * 2));
     }
-    animation.additive = hkx.U8(obj.offset + off::kBindingBlendHint) != 0;
+    // hk2014 (Fallout 4) inserted a partitionIndices array before blendHint.
+    const bool hk2014 = hkx.content_version().compare(0, 7, "hk_2014") == 0;
+    animation.additive =
+        hkx.U8(obj.offset + (hk2014 ? off::kBindingBlendHint2014 : off::kBindingBlendHint)) != 0;
     break;
   }
   return animation;

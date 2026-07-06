@@ -95,7 +95,8 @@ int main(int argc, char** argv) {
     }
     rec::asset::Vfs vfs;
     for (const auto& entry : std::filesystem::directory_iterator(args[1])) {
-      if (entry.path().extension() == ".bsa") {
+      const auto ext = entry.path().extension();
+      if (ext == ".bsa" || ext == ".ba2") {  // Skyrim / Fallout 4+ archives
         if (auto provider = rec::bethesda::OpenArchive(entry.path().string())) {
           vfs.Mount(std::move(provider));
         }
