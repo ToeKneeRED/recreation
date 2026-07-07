@@ -15,6 +15,13 @@ enum class AntiAliasingMode : u8 {
   // Upscalers do their own temporal accumulation, TAA must be off when one
   // is active. The renderer enforces this.
   kUpscaler,
+  // Hardware MSAA on the geometry passes (prepass + opaque scene), for people
+  // who want AA without any temporal component. Guides resolve sample-0 after
+  // the prepass, color averages after the scene pass, and everything
+  // downstream (transparency, compositors, post) runs single-sampled exactly
+  // as in kNone. No jitter; VRS and the mesh-shader path are disabled while
+  // active. Sample count comes from RenderSettings::msaa_samples.
+  kMsaa,
 };
 
 struct JitterSequence {

@@ -20,7 +20,8 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
                                                    Format normal_format, Format depth_format,
                                                    BindingLayoutHandle material_layout,
                                                    BindingLayoutHandle environment_layout,
-                                                   BindingLayoutHandle bindless_layout) {
+                                                   BindingLayoutHandle bindless_layout,
+                                                   u32 samples) {
   auto pipeline = std::unique_ptr<MeshPipeline>(new MeshPipeline(device));
   bool rt = device.caps().ray_query;
   bool mesh_caps = device.caps().mesh_shaders;
@@ -81,6 +82,9 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   scene.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
   scene.sets = sets;
   scene.push_constant_size = sizeof(MeshPushConstants);
+  // kMsaa mode: opaque scene + prepass raster multisampled; the blend
+  // pipelines below stay at 1 sample (the transparent pass runs post-resolve).
+  scene.samples = samples;
   scene.debug_name = "mesh_scene";
 
   bool wire_capable = device.caps().fill_mode_non_solid;
@@ -120,6 +124,9 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   {
     GraphicsPipelineDesc desc = scene;
     desc.depth.compare = CompareOp::kGreater;  // reversed z
+    // The transparent pass always runs after the kMsaa resolve, on
+    // single-sampled targets.
+    desc.samples = 1;
     // Two attachments only (no skin export in the transparent pass), so the
     // fragments below stay the plain two-target shaders.
     desc.color_formats = {color_format, motion_format};

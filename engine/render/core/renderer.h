@@ -409,6 +409,12 @@ class Renderer {
   // resize path as a render_scale change.
   DynamicResolution drs_;
   f32 applied_dynamic_scale_ = 1.0f;
+  // kMsaa: the sample count the mesh pipelines were built with (1 = the
+  // standard single-sampled path). Diverging from the settings-derived value
+  // rebuilds them through a device idle, like an upscaler swap.
+  u32 applied_msaa_samples_ = 1;
+  PipelineHandle msaa_resolve_pipeline_;  // sample-0 guide resolve (compute)
+  PipelineHandle depth_copy_pipeline_;    // rebuilds 1x hw depth post-resolve
   AntiAliasingMode applied_aa_ = AntiAliasingMode::kTaa;
   bool applied_vsync_ = false;
   // Sun state baked into the environment maps; differing means regenerate.

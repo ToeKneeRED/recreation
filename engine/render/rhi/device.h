@@ -120,8 +120,10 @@ class Device {
   virtual GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) = 0;
   virtual void DestroyBuffer(GpuBuffer& buffer) = 0;
 
+  // samples > 1 creates a multisampled image (mip_levels must stay 1); resolve
+  // through CommandList::ResolveTexture before any single-sampled consumer.
   virtual GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
-                                 u32 mip_levels = 1) = 0;
+                                 u32 mip_levels = 1, u32 samples = 1) = 0;
   // Volumetric texture (froxel scattering volumes). Backends without it
   // return a null image and the caller skips the feature.
   virtual GpuImage CreateImage3D(Format /*format*/, u32 /*width*/, u32 /*height*/, u32 /*depth*/,

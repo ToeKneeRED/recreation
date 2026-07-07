@@ -173,6 +173,8 @@ set(RECREATION_RENDER_SHADERS
   shaders/pipeline/mesh_rt_sss.ps.hlsl
   shaders/util/fullscreen.vs.hlsl
   shaders/util/blit.ps.hlsl
+  shaders/util/msaa_resolve.cs.hlsl
+  shaders/util/depth_copy.ps.hlsl
   shaders/post/tonemap.ps.hlsl
   shaders/post/taa.cs.hlsl
   shaders/atmosphere/transmittance_lut.cs.hlsl

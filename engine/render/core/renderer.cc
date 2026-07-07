@@ -17,7 +17,10 @@
 #include "shaders/hdr_capture_cs_hlsl.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
 #include "shaders/contact_shadow_cs_hlsl.h"
+#include "shaders/depth_copy_ps_hlsl.h"
+#include "shaders/fullscreen_vs_hlsl.h"
 #include "shaders/light_cluster_cs_hlsl.h"
+#include "shaders/msaa_resolve_cs_hlsl.h"
 #include "shaders/sss_blur_cs_hlsl.h"
 
 namespace rec::render {
@@ -50,6 +53,7 @@ base::Option<bool> FroxelOpt{"froxel.fog", true, "REC_FROXEL"};
 base::Option<double> FroxelDensity{"froxel.density", 0.005, "REC_FROXEL_DENSITY"};
 base::Option<int> TexBudgetMb{"tex.budget.mb", -1, "REC_TEX_BUDGET_MB"};
 base::Option<bool> GpuTimings{"gpu.timings", false, "REC_GPU_TIMINGS"};
+base::Option<int> MsaaOpt{"msaa", 0, "REC_MSAA"};
 base::Option<bool> DrsOpt{"drs", false, "REC_DRS"};
 base::Option<double> DrsTargetMs{"drs.target.ms", 16.6, "REC_DRS_TARGET_MS"};
 base::Option<double> DrsMinScale{"drs.min.scale", 0.5, "REC_DRS_MIN_SCALE"};
@@ -224,6 +228,27 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
                                         bindless_ ? bindless_->set_layout() : BindingLayoutHandle{});
   post_ = PostPass::Create(*device_, swapchain_->format());
   if (!mesh_pipeline_ || !post_ || !taa_.Initialize(*device_)) return false;
+  // kMsaa support: sample-0 guide resolve + the fullscreen depth rebuild that
+  // hands the post-resolve raster passes a single-sampled depth buffer.
+  msaa_resolve_pipeline_ = device_->CreateComputePipeline({
+      .shader = REC_SHADER(k_msaa_resolve_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kSampledImage},
+                          {1, BindingType::kSampledImage},
+                          {2, BindingType::kStorageImage},
+                          {3, BindingType::kStorageImage}}}},
+      .push_constant_size = 8,
+      .debug_name = "msaa_resolve",
+  });
+  depth_copy_pipeline_ = device_->CreateGraphicsPipeline({
+      .vertex = REC_SHADER(k_fullscreen_vs_hlsl),
+      .fragment = REC_SHADER(k_depth_copy_ps_hlsl),
+      .raster = {.cull = CullMode::kNone},
+      .depth = {.test = true, .write = true, .compare = CompareOp::kAlways,
+                .format = kDepthFormat},
+      .sets = {{.slots = {{0, BindingType::kSampledImage}}}},
+      .debug_name = "msaa_depth_copy",
+  });
+  if (!msaa_resolve_pipeline_ || !depth_copy_pipeline_) return false;
   ui_blur_ = UiBlurPass::Create(*device_);  // optional: frosted-glass UI blur
   if (rt_available_ && !rtao_.Initialize(*device_)) return false;
   if (rt_available_ && bindless_ &&
@@ -555,6 +580,12 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (TexBudgetMb.overridden()) settings_.texture_budget_mb = TexBudgetMb;
   // REC_GPU_TIMINGS forces per-pass timestamps on for headless profiling.
   if (GpuTimings.overridden()) settings_.gpu_pass_timings = GpuTimings;
+  // REC_MSAA=2/4/8 selects the hardware-MSAA AA mode (no temporal component);
+  // 0/1 leaves the configured mode alone.
+  if (MsaaOpt.overridden() && static_cast<int>(MsaaOpt) >= 2) {
+    settings_.aa_mode = AntiAliasingMode::kMsaa;
+    settings_.msaa_samples = static_cast<u32>(static_cast<int>(MsaaOpt));
+  }
   // REC_DRS holds the GPU frame time at REC_DRS_TARGET_MS by stepping the
   // render scale, no lower than REC_DRS_MIN_SCALE per axis.
   if (DrsOpt.overridden()) settings_.dynamic_resolution = DrsOpt;
@@ -756,6 +787,38 @@ void Renderer::ApplySettings() {
   // kUpscaler is only valid with a live upscaler.
   if (settings_.aa_mode == AntiAliasingMode::kUpscaler && settings_.upscaler == UpscalerKind::kNone) {
     settings_.aa_mode = AntiAliasingMode::kTaa;
+  }
+
+  // MSAA is a raster-geometry mode: the path tracer bypasses the raster path
+  // entirely and its water prepass would bind multisampled prepass pipelines
+  // on single-sampled targets, so path tracing wins while both are asked for.
+  if (settings_.aa_mode == AntiAliasingMode::kMsaa && settings_.path_trace) {
+    settings_.aa_mode = AntiAliasingMode::kTaa;
+  }
+  // The sample count bakes into the mesh pipelines; a mode/count change
+  // rebuilds them through a device idle, like an upscaler swap.
+  u32 want_msaa = 1;
+  if (settings_.aa_mode == AntiAliasingMode::kMsaa) {
+    want_msaa = settings_.msaa_samples >= 8 ? 8u : settings_.msaa_samples >= 4 ? 4u : 2u;
+  }
+  if (want_msaa != applied_msaa_samples_ && mesh_pipeline_) {
+    device_->WaitIdle();
+    auto rebuilt = MeshPipeline::Create(
+        *device_, kSceneColorFormat, kMotionFormat, kNormalFormat, kDepthFormat,
+        material_system_->set_layout(), environment_->env_set_layout(),
+        bindless_ ? bindless_->set_layout() : BindingLayoutHandle{}, want_msaa);
+    if (rebuilt) {
+      mesh_pipeline_ = std::move(rebuilt);
+      applied_msaa_samples_ = want_msaa;
+      REC_INFO("msaa: mesh pipelines rebuilt at {}x", want_msaa);
+    } else {
+      REC_WARN("msaa: mesh pipeline rebuild failed, keeping {}x", applied_msaa_samples_);
+      settings_.aa_mode = applied_msaa_samples_ > 1 ? AntiAliasingMode::kMsaa
+                                                    : AntiAliasingMode::kTaa;
+    }
+    transient_pool_->Clear();
+    taa_.Reset();
+    has_prev_frame_ = false;
   }
 
   if (material_system_) {
@@ -1385,9 +1448,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
+  // kMsaa: the prepass + opaque scene render multisampled and resolve before
+  // everything downstream, which then runs single-sampled exactly as kNone.
+  // ApplySettings already rebuilt the mesh pipelines at this sample count.
+  const bool msaa = applied_msaa_samples_ > 1 && !path_trace;
+  const u32 msaa_samples = msaa ? applied_msaa_samples_ : 1;
   // Scene pass consumes last frame's rate image; the rebuild pass below the
   // transparents keeps it fresh. Wireframe wants exact per-pixel lines.
-  vrs_active_ = settings_.vrs && vrs_.available() && !path_trace && !settings_.wireframe;
+  // The VRS rate image cannot attach to a multisampled pass here.
+  vrs_active_ =
+      settings_.vrs && vrs_.available() && !path_trace && !settings_.wireframe && !msaa;
   // Foliage uploaded before path tracing was enabled has no blas (it was excluded
   // from the realtime tlas). Build it now so alpha-tested vegetation appears when
   // path tracing is toggled on at runtime, not only when set before content load.
@@ -1820,6 +1890,34 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
          .width = render_width_, .height = render_height_});
   }
 
+  // kMsaa: multisampled twins for the geometry window (prepass + scene). The
+  // plain handles above keep flowing to every downstream consumer as the
+  // resolved single-sampled versions; only the two geometry passes and the
+  // resolve/depth-rebuild passes below touch these.
+  ResourceHandle geom_depth = depth, geom_normals = normals, geom_motion = motion,
+                 geom_depth_export = depth_export, geom_scene = scene_color,
+                 geom_skin = skin_diffuse;
+  if (msaa) {
+    geom_depth = graph_.CreateTexture({.name = "depth_ms", .format = kDepthFormat,
+                                       .width = render_width_, .height = render_height_,
+                                       .samples = msaa_samples});
+    geom_normals = graph_.CreateTexture({.name = "normals_ms", .format = kNormalFormat,
+                                         .width = render_width_, .height = render_height_,
+                                         .samples = msaa_samples});
+    geom_motion = graph_.CreateTexture({.name = "motion_ms", .format = kMotionFormat,
+                                        .width = render_width_, .height = render_height_,
+                                        .samples = msaa_samples});
+    geom_depth_export = graph_.CreateTexture(
+        {.name = "depth_export_ms", .format = Format::kR32Float, .width = render_width_,
+         .height = render_height_, .samples = msaa_samples});
+    geom_scene = graph_.CreateTexture({.name = "scene_color_ms", .format = kSceneColorFormat,
+                                       .width = render_width_, .height = render_height_,
+                                       .samples = msaa_samples});
+    geom_skin = graph_.CreateTexture(
+        {.name = "skin_diffuse_ms", .format = MeshPipeline::kSkinDiffuseFormat,
+         .width = render_width_, .height = render_height_, .samples = msaa_samples});
+  }
+
   // Virtual texturing: drain last frame's page requests, stream pages, and
   // record this frame's atlas/indirection uploads + the feedback copy/reset.
   if (!path_trace) virtual_texture_.AddToGraph(graph_, frame_index_);
@@ -2250,7 +2348,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Mesh-shader opaque path: drawn this frame if enabled and supported. The task
   // stage reuses the same hi-z the raster cull built (last frame's) for instance
   // occlusion; ms_occ carries the projection scale + hi-z size (z=0 disables it).
-  const bool ms_active = settings_.mesh_shader_lod && mesh_pipeline_->has_mesh_shader();
+  // The meshlet pipelines stay single-sampled, so the path sits out kMsaa.
+  const bool ms_active =
+      settings_.mesh_shader_lod && mesh_pipeline_->has_mesh_shader() && !msaa;
   const bool ms_occlude = ms_active && cull_occlusion;
   f32 ms_occ[4] = {0, 0, 0, 0};
   if (ms_occlude) {
@@ -2319,24 +2419,24 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   graph_.AddPass(
       "prepass",
       [&](RenderGraph::PassBuilder& builder) {
-        builder.Write(normals, ResourceUsage::kColorAttachment);
-        builder.Write(motion, ResourceUsage::kColorAttachment);
-        builder.Write(depth_export, ResourceUsage::kColorAttachment);
-        builder.Write(depth, ResourceUsage::kDepthAttachment);
+        builder.Write(geom_normals, ResourceUsage::kColorAttachment);
+        builder.Write(geom_motion, ResourceUsage::kColorAttachment);
+        builder.Write(geom_depth_export, ResourceUsage::kColorAttachment);
+        builder.Write(geom_depth, ResourceUsage::kDepthAttachment);
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
-      [this, normals, motion, depth_export, depth, cull_commands, &frame, &view, ms_active,
-       ms_occlude, cull_hiz, globals_set, update_globals_set, frame_slot,
+      [this, geom_normals, geom_motion, geom_depth_export, geom_depth, cull_commands, &frame,
+       &view, ms_active, ms_occlude, cull_hiz, globals_set, update_globals_set, frame_slot,
        draw_meshlet_instances](PassContext& ctx) {
         // First globals-set user this frame: write uniform + tlas + hi-z once.
         update_globals_set(ctx, ms_occlude ? cull_hiz : kInvalidResource, ms_active,
                            /*want_tlas=*/true);
 
         ColorAttachment colors[3];
-        colors[0] = {.view = ctx.graph->image(normals).view};
-        colors[1] = {.view = ctx.graph->image(motion).view};
-        colors[2] = {.view = ctx.graph->image(depth_export).view};
-        DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
+        colors[0] = {.view = ctx.graph->image(geom_normals).view};
+        colors[1] = {.view = ctx.graph->image(geom_motion).view};
+        colors[2] = {.view = ctx.graph->image(geom_depth_export).view};
+        DepthAttachment depth_attachment{.view = ctx.graph->image(geom_depth).view,
                                          .clear = 0.0f};  // reversed z clears to far = 0
         ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                  .colors = {colors, 3},
@@ -2409,6 +2509,51 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         }
         ctx.cmd->EndRendering();
       });
+
+  // kMsaa: resolve the prepass guides to single-sampled (sample 0 - averaging
+  // would invent phantom depths/normals at silhouettes) and rebuild the 1x
+  // hardware depth every post-resolve raster pass tests against. Motion
+  // resolves after the scene pass instead (the sky still writes it there).
+  if (msaa) {
+    graph_.AddPass(
+        "msaa_guides",
+        [&](RenderGraph::PassBuilder& builder) {
+          builder.Read(geom_normals, ResourceUsage::kSampledCompute);
+          builder.Read(geom_depth_export, ResourceUsage::kSampledCompute);
+          builder.Write(normals, ResourceUsage::kStorageWrite);
+          builder.Write(depth_export, ResourceUsage::kStorageWrite);
+        },
+        [this, geom_normals, geom_depth_export, normals, depth_export](PassContext& ctx) {
+          struct {
+            u32 width;
+            u32 height;
+          } push{render_width_, render_height_};
+          ctx.cmd->BindPipeline(msaa_resolve_pipeline_);
+          ctx.cmd->BindTransient(0,
+                                 {Bind::SampledView(0, ctx.graph->image(geom_normals).view),
+                                  Bind::SampledView(1, ctx.graph->image(geom_depth_export).view),
+                                  Bind::Storage(2, ctx.graph->image(normals)),
+                                  Bind::Storage(3, ctx.graph->image(depth_export))});
+          ctx.cmd->Push(push);
+          ctx.cmd->Dispatch2D({render_width_, render_height_});
+        });
+    graph_.AddPass(
+        "msaa_depth_copy",
+        [&](RenderGraph::PassBuilder& builder) {
+          builder.Read(depth_export, ResourceUsage::kSampledFragment);
+          builder.Write(depth, ResourceUsage::kDepthAttachment);
+        },
+        [this, depth_export, depth](PassContext& ctx) {
+          DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
+                                           .load = LoadOp::kDontCare};
+          ctx.cmd->BeginRendering(
+              {.extent = {render_width_, render_height_}, .depth = &depth_attachment});
+          ctx.cmd->BindPipeline(depth_copy_pipeline_);
+          ctx.cmd->BindTransient(0, {Bind::SampledView(0, ctx.graph->image(depth_export).view)});
+          ctx.cmd->Draw(3, 1, 0, 0);
+          ctx.cmd->EndRendering();
+        });
+  }
 
   // Snapshot this frame's depth for next frame's occlusion test.
   if (settings_.gpu_culling && settings_.gpu_occlusion) {
@@ -2644,10 +2789,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   graph_.AddPass(
       "scene",
       [&](RenderGraph::PassBuilder& builder) {
-        builder.Write(scene_color, ResourceUsage::kColorAttachment);
-        builder.Write(motion, ResourceUsage::kColorAttachment);
-        builder.Write(skin_diffuse, ResourceUsage::kColorAttachment);
-        builder.Write(depth, ResourceUsage::kDepthAttachment);
+        builder.Write(geom_scene, ResourceUsage::kColorAttachment);
+        builder.Write(geom_motion, ResourceUsage::kColorAttachment);
+        builder.Write(geom_skin, ResourceUsage::kColorAttachment);
+        builder.Write(geom_depth, ResourceUsage::kDepthAttachment);
         if (ao != kInvalidResource) builder.Read(ao, ResourceUsage::kSampledFragment);
         if (sun_shadow != kInvalidResource) builder.Read(sun_shadow, ResourceUsage::kSampledFragment);
         if (spec_refl != kInvalidResource) builder.Read(spec_refl, ResourceUsage::kSampledFragment);
@@ -2658,9 +2803,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         }
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
-      [this, scene_color, motion, skin_diffuse, depth, ao, sun_shadow, spec_refl, use_rt_frag,
-       ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands, ms_active, globals_set,
-       frame_slot, restir_active, restir_out, &frame, &view,
+      [this, geom_scene, geom_motion, geom_skin, geom_depth, msaa, ao, sun_shadow, spec_refl,
+       use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands, ms_active,
+       globals_set, frame_slot, restir_active, restir_out, &frame, &view,
        draw_meshlet_instances](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
         TextureView ao_view =
@@ -2690,15 +2835,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
 
         ColorAttachment colors[3];
-        colors[0] = {.view = ctx.graph->image(scene_color).view,
+        colors[0] = {.view = ctx.graph->image(geom_scene).view,
                      .load = LoadOp::kClear,
                      .clear = {0.02f, 0.02f, 0.05f, 1.0f}};
-        colors[1] = {.view = ctx.graph->image(motion).view,
+        colors[1] = {.view = ctx.graph->image(geom_motion).view,
                      .load = LoadOp::kLoad};  // the prepass wrote motion
-        colors[2] = {.view = ctx.graph->image(skin_diffuse).view,
+        colors[2] = {.view = ctx.graph->image(geom_skin).view,
                      .load = LoadOp::kClear,
                      .clear = {0.0f, 0.0f, 0.0f, 0.0f}};
-        DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
+        DepthAttachment depth_attachment{.view = ctx.graph->image(geom_depth).view,
                                          .load = LoadOp::kLoad};  // prepass depth, tested EQUAL
         ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
                                  .colors = {colors, 3},
@@ -2758,9 +2903,59 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (skinned_bound) {
           mesh_pipeline_->SetSkinned(*ctx.cmd, false, use_rt_frag, settings_.wireframe);
         }
-        if (settings_.sky && !settings_.interior) environment_->DrawSky(*ctx.cmd, globals_set);
+        // The sky pipeline is single-sampled; under kMsaa it draws in its own
+        // pass right after the resolve instead (same attachments at 1x).
+        if (settings_.sky && !settings_.interior && !msaa) {
+          environment_->DrawSky(*ctx.cmd, globals_set);
+        }
         ctx.cmd->EndRendering();
       });
+
+  // kMsaa: average-resolve the scene color (this is the actual antialiasing),
+  // motion (the geometry part; the sky adds its motion at 1x below) and the
+  // skin-diffuse export, then draw the sky into the resolved targets with the
+  // rebuilt 1x depth. Everything after this point runs exactly as in kNone.
+  if (msaa) {
+    graph_.AddPass(
+        "msaa_resolve",
+        [&](RenderGraph::PassBuilder& builder) {
+          builder.Read(geom_scene, ResourceUsage::kResolveSrc);
+          builder.Read(geom_motion, ResourceUsage::kResolveSrc);
+          builder.Read(geom_skin, ResourceUsage::kResolveSrc);
+          builder.Write(scene_color, ResourceUsage::kResolveDst);
+          builder.Write(motion, ResourceUsage::kResolveDst);
+          builder.Write(skin_diffuse, ResourceUsage::kResolveDst);
+        },
+        [this, geom_scene, geom_motion, geom_skin, scene_color, motion,
+         skin_diffuse](PassContext& ctx) {
+          ctx.cmd->ResolveTexture(ctx.graph->image(geom_scene), ctx.graph->image(scene_color));
+          ctx.cmd->ResolveTexture(ctx.graph->image(geom_motion), ctx.graph->image(motion));
+          ctx.cmd->ResolveTexture(ctx.graph->image(geom_skin), ctx.graph->image(skin_diffuse));
+        });
+    if (settings_.sky && !settings_.interior) {
+      graph_.AddPass(
+          "msaa_sky",
+          [&](RenderGraph::PassBuilder& builder) {
+            builder.Write(scene_color, ResourceUsage::kColorAttachment);
+            builder.Write(motion, ResourceUsage::kColorAttachment);
+            builder.Write(skin_diffuse, ResourceUsage::kColorAttachment);
+            builder.Write(depth, ResourceUsage::kDepthAttachment);
+          },
+          [this, scene_color, motion, skin_diffuse, depth, globals_set](PassContext& ctx) {
+            ColorAttachment colors[3];
+            colors[0] = {.view = ctx.graph->image(scene_color).view, .load = LoadOp::kLoad};
+            colors[1] = {.view = ctx.graph->image(motion).view, .load = LoadOp::kLoad};
+            colors[2] = {.view = ctx.graph->image(skin_diffuse).view, .load = LoadOp::kLoad};
+            DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
+                                             .load = LoadOp::kLoad};
+            ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
+                                     .colors = {colors, 3},
+                                     .depth = &depth_attachment});
+            environment_->DrawSky(*ctx.cmd, globals_set);
+            ctx.cmd->EndRendering();
+          });
+    }
+  }
 
   // Screen-space subsurface scattering: separable per-channel diffusion of the
   // skin buffer the scene pass exported, folded back into the opaque color
@@ -3607,6 +3802,8 @@ void Renderer::Shutdown() {
     motion_blur_.Destroy(*device_);
     dof_.Destroy(*device_);
     if (light_cluster_pipeline_) device_->DestroyPipeline(light_cluster_pipeline_);
+    if (msaa_resolve_pipeline_) device_->DestroyPipeline(msaa_resolve_pipeline_);
+    if (depth_copy_pipeline_) device_->DestroyPipeline(depth_copy_pipeline_);
     if (contact_shadow_pipeline_) device_->DestroyPipeline(contact_shadow_pipeline_);
     if (cloud_shadow_pipeline_) device_->DestroyPipeline(cloud_shadow_pipeline_);
     if (sss_pipeline_) device_->DestroyPipeline(sss_pipeline_);

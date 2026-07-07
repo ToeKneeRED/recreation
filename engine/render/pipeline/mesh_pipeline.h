@@ -138,12 +138,16 @@ class MeshPipeline {
 
   // bindless_layout enables set 3 (the scene tables the rt variant reads for
   // reflection hit shading); pass a null handle when ray query is unavailable.
+  // samples > 1 builds the opaque/prepass raster pipelines multisampled
+  // (kMsaa mode). Blend pipelines stay single-sampled: the transparent pass
+  // always runs after the resolve.
   static std::unique_ptr<MeshPipeline> Create(Device& device, Format color_format,
                                               Format motion_format, Format normal_format,
                                               Format depth_format,
                                               BindingLayoutHandle material_layout,
                                               BindingLayoutHandle environment_layout,
-                                              BindingLayoutHandle bindless_layout);
+                                              BindingLayoutHandle bindless_layout,
+                                              u32 samples = 1);
   ~MeshPipeline();
 
   MeshPipeline(const MeshPipeline&) = delete;

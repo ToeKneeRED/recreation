@@ -126,7 +126,7 @@ bool D3D12Swapchain::Init(u32 width, u32 height, bool vsync) {
         format_, extent_,
         kTextureUsageColorTarget | kTextureUsageSampled | kTextureUsageTransferSrc |
             kTextureUsageTransferDst,
-        1);
+        1, 1);
     if (!image) {
       REC_ERROR("d3d12: offscreen swapchain image creation failed");
       return false;

@@ -631,6 +631,17 @@ void D3D12CommandList::BlitMip(const GpuImage& image, u32 src_mip, Extent2D src_
   RequireTextureState(texture, dst_mip, 1, D3D12_RESOURCE_STATE_COPY_DEST);
 }
 
+void D3D12CommandList::ResolveTexture(const GpuImage& src, const GpuImage& dst) {
+  TextureRecord* src_texture = Rec(src.handle);
+  TextureRecord* dst_texture = Rec(dst.handle);
+  // Caller transitioned to kResolveSrc/kResolveDst; the tracker already
+  // matches, so these are no-ops that keep the state walk consistent.
+  RequireTextureState(src_texture, 0, 1, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+  RequireTextureState(dst_texture, 0, 1, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+  list_->ResolveSubresource(dst_texture->resource, 0, src_texture->resource, 0,
+                            ToDxgiFormat(dst.format));
+}
+
 void D3D12CommandList::ClearColor(const GpuImage& image, const f32 color[4]) {
   TextureRecord* texture = Rec(image.handle);
   bool has_rtv = false;

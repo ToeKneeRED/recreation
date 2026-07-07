@@ -841,7 +841,7 @@ void VulkanDevice::ShareWithAsyncCompute(VkImageCreateInfo& info, TextureUsageFl
 }
 
 GpuImage VulkanDevice::CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
-                                     u32 mip_levels) {
+                                     u32 mip_levels, u32 samples) {
   VkFormat vk_format = ToVkFormat(format);
   VkImageCreateInfo image_info{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   image_info.imageType = VK_IMAGE_TYPE_2D;
@@ -849,7 +849,7 @@ GpuImage VulkanDevice::CreateImage2D(Format format, Extent2D extent, TextureUsag
   image_info.extent = {extent.width, extent.height, 1};
   image_info.mipLevels = mip_levels;
   image_info.arrayLayers = 1;
-  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_info.samples = static_cast<VkSampleCountFlagBits>(samples);
   image_info.usage = ToVkImageUsage(usage, format);
 
     const u32 shared_families[2] = {graphics_family_, compute_family_};
@@ -884,7 +884,8 @@ VmaAllocationCreateInfo alloc_info{};
           .view = MakeView(view),
           .format = format,
           .extent = extent,
-          .mip_levels = mip_levels};
+          .mip_levels = mip_levels,
+          .samples = samples};
 }
 
 GpuImage VulkanDevice::CreateImage3D(Format format, u32 width, u32 height, u32 depth,
@@ -1496,7 +1497,8 @@ bool VulkanDevice::BuildGraphicsPipeline(const GraphicsPipelineDesc& desc,
 
   VkPipelineMultisampleStateCreateInfo multisample{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  multisample.rasterizationSamples =
+      static_cast<VkSampleCountFlagBits>(desc.samples > 0 ? desc.samples : 1);
 
   VkPipelineDepthStencilStateCreateInfo depth{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};

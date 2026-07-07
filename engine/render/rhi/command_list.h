@@ -171,6 +171,11 @@ class CommandList {
   // kCopySrc, dst mip in kCopyDst.
   virtual void BlitMip(const GpuImage& image, u32 src_mip, Extent2D src_extent, u32 dst_mip,
                        Extent2D dst_extent) = 0;
+  // Averaged multisample resolve (color formats). Src must be in kResolveSrc,
+  // dst in kResolveDst; extents and formats must match. Data-preserving
+  // resolves (depth/normals: pick one sample) go through a compute pass
+  // reading the MS view instead.
+  virtual void ResolveTexture(const GpuImage& src, const GpuImage& dst) = 0;
   virtual void ClearColor(const GpuImage& image, const f32 color[4]) = 0;  // kCopyDst state
   virtual void ClearDepth(const GpuImage& image, f32 depth) = 0;           // kCopyDst state
   virtual void FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size, u32 data) = 0;

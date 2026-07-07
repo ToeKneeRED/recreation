@@ -30,6 +30,7 @@ struct GpuImage {
   Format format = Format::kUnknown;
   Extent2D extent{};
   u32 mip_levels = 1;
+  u32 samples = 1;  // >1 = multisampled (MSAA geometry targets)
 
   explicit operator bool() const { return static_cast<bool>(handle); }
 };

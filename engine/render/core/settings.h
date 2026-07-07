@@ -55,6 +55,10 @@ inline f32 UpscalerScale(UpscalerQuality quality) {
 // expensive transitions (upscaler swaps, vsync) go through a device idle.
 struct RenderSettings {
   AntiAliasingMode aa_mode = AntiAliasingMode::kTaa;
+  // Sample count for AntiAliasingMode::kMsaa (2/4/8; clamped to what the
+  // device supports). Switching aa_mode to/from kMsaa recreates the mesh
+  // pipelines (device idle), like an upscaler swap.
+  u32 msaa_samples = 4;
   UpscalerKind upscaler = UpscalerKind::kNone;
   UpscalerQuality upscaler_quality = UpscalerQuality::kQuality;
   f32 sharpness = 0.0f;  // 0..1, used by upscalers that sharpen

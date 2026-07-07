@@ -181,6 +181,13 @@ StateInfo StateInfoOf(ResourceState state, bool as_source) {
     case ResourceState::kCopyDst:
       return {VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
               VK_ACCESS_2_TRANSFER_WRITE_BIT};
+    // Vulkan resolves are transfer ops; d3d12 needs the distinct states.
+    case ResourceState::kResolveSrc:
+      return {VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_RESOLVE_BIT,
+              VK_ACCESS_2_TRANSFER_READ_BIT};
+    case ResourceState::kResolveDst:
+      return {VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_RESOLVE_BIT,
+              VK_ACCESS_2_TRANSFER_WRITE_BIT};
     case ResourceState::kShadingRate:
       return {VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR,
               VK_PIPELINE_STAGE_2_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR,

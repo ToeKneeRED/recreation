@@ -31,6 +31,10 @@ UsageState StateFor(ResourceUsage usage) {
       return {ResourceState::kShaderReadTaskMesh, false};
     case ResourceUsage::kStorageWrite:
       return {ResourceState::kGeneral, true};
+    case ResourceUsage::kResolveSrc:
+      return {ResourceState::kResolveSrc, false};
+    case ResourceUsage::kResolveDst:
+      return {ResourceState::kResolveDst, true};
   }
   return {ResourceState::kGeneral, true};
 }
@@ -47,6 +51,10 @@ TextureUsageFlags ImageUsageFor(ResourceUsage usage) {
       return kTextureUsageSampled;
     case ResourceUsage::kStorageWrite:
       return kTextureUsageStorage;
+    case ResourceUsage::kResolveSrc:
+      return kTextureUsageTransferSrc;
+    case ResourceUsage::kResolveDst:
+      return kTextureUsageTransferDst;
   }
   return 0;
 }
@@ -59,11 +67,12 @@ void TransientPool::BeginFrame() {
   for (Entry& entry : entries_) entry.in_use = false;
 }
 
-const GpuImage* TransientPool::Acquire(Format format, Extent2D extent, TextureUsageFlags usage) {
+const GpuImage* TransientPool::Acquire(Format format, Extent2D extent, TextureUsageFlags usage,
+                                       u32 samples) {
   for (Entry& entry : entries_) {
     if (entry.in_use || entry.image.format != format ||
         entry.image.extent.width != extent.width || entry.image.extent.height != extent.height ||
-        entry.usage != usage) {
+        entry.usage != usage || entry.image.samples != samples) {
       continue;
     }
     entry.in_use = true;
@@ -71,7 +80,7 @@ const GpuImage* TransientPool::Acquire(Format format, Extent2D extent, TextureUs
   }
 
   Entry entry;
-  entry.image = device_.CreateImage2D(format, extent, usage);
+  entry.image = device_.CreateImage2D(format, extent, usage, 1, samples);
   if (!entry.image) return nullptr;
   entry.usage = usage;
   entry.in_use = true;
@@ -137,7 +146,8 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
     Resource& resource = resources_[i];
     if (resource.imported) continue;
     const GpuImage* image = pool.Acquire(
-        resource.desc.format, {resource.desc.width, resource.desc.height}, usages[i]);
+        resource.desc.format, {resource.desc.width, resource.desc.height}, usages[i],
+        resource.desc.samples > 0 ? resource.desc.samples : 1);
     if (!image) {
       REC_ERROR("transient allocation failed for {}", resource.desc.name);
       return false;

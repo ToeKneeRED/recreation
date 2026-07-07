@@ -95,6 +95,8 @@ enum class ResourceState : u8 {
   kDepthTarget,
   kCopySrc,
   kCopyDst,
+  kResolveSrc,  // multisample resolve source (d3d12 distinguishes these from copies)
+  kResolveDst,
   kPresent,
   kShadingRate,  // fragment shading rate attachment (vrs rate image)
 };

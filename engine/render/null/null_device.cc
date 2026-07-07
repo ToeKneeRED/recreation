@@ -33,6 +33,7 @@ class NullCommandList final : public CommandList {
                            const BufferTextureCopy&) override {}
   void CopyBuffer(const GpuBuffer&, u64, const GpuBuffer&, u64, u64) override {}
   void BlitMip(const GpuImage&, u32, Extent2D, u32, Extent2D) override {}
+  void ResolveTexture(const GpuImage&, const GpuImage&) override {}
   void ClearColor(const GpuImage&, const f32[4]) override {}
   void ClearDepth(const GpuImage&, f32) override {}
   void FillBuffer(const GpuBuffer&, u64, u64, u32) override {}
@@ -58,7 +59,7 @@ class NullDevice final : public Device {
   GpuBuffer CreateBuffer(u64, BufferUsageFlags, bool) override { return {}; }
   GpuBuffer CreateBufferWithData(ByteSpan, BufferUsageFlags) override { return {}; }
   void DestroyBuffer(GpuBuffer& buffer) override { buffer = {}; }
-  GpuImage CreateImage2D(Format, Extent2D, TextureUsageFlags, u32) override { return {}; }
+  GpuImage CreateImage2D(Format, Extent2D, TextureUsageFlags, u32, u32) override { return {}; }
   GpuImage CreateImageCube(Format, u32, TextureUsageFlags, u32) override { return {}; }
   void DestroyImage(GpuImage& image) override { image = {}; }
   TextureView CreateMipView(const GpuImage&, u32) override { return {}; }

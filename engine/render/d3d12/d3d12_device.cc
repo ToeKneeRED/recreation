@@ -591,7 +591,7 @@ GpuImage D3D12Device::WrapTexture(TextureRecord* record) {
 }
 
 GpuImage D3D12Device::CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
-                                    u32 mip_levels) {
+                                    u32 mip_levels, u32 samples) {
   bool depth = IsDepthFormat(format);
   bool block = format >= Format::kBC1RgbUnorm && format <= Format::kBC7Srgb;
 
@@ -606,7 +606,7 @@ GpuImage D3D12Device::CreateImage2D(Format format, Extent2D extent, TextureUsage
   desc.Format = depth ? (format == Format::kD16Unorm ? DXGI_FORMAT_R16_TYPELESS
                                                      : DXGI_FORMAT_R32_TYPELESS)
                       : ToDxgiFormat(format);
-  desc.SampleDesc.Count = 1;
+  desc.SampleDesc.Count = samples;
   if (usage & kTextureUsageColorTarget) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   if (usage & kTextureUsageDepthTarget) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   if (usage & kTextureUsageStorage) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
@@ -629,7 +629,10 @@ GpuImage D3D12Device::CreateImage2D(Format format, Extent2D extent, TextureUsage
               mip_levels);
     return {};
   }
-  return WrapTexture(MakeTextureRecord(resource, format, extent, mip_levels, 1, false, usage));
+  GpuImage image =
+      WrapTexture(MakeTextureRecord(resource, format, extent, mip_levels, 1, false, usage));
+  image.samples = samples;
+  return image;
 }
 
 GpuImage D3D12Device::CreateImage3D(Format format, u32 width, u32 height, u32 depth,
@@ -1414,7 +1417,7 @@ PipelineHandle D3D12Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& d
     stream.dsv.value = desc.depth.format != Format::kUnknown
                            ? ToDxgiFormat(desc.depth.format)
                            : DXGI_FORMAT_UNKNOWN;
-    stream.sample.value = {1, 0};
+    stream.sample.value = {desc.samples > 0 ? desc.samples : 1, 0};
 
     D3D12_PIPELINE_STATE_STREAM_DESC stream_desc = {sizeof(stream), &stream};
     hr = device2_->CreatePipelineState(&stream_desc, IID_ID3D12PipelineState,
@@ -1488,7 +1491,7 @@ PipelineHandle D3D12Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& d
     }
     pso.DSVFormat = desc.depth.format != Format::kUnknown ? ToDxgiFormat(desc.depth.format)
                                                           : DXGI_FORMAT_UNKNOWN;
-    pso.SampleDesc = {1, 0};
+    pso.SampleDesc = {desc.samples > 0 ? desc.samples : 1, 0};
     hr = device_->CreateGraphicsPipelineState(&pso, IID_ID3D12PipelineState,
                                               reinterpret_cast<void**>(&record->pso));
   }

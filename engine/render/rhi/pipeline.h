@@ -68,6 +68,9 @@ struct GraphicsPipelineDesc {
   base::Vector<BlendMode> blend;  // per color target; empty = all opaque
   base::Vector<PipelineBindings> sets;
   u32 push_constant_size = 0;
+  // Rasterization sample count; must match the bound targets' samples.
+  // 1 = the standard single-sampled path (every existing pipeline).
+  u32 samples = 1;
   const char* debug_name = nullptr;
 };
 

@@ -80,6 +80,8 @@ D3D12_RESOURCE_STATES ToResourceStates(ResourceState state) {
     case ResourceState::kDepthTarget: return D3D12_RESOURCE_STATE_DEPTH_WRITE;
     case ResourceState::kCopySrc: return D3D12_RESOURCE_STATE_COPY_SOURCE;
     case ResourceState::kCopyDst: return D3D12_RESOURCE_STATE_COPY_DEST;
+    case ResourceState::kResolveSrc: return D3D12_RESOURCE_STATE_RESOLVE_SOURCE;
+    case ResourceState::kResolveDst: return D3D12_RESOURCE_STATE_RESOLVE_DEST;
     // The offscreen ring has no display engine; PRESENT aliases COMMON in
     // D3D12 anyway, so the renderer's kPresent handoff maps cleanly.
     case ResourceState::kPresent: return D3D12_RESOURCE_STATE_COMMON;

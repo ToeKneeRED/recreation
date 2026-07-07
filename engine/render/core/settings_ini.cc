@@ -27,6 +27,7 @@ const char* Name(AntiAliasingMode m) {
     case AntiAliasingMode::kNone: return "none";
     case AntiAliasingMode::kTaa: return "taa";
     case AntiAliasingMode::kUpscaler: return "upscaler";
+    case AntiAliasingMode::kMsaa: return "msaa";
   }
   return "taa";
 }
@@ -34,6 +35,7 @@ bool Parse(const std::string& v, AntiAliasingMode& out) {
   if (v == "none") out = AntiAliasingMode::kNone;
   else if (v == "taa") out = AntiAliasingMode::kTaa;
   else if (v == "upscaler") out = AntiAliasingMode::kUpscaler;
+  else if (v == "msaa") out = AntiAliasingMode::kMsaa;
   else return false;
   return true;
 }

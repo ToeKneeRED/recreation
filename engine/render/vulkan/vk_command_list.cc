@@ -275,6 +275,17 @@ void VulkanCommandList::BlitMip(const GpuImage& image, u32 src_mip, Extent2D src
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 }
 
+void VulkanCommandList::ResolveTexture(const GpuImage& src, const GpuImage& dst) {
+  const TextureRecord* src_texture = Rec(src.handle);
+  const TextureRecord* dst_texture = Rec(dst.handle);
+  VkImageResolve region{};
+  region.srcSubresource = {src_texture->aspect, 0, 0, 1};
+  region.dstSubresource = {dst_texture->aspect, 0, 0, 1};
+  region.extent = {src.extent.width, src.extent.height, 1};
+  vkCmdResolveImage(cmd_, src_texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    dst_texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+}
+
 void VulkanCommandList::ClearColor(const GpuImage& image, const f32 color[4]) {
   const TextureRecord* texture = Rec(image.handle);
   VkClearColorValue value{{color[0], color[1], color[2], color[3]}};

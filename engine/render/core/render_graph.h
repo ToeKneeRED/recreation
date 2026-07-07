@@ -27,6 +27,8 @@ enum class ResourceUsage : u8 {
   kSampledCompute,
   kSampledTaskMesh,  // sampled in the task/mesh stages (mesh-shader cull)
   kStorageWrite,
+  kResolveSrc,  // multisample resolve source (CommandList::ResolveTexture)
+  kResolveDst,
 };
 
 struct TransientTextureDesc {
@@ -34,6 +36,7 @@ struct TransientTextureDesc {
   Format format = Format::kRGBA16Float;
   u32 width = 0;
   u32 height = 0;
+  u32 samples = 1;  // >1 = multisampled geometry target (kMsaa mode)
 };
 
 // Caches images keyed by their description so a steady frame allocates
@@ -48,7 +51,8 @@ class TransientPool {
   TransientPool& operator=(const TransientPool&) = delete;
 
   void BeginFrame();
-  const GpuImage* Acquire(Format format, Extent2D extent, TextureUsageFlags usage);
+  const GpuImage* Acquire(Format format, Extent2D extent, TextureUsageFlags usage,
+                          u32 samples = 1);
 
   // Frees every cached image. Call after WaitIdle, e.g. on resize.
   void Clear();

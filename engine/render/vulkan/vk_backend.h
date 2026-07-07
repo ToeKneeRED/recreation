@@ -169,6 +169,7 @@ class VulkanCommandList final : public CommandList {
                   u64 size) override;
   void BlitMip(const GpuImage& image, u32 src_mip, Extent2D src_extent, u32 dst_mip,
                Extent2D dst_extent) override;
+  void ResolveTexture(const GpuImage& src, const GpuImage& dst) override;
   void ClearColor(const GpuImage& image, const f32 color[4]) override;
   void ClearDepth(const GpuImage& image, f32 depth) override;
   void FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size, u32 data) override;
@@ -248,7 +249,7 @@ class VulkanDevice final : public Device {
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override;
   void DestroyBuffer(GpuBuffer& buffer) override;
   GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
-                         u32 mip_levels) override;
+                         u32 mip_levels, u32 samples) override;
   GpuImage CreateImage3D(Format format, u32 width, u32 height, u32 depth,
                          TextureUsageFlags usage) override;
   GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
