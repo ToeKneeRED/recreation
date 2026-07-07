@@ -22,6 +22,12 @@ public sealed class FakeBackend : IEngineBackend
     private readonly Dictionary<ulong, ulong> _race = new();     // base -> race form
     private readonly Dictionary<ulong, int> _weaponDamage = new();  // weapon -> damage
     private readonly Dictionary<ulong, float> _armorRating = new();  // armor -> rating
+    private readonly Dictionary<ulong, int> _formType = new();       // form -> type code
+    private readonly Dictionary<ulong, ulong> _harvest = new();      // flora -> ingredient
+    private readonly HashSet<ulong> _disabled = new();
+
+    public void SetFormType(ulong form, int type) => _formType[form] = type;
+    public void SetHarvestIngredient(ulong flora, ulong ingredient) => _harvest[flora] = ingredient;
 
     public void SetActorBaseData(ulong baseObject, int sex, ulong race)
     {
@@ -195,6 +201,20 @@ public sealed class FakeBackend : IEngineBackend
                 return Value.Int(_weaponDamage.GetValueOrDefault(self));
             case "GetArmorRating":
                 return Value.Float(_armorRating.GetValueOrDefault(self));
+            case "GetType":
+                return Value.Int(_formType.GetValueOrDefault(self));
+            case "GetHarvestIngredient":
+                return Value.Object(_harvest.GetValueOrDefault(self));
+            case "Disable":
+                _disabled.Add(self);
+                return Value.None;
+            case "Enable":
+                _disabled.Remove(self);
+                return Value.None;
+            case "IsEnabled":
+                return Value.Bool(!_disabled.Contains(self));
+            case "IsDisabled":
+                return Value.Bool(_disabled.Contains(self));
             default:
                 return Value.None;
         }

@@ -31,6 +31,7 @@ internal static class Program
         EncumbranceTests.Run(check);
         FastTravelTests.Run(check);
         LocationDiscoveryTests.Run(check);
+        HarvestingTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;
