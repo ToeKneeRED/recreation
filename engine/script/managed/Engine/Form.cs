@@ -52,6 +52,10 @@ public class Form
     // The item a harvestable flora produces (its FLOR produce), or Form.None.
     public Form HarvestIngredient => Form.From(Call("GetHarvestIngredient").AsHandle());
 
+    // The enchantment on a weapon or armor, or Form.None if unenchanted.
+    public Form Enchantment => Form.From(Call("GetEnchantment").AsHandle());
+    public bool IsEnchanted => Enchantment.Exists;
+
     // True if the engine resolves this handle to a script instance of typeName
     // or one of its ancestors.
     public bool Is(string typeName)
