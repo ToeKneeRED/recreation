@@ -39,6 +39,10 @@ class SkyrimBindings {
   // Base armor rating of an armor form (ARMO); 0 for non-armor.
   virtual f32 GetArmorRating(papyrus::ObjectRef armor) { return 0; }
 
+  // The ingredient a harvestable flora (FLOR) produces, from its PFIG; None for
+  // non-flora. The form passed is the flora base, not a placed reference.
+  virtual papyrus::ObjectRef GetHarvestIngredient(papyrus::ObjectRef flora) { return {}; }
+
   // ActorBase (NPC_ record data).
   virtual i32 GetSex(papyrus::ObjectRef actor_base) { return 0; }  // 0 male, 1 female
   virtual bool IsUnique(papyrus::ObjectRef actor_base) { return false; }

@@ -521,6 +521,10 @@ papyrus::ObjectRef RecordBackedSkyrimBindings::GetRace(ObjectRef actor_base) {
   return ResolveFormRef(actor_base, FourCc('R', 'N', 'A', 'M'));
 }
 
+papyrus::ObjectRef RecordBackedSkyrimBindings::GetHarvestIngredient(ObjectRef flora) {
+  return ResolveFormRef(flora, FourCc('P', 'F', 'I', 'G'));
+}
+
 papyrus::ObjectRef RecordBackedSkyrimBindings::GetBaseObject(ObjectRef ref) {
   return ResolveFormRef(ref, FourCc('N', 'A', 'M', 'E'));
 }
