@@ -375,8 +375,11 @@ bool FaceBuilder::AssembleNpc(bethesda::GlobalFormId npc, FaceState* out) {
         m.normal_model_space = IsModelSpaceNormal(pt->normal);
       }
       m.metallic_factor = 0.0f;
-      m.roughness_factor = 0.06f;  // glossy: a bright catchlight stands in for the eye cubemap
-      for (int k = 0; k < 3; ++k) m.base_color_factor[k] = 1.2f;  // lift sclera/iris in the socket
+      // Glossy, but not mirror-tight: a broader lobe keeps a catchlight on the eye
+      // as the head turns to 3/4 (a near-mirror highlight slides off and the eye
+      // reads dead), and a higher albedo lifts the sclera/iris out of the socket.
+      m.roughness_factor = 0.18f;
+      for (int k = 0; k < 3; ++k) m.base_color_factor[k] = 1.5f;
       ctx_.assets->AddMaterial(m);
       ctx_.renderer->UploadMaterial(m);
       p.material_override = m.id;

@@ -1320,10 +1320,10 @@ void DemoScenes::CreateFacesDemoScene() {
           params.tint = {hc[0], hc[1], hc[2]};
           params.diffuse = diffuse;
           params.guide_count = 9000;
-          params.children_per_guide = 26;
+          params.children_per_guide = 32;
           params.strand_width = 0.0015f;
-          params.clump_radius = 0.005f;
-          params.frizz = 0.22f;  // groomed, not the demo's wind-blown fuzzball
+          params.clump_radius = 0.007f;  // wider clumps fill gaps (no see-through)
+          params.frizz = 0.25f;  // groomed flyaway (curl de-slabs independently)
           // Standalone hair NIFs are authored head-local at the origin, but the
           // facegen face part carries the body-height offset, so drop the groom
           // onto the face's crown (bounds centre + up*radius in game units, then

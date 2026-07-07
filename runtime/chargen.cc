@@ -344,9 +344,10 @@ void CharGen::RebuildHairGroom() {
   p.tint = {tint.x, tint.y, tint.z};
   p.diffuse = diffuse;
   p.guide_count = 7000;
-  p.children_per_guide = 18;
+  p.children_per_guide = 24;
   p.strand_width = 0.0013f;
-  p.clump_radius = 0.005f;
+  p.clump_radius = 0.007f;  // wider clumps fill the gaps between guides (no scalp show-through)
+  p.frizz = 0.4f;  // tidy portrait flyaway; the curl still de-slabs into locks
   groom_ = r.CreateHairGroom(*conv.mesh, p, MakeTranslation(HeadBoneOffset()));
 }
 
@@ -363,6 +364,10 @@ void CharGen::SetupSceneAndCamera() {
   s.sun_color = {1.0f, 0.97f, 0.94f};
   s.ambient = 0.32f;
   s.dof = false;
+  // No cast shadows: a floating head has no contact shadow to lose, the soft
+  // portrait key plus the baked facegen tint carry the form, and it drops the
+  // head's own sun shadow that otherwise specks the studio backdrop below it.
+  s.rt_shadows = false;
   // Fixed exposure: the dark backdrop dominates the frame, so auto exposure
   // would crank up and wash out both the backdrop and the skin.
   s.auto_exposure = false;
