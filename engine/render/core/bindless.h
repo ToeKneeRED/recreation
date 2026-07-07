@@ -3,6 +3,8 @@
 
 #include <memory>
 
+#include <base/containers/vector.h>
+
 #include "core/types.h"
 #include "render/rhi/device.h"
 
@@ -61,6 +63,16 @@ class BindlessRegistry {
   // All return kInvalidIndex when the respective table is full.
   u32 RegisterTexture(TextureView view);
   u32 RegisterMaterial(const MaterialRecord& record);
+  // Texture streaming support. ReleaseTexture returns a slot to a free list
+  // that RegisterTexture reuses. The caller owns the timing: release only
+  // after every in-flight frame that could read the slot has drained AND no
+  // material record still points at it (the material system's retire ring
+  // guarantees both). RewriteTextureIndex repoints a material record's
+  // texture references (all four fields checked) from one slot to another;
+  // the table is host visible, so pending frames read either index — both
+  // stay valid images until the old slot is released.
+  void ReleaseTexture(u32 index);
+  void RewriteTextureIndex(u32 material_index, u32 old_texture, u32 new_texture);
   // Geometry records must follow the blas geometry order (non-blend
   // submeshes in submesh order). Returns the instanceCustomIndex.
   // The buffers must have been created with kBufferUsageDeviceAddress.
@@ -85,6 +97,7 @@ class BindlessRegistry {
   u32 geometry_count_ = 0;
   u32 material_count_ = 0;
   u32 texture_count_ = 0;
+  base::Vector<u32> free_textures_;  // released slots, reused by RegisterTexture
 };
 
 }  // namespace rec::render

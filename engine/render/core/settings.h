@@ -71,6 +71,12 @@ struct RenderSettings {
   f32 dynamic_target_ms = 16.6f;
   f32 dynamic_min_scale = 0.5f;
 
+  // Material-texture VRAM budget (MB) for the mip streaming in MaterialSystem:
+  // textures whose materials haven't drawn recently drop to a low-mip tail
+  // when the budget is exceeded, and stream back in when used again.
+  // -1 = auto (half of device-local memory), 0 = unlimited (streaming off).
+  i32 texture_budget_mb = -1;
+
   bool rt_shadows = true;  // masked by device caps and the renderer desc
   f32 sun_angular_radius = 0.005f;  // radians; 0 reverts to hard shadows
 

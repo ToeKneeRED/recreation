@@ -44,15 +44,37 @@ bool BindlessRegistry::Initialize() {
 }
 
 u32 BindlessRegistry::RegisterTexture(TextureView view) {
-  if (texture_count_ >= kMaxTextures) {
+  u32 index;
+  if (!free_textures_.empty()) {
+    index = free_textures_.back();
+    free_textures_.pop_back();
+  } else if (texture_count_ < kMaxTextures) {
+    index = texture_count_++;
+  } else {
     REC_WARN("bindless texture table full");
     return kInvalidIndex;
   }
-  u32 index = texture_count_++;
   BindingItem item = Bind::SampledView(3, view);
   item.array_index = index;
   device_.UpdateBindingSet(set_, {item});
   return index;
+}
+
+void BindlessRegistry::ReleaseTexture(u32 index) {
+  if (index == kInvalidIndex) return;
+  free_textures_.push_back(index);
+}
+
+void BindlessRegistry::RewriteTextureIndex(u32 material_index, u32 old_texture, u32 new_texture) {
+  if (material_index == kInvalidIndex || material_index >= material_count_) return;
+  auto* record = reinterpret_cast<MaterialRecord*>(static_cast<u8*>(material_table_.mapped) +
+                                                   material_index * sizeof(MaterialRecord));
+  if (record->base_color_texture == old_texture) record->base_color_texture = new_texture;
+  if (record->metallic_roughness_texture == old_texture) {
+    record->metallic_roughness_texture = new_texture;
+  }
+  if (record->terrain_layer1_texture == old_texture) record->terrain_layer1_texture = new_texture;
+  if (record->terrain_weight_texture == old_texture) record->terrain_weight_texture = new_texture;
 }
 
 u32 BindlessRegistry::RegisterMaterial(const MaterialRecord& record) {

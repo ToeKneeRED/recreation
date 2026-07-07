@@ -117,10 +117,12 @@ bool MaterialSystem::CreateDefaults() {
   }
   default_set_ = AllocateSet();
   if (!default_set_) return false;
-  return WriteSet(default_set_, 0, default_material);
+  u64 map_keys[5];
+  return WriteSet(default_set_, static_cast<u32>(param_buffers_.size()) - 1,
+                  sets_in_last_pool_ - 1, default_material, 0, map_keys);
 }
 
-GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture) {
+GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 first_mip) {
   FormatInfo info = FormatFor(texture.format, texture.is_srgb);
   if (info.format == Format::kUnknown || texture.width == 0 || texture.height == 0) {
     REC_WARN("texture upload skipped, unsupported format");
@@ -130,25 +132,41 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture) {
     REC_WARN("array/cubemap textures not supported yet");
     return {};
   }
+  if (first_mip >= texture.mip_count) return {};
 
   // Uncompressed single-mip sources get a generated chain; BCn ships its
-  // mips in the asset and cannot be blitted.
+  // mips in the asset and cannot be blitted. Partial (streamed) uploads only
+  // happen on baked chains, never through the generate path.
   bool generate_mips = texture.mip_count == 1 && info.block_dim == 1;
+  u32 top_width = std::max(1u, texture.width >> first_mip);
+  u32 top_height = std::max(1u, texture.height >> first_mip);
   u32 mip_count = generate_mips ? FullMipChainLength(texture.width, texture.height)
-                                : texture.mip_count;
+                                : texture.mip_count - first_mip;
 
   TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
   if (generate_mips) usage |= kTextureUsageTransferSrc;
   GpuImage image =
-      device_.CreateImage2D(info.format, {texture.width, texture.height}, usage, mip_count);
+      device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
   if (!image) return {};
 
-  GpuBuffer staging = device_.CreateBuffer(texture.data.size(), kBufferUsageTransferSrc, true);
+  // Skip past the source mips above the resident range.
+  u64 skip = 0;
+  {
+    u32 width = texture.width;
+    u32 height = texture.height;
+    for (u32 mip = 0; mip < first_mip; ++mip) {
+      skip += MipSizeBytes(info, width, height);
+      width = std::max(1u, width / 2);
+      height = std::max(1u, height / 2);
+    }
+  }
+  u64 upload_bytes = texture.data.size() - skip;
+  GpuBuffer staging = device_.CreateBuffer(upload_bytes, kBufferUsageTransferSrc, true);
   if (!staging.mapped) {
     device_.DestroyImage(image);
     return {};
   }
-  std::memcpy(staging.mapped, texture.data.data(), texture.data.size());
+  std::memcpy(staging.mapped, texture.data.data() + skip, upload_bytes);
 
   u32 upload_mips = generate_mips ? 1 : mip_count;
   device_.ImmediateSubmit([&](CommandList& cmd) {
@@ -156,8 +174,8 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture) {
 
     base::Vector<BufferTextureCopy> regions;
     u64 offset = 0;
-    u32 width = texture.width;
-    u32 height = texture.height;
+    u32 width = top_width;
+    u32 height = top_height;
     for (u32 mip = 0; mip < upload_mips; ++mip) {
       regions.push_back({.buffer_offset = offset, .mip = mip, .extent = {width, height}});
       offset += MipSizeBytes(info, width, height);
@@ -205,19 +223,53 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture) {
   return image;
 }
 
+u64 MaterialSystem::BytesForMips(const asset::Texture& texture, u32 first_mip) const {
+  FormatInfo info = FormatFor(texture.format, texture.is_srgb);
+  u64 bytes = 0;
+  u32 width = texture.width;
+  u32 height = texture.height;
+  for (u32 mip = 0; mip < texture.mip_count; ++mip) {
+    if (mip >= first_mip) bytes += MipSizeBytes(info, width, height);
+    width = std::max(1u, width / 2);
+    height = std::max(1u, height / 2);
+  }
+  return bytes;
+}
+
 bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   u64 key = texture.id.hash ^ id_salt;
   if (textures_.find(key)) return true;
   GpuImage image = UploadTextureImage(texture);
   if (!image) return false;
-  textures_.insert(key, image);
+
+  auto record = std::make_unique<TextureRecord>();
+  record->key = key;
+  record->image = image;
+  record->total_mips = texture.mip_count;
+  FormatInfo info = FormatFor(texture.format, texture.is_srgb);
+  bool baked = info.block_dim == 4 && texture.mip_count > 1;
+  // Generated chains add ~1/3 on top of the source mip 0.
+  record->full_bytes = baked ? texture.data.size() : texture.data.size() * 4 / 3;
+  record->resident_bytes = record->full_bytes;
+  if (baked) {
+    u32 dim = std::max(texture.width, texture.height);
+    u32 tail = 0;
+    while (tail + 1 < texture.mip_count && (dim >> tail) > kTailMaxDim) ++tail;
+    record->tail_first_mip = tail;
+    record->streamable = tail > 0;
+    if (record->streamable) record->source = texture;  // retained for re-promotes
+  }
+  // Fresh uploads count as hot so an over-budget load burst can't demote a
+  // texture before the material/mesh referencing it even arrives.
+  record->last_used = current_frame_;
   if (registry_ && texture.is_srgb) {
     // Only color textures matter for ray hit shading.
-    u32 index = registry_->RegisterTexture(image.view);
-    if (index != BindlessRegistry::kInvalidIndex) {
-      bindless_textures_.insert(key, index);
-    }
+    record->bindless = registry_->RegisterTexture(image.view);
   }
+  resident_bytes_ += record->resident_bytes;
+  u32 index = static_cast<u32>(texture_records_.size());
+  texture_records_.push_back(std::move(record));
+  textures_.insert(key, index);
   return true;
 }
 
@@ -240,15 +292,49 @@ BindingSetHandle MaterialSystem::AllocateSet() {
   return set;
 }
 
+MaterialSystem::TextureRecord* MaterialSystem::record_for(u64 hash) {
+  if (hash == 0) return nullptr;
+  const u32* index = textures_.find(hash);
+  return index ? texture_records_[*index].get() : nullptr;
+}
+
 const GpuImage* MaterialSystem::texture_or(u64 hash, const GpuImage& fallback) const {
   if (hash != 0) {
-    if (const GpuImage* found = textures_.find(hash)) return found;
+    if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
   }
   return &fallback;
 }
 
-bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
-                              const asset::Material& material, u64 id_salt) {
+u32 MaterialSystem::EnsureBindless(u64 key) {
+  TextureRecord* record = record_for(key);
+  if (!record || !registry_) return BindlessRegistry::kInvalidIndex;
+  if (record->bindless == BindlessRegistry::kInvalidIndex) {
+    record->bindless = registry_->RegisterTexture(record->image.view);
+  }
+  return record->bindless;
+}
+
+void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime) {
+  const GpuImage* maps[5] = {
+      texture_or(runtime.map_keys[0], white_),
+      texture_or(runtime.map_keys[1], flat_normal_),
+      texture_or(runtime.map_keys[2], white_),
+      texture_or(runtime.map_keys[3], white_),
+      texture_or(runtime.map_keys[4], white_),  // white = surface level
+  };
+  GpuBuffer& buffer = param_buffers_[runtime.pool];
+  u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
+  device_.UpdateBindingSet(set, {Bind::Uniform(0, buffer, offset, sizeof(Params)),
+                                 Bind::Combined(1, maps[0]->view, sampler_),
+                                 Bind::Combined(2, maps[1]->view, sampler_),
+                                 Bind::Combined(3, maps[2]->view, sampler_),
+                                 Bind::Combined(4, maps[3]->view, sampler_),
+                                 Bind::Combined(5, maps[4]->view, sampler_)});
+}
+
+bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
+                              const asset::Material& material, u64 id_salt,
+                              u64 out_map_keys[5]) {
   Params params;
   std::memcpy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
   std::memcpy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
@@ -301,28 +387,27 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 param_index,
     params.height_scale = material.height_scale;
   }
 
-  GpuBuffer& buffer = param_buffers_.back();
+  GpuBuffer& buffer = param_buffers_[pool];
   u64 offset = static_cast<u64>(param_index) * kParamStride;
   std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
 
-  const GpuImage* maps[5] = {
-      texture_or(material.base_color.hash ^ id_salt, white_),
-      texture_or(material.normal.hash ^ id_salt, flat_normal_),
-      texture_or(material.metallic_roughness.hash ^ id_salt, white_),
-      texture_or(material.emissive.hash ^ id_salt, white_),
-      texture_or(material.height.hash ^ id_salt, white_),  // white = surface level
-  };
-  device_.UpdateBindingSet(set, {Bind::Uniform(0, buffer, offset, sizeof(Params)),
-                                 Bind::Combined(1, maps[0]->view, sampler_),
-                                 Bind::Combined(2, maps[1]->view, sampler_),
-                                 Bind::Combined(3, maps[2]->view, sampler_),
-                                 Bind::Combined(4, maps[3]->view, sampler_),
-                                 Bind::Combined(5, maps[4]->view, sampler_)});
+  MaterialRuntime runtime;
+  runtime.set = set;
+  runtime.pool = pool;
+  runtime.param_index = param_index;
+  runtime.map_keys[0] = material.base_color.hash ^ id_salt;
+  runtime.map_keys[1] = material.normal.hash ^ id_salt;
+  runtime.map_keys[2] = material.metallic_roughness.hash ^ id_salt;
+  runtime.map_keys[3] = material.emissive.hash ^ id_salt;
+  runtime.map_keys[4] = material.height.hash ^ id_salt;
+  WriteSetBindings(set, runtime);
+  std::memcpy(out_map_keys, runtime.map_keys, sizeof(runtime.map_keys));
   return true;
 }
 
 const GpuImage* MaterialSystem::find_texture(u64 hash) const {
-  return textures_.find(hash);
+  if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
+  return nullptr;
 }
 
 bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt) {
@@ -330,8 +415,13 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   if (sets_.find(key)) return true;
   BindingSetHandle set = AllocateSet();
   if (!set) return false;
-  if (!WriteSet(set, sets_in_last_pool_ - 1, material, id_salt)) return false;
-  sets_.insert(key, set);
+  MaterialRuntime runtime;
+  runtime.set = set;
+  runtime.pool = static_cast<u32>(param_buffers_.size()) - 1;
+  runtime.param_index = sets_in_last_pool_ - 1;
+  if (!WriteSet(set, runtime.pool, runtime.param_index, material, id_salt, runtime.map_keys)) {
+    return false;
+  }
   // Transmissive (glass) materials route to the transparent pass so they can
   // sample the opaque scene behind them, regardless of their declared alpha.
   asset::AlphaMode mode =
@@ -345,22 +435,13 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
     std::memcpy(record.emissive, material.emissive_factor, sizeof(f32) * 3);
     record.roughness = material.roughness_factor;
     record.metallic = material.metallic_factor;
-    if (const u32* texture = bindless_textures_.find(material.base_color.hash ^ id_salt)) {
-      record.base_color_texture = *texture;
+    if (TextureRecord* base = record_for(material.base_color.hash ^ id_salt)) {
+      record.base_color_texture = base->bindless;
     }
     // The metallic-roughness map is linear, so UploadTexture skipped the bindless
     // table (it only registers sRGB color maps). Register it on demand here so the
     // path tracer can read per-texel gloss for its specular lobe.
-    u64 mr_key = material.metallic_roughness.hash ^ id_salt;
-    if (const u32* mr = bindless_textures_.find(mr_key)) {
-      record.metallic_roughness_texture = *mr;
-    } else if (const GpuImage* mr_img = textures_.find(mr_key)) {
-      u32 idx = registry_->RegisterTexture(mr_img->view);
-      if (idx != BindlessRegistry::kInvalidIndex) {
-        bindless_textures_.insert(mr_key, idx);
-        record.metallic_roughness_texture = idx;
-      }
-    }
+    record.metallic_roughness_texture = EnsureBindless(material.metallic_roughness.hash ^ id_salt);
     if (mode == asset::AlphaMode::kMask) {
       record.flags |= BindlessRegistry::kMaterialAlphaMask;
       record.alpha_cutoff = material.alpha_cutoff;
@@ -371,28 +452,215 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
     // metallic_roughness = layer 2 are already registered above).
     if (material.is_terrain) {
       record.flags |= BindlessRegistry::kMaterialTerrain;
-      if (const u32* l1 = bindless_textures_.find(material.normal.hash ^ id_salt)) {
-        record.terrain_layer1_texture = *l1;
+      if (TextureRecord* layer1 = record_for(material.normal.hash ^ id_salt)) {
+        record.terrain_layer1_texture = layer1->bindless;
       }
       // The weight map is linear, so UploadTexture skipped the bindless table;
       // register it on demand like the metallic-roughness map above.
-      u64 ctrl_key = material.emissive.hash ^ id_salt;
-      if (const u32* ctrl = bindless_textures_.find(ctrl_key)) {
-        record.terrain_weight_texture = *ctrl;
-      } else if (const GpuImage* ctrl_img = textures_.find(ctrl_key)) {
-        u32 idx = registry_->RegisterTexture(ctrl_img->view);
-        if (idx != BindlessRegistry::kInvalidIndex) {
-          bindless_textures_.insert(ctrl_key, idx);
-          record.terrain_weight_texture = idx;
-        }
-      }
+      record.terrain_weight_texture = EnsureBindless(material.emissive.hash ^ id_salt);
     }
     u32 index = registry_->RegisterMaterial(record);
     if (index != BindlessRegistry::kInvalidIndex) {
       bindless_materials_.insert(key, index);
+      runtime.bindless_material = index;
+    }
+  }
+  u32 material_index = static_cast<u32>(material_records_.size());
+  material_records_.push_back(runtime);
+  sets_.insert(key, material_index);
+  // Reverse map for streaming: a texture swap rebuilds these materials' sets.
+  for (u64 map_key : runtime.map_keys) {
+    if (TextureRecord* record = record_for(map_key)) {
+      // The same texture can fill several slots of one material; one rebuild
+      // rewrites every slot, so record the material once.
+      if (record->material_indices.empty() || record->material_indices.back() != material_index) {
+        record->material_indices.push_back(material_index);
+      }
     }
   }
   return true;
+}
+
+// --- texture streaming ------------------------------------------------------
+
+void MaterialSystem::Pin(u64 texture_hash) {
+  TextureRecord* record = record_for(texture_hash);
+  if (!record) return;
+  record->pinned = true;
+  // Pinned consumers cache the view/bindless index, so a demoted texture must
+  // come back to full residency (and then never move again).
+  if (record->streamable && record->resident_first_mip != 0) {
+    if (SwapResident(*record, 0, current_frame_)) ++promotes_;
+  }
+}
+
+void MaterialSystem::Touch(u64 material_hash, u32 frame_index) {
+  if (material_hash == 0 || budget_bytes_ == 0) return;
+  const u32* index = sets_.find(material_hash);
+  if (!index) return;
+  MaterialRuntime& runtime = material_records_[*index];
+  if (runtime.last_used == frame_index) return;
+  runtime.last_used = frame_index;
+  for (u64 map_key : runtime.map_keys) {
+    if (TextureRecord* record = record_for(map_key)) record->last_used = frame_index;
+  }
+}
+
+void MaterialSystem::BeginFrame(u32 frame_index) {
+  current_frame_ = frame_index;
+  // Device::BeginFrame just waited the frame ring's fence, so anything retired
+  // kMaxFramesInFlight frames ago is no longer referenced by the GPU.
+  size_t kept = 0;
+  for (size_t i = 0; i < retired_.size(); ++i) {
+    Retired& retired = retired_[i];
+    if (retired.frame + Device::kMaxFramesInFlight <= frame_index) {
+      if (retired.image) device_.DestroyImage(retired.image);
+      if (retired.set) device_.DestroyBindingSet(retired.set);
+      if (registry_ && retired.bindless_slot != BindlessRegistry::kInvalidIndex) {
+        registry_->ReleaseTexture(retired.bindless_slot);
+      }
+    } else {
+      retired_[kept++] = retired;
+    }
+  }
+  retired_.resize(kept);
+}
+
+bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index) {
+  GpuImage next = UploadTextureImage(record.source, first_mip);
+  if (!next) return false;
+
+  u32 old_slot = record.bindless;
+  u32 new_slot = BindlessRegistry::kInvalidIndex;
+  if (registry_ && old_slot != BindlessRegistry::kInvalidIndex) {
+    // A fresh slot: pending frames may still read the old descriptor, which
+    // update-after-bind only allows us to leave alone, not rewrite.
+    new_slot = registry_->RegisterTexture(next.view);
+    if (new_slot == BindlessRegistry::kInvalidIndex) {
+      device_.DestroyImage(next);
+      return false;
+    }
+  }
+
+  // Pre-create every replacement set before committing: the live sets may be
+  // pending on the GPU, so a half-swapped state (image retired, set rebuild
+  // failed) would leave a dangling descriptor.
+  base::Vector<BindingSetHandle> fresh_sets;
+  for (size_t i = 0; i < record.material_indices.size(); ++i) {
+    BindingSetHandle fresh = device_.CreateBindingSet(set_layout_);
+    if (!fresh) {
+      for (BindingSetHandle set : fresh_sets) device_.DestroyBindingSet(set);
+      if (registry_ && new_slot != BindlessRegistry::kInvalidIndex) {
+        registry_->ReleaseTexture(new_slot);
+      }
+      device_.DestroyImage(next);
+      return false;
+    }
+    fresh_sets.push_back(fresh);
+  }
+
+  retired_.push_back({record.image, {}, old_slot, frame_index});
+  resident_bytes_ -= record.resident_bytes;
+  record.image = next;
+  record.resident_first_mip = first_mip;
+  record.resident_bytes = BytesForMips(record.source, first_mip);
+  record.bindless = new_slot;
+  resident_bytes_ += record.resident_bytes;
+
+  for (size_t i = 0; i < record.material_indices.size(); ++i) {
+    MaterialRuntime& runtime = material_records_[record.material_indices[i]];
+    WriteSetBindings(fresh_sets[i], runtime);
+    retired_.push_back({{}, runtime.set, BindlessRegistry::kInvalidIndex, frame_index});
+    runtime.set = fresh_sets[i];
+    if (registry_ && runtime.bindless_material != BindlessRegistry::kInvalidIndex &&
+        old_slot != BindlessRegistry::kInvalidIndex) {
+      registry_->RewriteTextureIndex(runtime.bindless_material, old_slot, new_slot);
+    }
+  }
+  return true;
+}
+
+void MaterialSystem::UpdateStreaming(u32 frame_index) {
+  if (budget_bytes_ == 0 || texture_records_.empty()) return;
+
+  // Coldest fully-resident streamable texture idle for at least min_idle
+  // frames; nullptr when everything is warmer than that.
+  auto coldest = [&](u32 min_idle) -> TextureRecord* {
+    TextureRecord* best = nullptr;
+    for (auto& entry : texture_records_) {
+      TextureRecord& record = *entry;
+      if (!record.streamable || record.pinned || record.resident_first_mip != 0) continue;
+      if (record.last_used + min_idle > frame_index) continue;
+      if (!best || record.last_used < best->last_used) best = &record;
+    }
+    return best;
+  };
+
+  // Promote textures whose materials drew recently, evicting cold ones first.
+  u32 promotes = 0;
+  for (auto& entry : texture_records_) {
+    if (promotes >= kMaxPromotesPerFrame) break;
+    TextureRecord& record = *entry;
+    if (!record.streamable || record.resident_first_mip == 0) continue;
+    if (record.last_used + kHotWindow < frame_index) continue;
+    u64 needed = record.full_bytes - record.resident_bytes;
+    while (resident_bytes_ + needed > budget_bytes_) {
+      TextureRecord* victim = coldest(kColdWindow);
+      if (!victim) break;
+      if (!SwapResident(*victim, victim->tail_first_mip, frame_index)) break;
+      ++demotes_;
+    }
+    if (resident_bytes_ + needed > budget_bytes_) continue;  // no room; stay at the tail
+    if (SwapResident(record, 0, frame_index)) {
+      ++promotes_;
+      ++promotes;
+    }
+  }
+
+  // Pressure: demote the coldest textures while over budget. Never demote a
+  // texture drawn within the hot window - a working set larger than the
+  // budget stays over it (warned once) instead of thrashing.
+  u32 demotes = 0;
+  while (resident_bytes_ > budget_bytes_ && demotes < kMaxDemotesPerFrame) {
+    TextureRecord* victim = coldest(kHotWindow + 1);
+    if (!victim) {
+      if (!over_budget_warned_) {
+        REC_WARN("texture streaming: resident {} MB over the {} MB budget with every "
+                 "streamable texture hot; raise REC_TEX_BUDGET_MB",
+                 resident_bytes_ >> 20, budget_bytes_ >> 20);
+        over_budget_warned_ = true;
+      }
+      break;
+    }
+    if (!SwapResident(*victim, victim->tail_first_mip, frame_index)) break;
+    ++demotes_;
+    ++demotes;
+  }
+  if (resident_bytes_ <= budget_bytes_) over_budget_warned_ = false;
+
+  // Headless-debuggable activity trace, throttled to every ~10s at 60fps.
+  if ((promotes_ + demotes_) != logged_ops_ && frame_index >= logged_frame_ + 600) {
+    StreamingStats stats = streaming_stats();
+    REC_INFO("texture streaming: {}/{} MB resident, {}/{} textures demoted, {} promotes {} demotes",
+             resident_bytes_ >> 20, budget_bytes_ >> 20, stats.demoted_count,
+             stats.streamable_count, promotes_, demotes_);
+    logged_ops_ = promotes_ + demotes_;
+    logged_frame_ = frame_index;
+  }
+}
+
+MaterialSystem::StreamingStats MaterialSystem::streaming_stats() const {
+  StreamingStats stats;
+  stats.resident_bytes = resident_bytes_;
+  stats.budget_bytes = budget_bytes_;
+  stats.promotes = promotes_;
+  stats.demotes = demotes_;
+  for (const auto& entry : texture_records_) {
+    if (!entry->streamable) continue;
+    ++stats.streamable_count;
+    if (entry->resident_first_mip != 0) ++stats.demoted_count;
+  }
+  return stats;
 }
 
 bool MaterialSystem::is_water(u64 material_hash) const {
@@ -405,7 +673,9 @@ u32 MaterialSystem::bindless_material(u64 material_hash) const {
 }
 
 u32 MaterialSystem::bindless_texture(u64 texture_hash) const {
-  if (const u32* index = bindless_textures_.find(texture_hash)) return *index;
+  if (const u32* index = textures_.find(texture_hash)) {
+    return texture_records_[*index]->bindless;
+  }
   return BindlessRegistry::kInvalidIndex;
 }
 
@@ -434,18 +704,22 @@ bool MaterialSystem::is_effect_additive(u64 material_hash) const {
 
 BindingSetHandle MaterialSystem::set(u64 material_hash) const {
   if (material_hash != 0) {
-    if (const BindingSetHandle* found = sets_.find(material_hash)) return *found;
+    if (const u32* index = sets_.find(material_hash)) return material_records_[*index].set;
   }
   return default_set_;
 }
 
 MaterialSystem::~MaterialSystem() {
-  for (auto kv : textures_) device_.DestroyImage(kv.value);
-  textures_.clear();
+  for (auto& record : texture_records_) device_.DestroyImage(record->image);
+  texture_records_.clear();
+  for (Retired& retired : retired_) {
+    if (retired.image) device_.DestroyImage(retired.image);
+    if (retired.set) device_.DestroyBindingSet(retired.set);
+  }
   device_.DestroyImage(white_);
   device_.DestroyImage(flat_normal_);
   for (GpuBuffer& buffer : param_buffers_) device_.DestroyBuffer(buffer);
-  for (auto kv : sets_) device_.DestroyBindingSet(kv.value);
+  for (MaterialRuntime& runtime : material_records_) device_.DestroyBindingSet(runtime.set);
   if (default_set_) device_.DestroyBindingSet(default_set_);
   if (set_layout_) device_.DestroyBindingLayout(set_layout_);
 }

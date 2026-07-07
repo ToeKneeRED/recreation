@@ -48,6 +48,7 @@ base::Option<bool> FrameGenOpt{"framegen", false, "REC_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "REC_LOCAL_SHADOWS"};
 base::Option<bool> FroxelOpt{"froxel.fog", true, "REC_FROXEL"};
 base::Option<double> FroxelDensity{"froxel.density", 0.005, "REC_FROXEL_DENSITY"};
+base::Option<int> TexBudgetMb{"tex.budget.mb", -1, "REC_TEX_BUDGET_MB"};
 base::Option<bool> DrsOpt{"drs", false, "REC_DRS"};
 base::Option<double> DrsTargetMs{"drs.target.ms", 16.6, "REC_DRS_TARGET_MS"};
 base::Option<double> DrsMinScale{"drs.min.scale", 0.5, "REC_DRS_MIN_SCALE"};
@@ -546,6 +547,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (LocalShadowsOpt.overridden()) settings_.local_shadows = LocalShadowsOpt;
   if (FroxelOpt.overridden()) settings_.froxel_fog = FroxelOpt;
   if (FroxelDensity.overridden()) settings_.froxel_density = static_cast<f32>(double(FroxelDensity));
+  // REC_TEX_BUDGET_MB caps resident material-texture memory (mip streaming);
+  // -1 auto (half of vram), 0 unlimited.
+  if (TexBudgetMb.overridden()) settings_.texture_budget_mb = TexBudgetMb;
   // REC_DRS holds the GPU frame time at REC_DRS_TARGET_MS by stepping the
   // render scale, no lower than REC_DRS_MIN_SCALE per axis.
   if (DrsOpt.overridden()) settings_.dynamic_resolution = DrsOpt;
@@ -749,6 +753,13 @@ void Renderer::ApplySettings() {
     settings_.aa_mode = AntiAliasingMode::kTaa;
   }
 
+  if (material_system_) {
+    u64 budget = settings_.texture_budget_mb < 0
+                     ? device_->caps().device_local_bytes / 2
+                     : static_cast<u64>(settings_.texture_budget_mb) << 20;
+    material_system_->SetBudget(budget);
+  }
+
   // Dynamic resolution: stepped controller on the resolved GPU frame time.
   // Inert while a vendor upscaler pins the render ratio, or while the path
   // tracer runs (a step resets its accumulation every time it fires).
@@ -902,6 +913,9 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     for (asset::ParticleEmitter& e : emitters) {
       u32 index = BindlessRegistry::kInvalidIndex;
       if (e.texture != 0 && material_system_) {
+        // The index is baked here for the mesh's lifetime; streaming would
+        // move the slot under it.
+        material_system_->Pin(e.texture ^ id_salt);
         index = material_system_->bindless_texture(e.texture ^ id_salt);
       }
       e.texture = index;  // now a bindless index, 0xffffffff = untextured
@@ -1118,6 +1132,9 @@ void Renderer::EnsureRayTracingGeometry() {
 
 void Renderer::SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas) {
   if (!material_system_) return;
+  // The cached views below dangle if the streamer ever swaps these images.
+  material_system_->Pin(texture.hash);
+  if (normal_atlas) material_system_->Pin(normal_atlas.hash);
   const GpuImage* img = material_system_->find_texture(texture.hash);
   decal_atlas_view_ = img ? img->view : TextureView{};
   const GpuImage* normal_img =
@@ -1191,6 +1208,14 @@ void Renderer::RenderFrame(const FrameView& view) {
     }
   }
 #endif
+
+  // Texture streaming: flush the retire ring (safe now - BeginFrame waited the
+  // slot fence) and run the promote/demote policy before any pass records, so
+  // the whole frame binds one consistent generation of material sets.
+  if (material_system_) {
+    material_system_->BeginFrame(frame_index_);
+    material_system_->UpdateStreaming(frame_index_);
+  }
 
   transient_pool_->BeginFrame();
   graph_.Reset();
@@ -1582,6 +1607,32 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   Mat4 proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f);
   Mat4 view_mat = LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
   Mat4 view_proj = proj * view_mat;
+
+  // Streaming feedback: touch the materials of frustum-visible draws only.
+  // view.draws is the full submitted list (GPU culling happens later), so
+  // without the sphere test every loaded material would read as hot and the
+  // texture LRU would degenerate to "loaded".
+  if (material_system_ && material_system_->streaming_active()) {
+    f32 touch_planes[5][4];
+    ExtractFrustumPlanes(view_proj, touch_planes);
+    for (const DrawItem& item : view.draws) {
+      const GpuMesh* mesh = meshes_.find(item.mesh);
+      if (!mesh) continue;
+      const f32* m = item.transform.m;
+      const f32* c = mesh->bounds_center;
+      Vec3 wc{m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12],
+              m[1] * c[0] + m[5] * c[1] + m[9] * c[2] + m[13],
+              m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14]};
+      f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+      f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+      f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+      f32 radius = mesh->bounds_radius * std::max(sx, std::max(sy, sz));
+      if (radius > 0.0f && SphereOutsideFrustum(touch_planes, wc, radius)) continue;
+      for (const GpuSubmesh& submesh : mesh->submeshes) {
+        material_system_->Touch(submesh.material, frame_index_);
+      }
+    }
+  }
 
   bool temporal =
       settings_.aa_mode == AntiAliasingMode::kTaa ||
