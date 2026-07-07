@@ -500,8 +500,10 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     f32 cfreq = 4.0f + randf() * 6.0f;
     // Curl scaled to lock width with a floor, so the smaller-card style (elf
     // blonde) breaks up as much as the wide-card ones. Two octaves: a broad wave
-    // plus fine detail that breaks flat card facets.
-    f32 camp = std::clamp(comp.hw * 0.85f, 0.009f, 0.024f) * (0.6f + 0.8f * randf()) * params.frizz;
+    // plus fine detail that breaks flat card facets. Independent of `frizz`: the
+    // wave is what de-slabs coplanar cards into locks, so it must stay strong even
+    // for "groomed" (low-flyaway) facegen styles, or the cards read as metal foil.
+    f32 camp = std::clamp(comp.hw * 0.85f, 0.010f, 0.020f) * (0.6f + 0.8f * randf());
     // Trace root->tip, anchored on the scalp vertex and holding across = c_seed so
     // it follows one card strip (narrow world bandwidth prevents slab merging).
     Vec3 chain_prev = root_pos;
@@ -516,7 +518,10 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
         f32 a = comp.a_root + (comp.a_tip - comp.a_root) * tt;
         chain_prev = ChainStep(comp, verts, a, c_seed, chain_prev, ha, hc);
         f32 ramp = std::min(1.0f, tt / 0.18f);  // keep roots on the scalp
-        f32 wv = camp * tt;
+        // Curl carries a small base amount near the root (not zero) so short,
+        // crown-only cards break out of the coplanar slab too, then grows to the
+        // tip; the very first point stays pinned on the scalp (k==0 above).
+        f32 wv = camp * (0.2f + 0.8f * tt);
         Vec3 curl =
             comp.normal * ((std::sin(cfreq * tt + cph1) + 0.4f * std::sin(cfreq * 2.7f * tt + cph3)) * wv) +
             comp.across_dir *

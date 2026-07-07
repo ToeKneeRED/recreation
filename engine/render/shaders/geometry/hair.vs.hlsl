@@ -52,6 +52,14 @@ VsOut main(uint vid : SV_VertexID) {
   float3 tangent = normalize(points[gbase + nxt].pos.xyz - points[gbase + prv].pos.xyz + 1e-6);
   float along = float(pt) / float(kPointsPerStrand - 1);
 
+  // Per-rendered-strand shading tangent: the children of one guide (and coplanar
+  // strands of one card) share a geometric tangent, so a tight specular lobe lights
+  // them all at once and the clump reads as a metal-foil plate. Tilt the shading
+  // tangent a little per strand so the highlight breaks into individual glints; the
+  // ribbon silhouette still rides the true tangent below.
+  float3 jit = float3(Hash(block * 4u + 1u), Hash(block * 4u + 3u), Hash(block * 4u + 5u)) - 0.5;
+  float3 shade_tangent = normalize(tangent + jit * 0.4);
+
   // World-stable clump offset: a per-child spiral in the plane perpendicular to
   // the strand, tapering to zero at the tip so children converge like a tuft.
   if (children > 1 && child > 0) {
@@ -77,7 +85,7 @@ VsOut main(uint vid : SV_VertexID) {
 
   VsOut o;
   o.pos = mul(pc.view_proj, float4(world, 1.0));
-  o.tangent = tangent;
+  o.tangent = shade_tangent;
   o.world_pos = world;
   o.along = along;
   o.color = col;

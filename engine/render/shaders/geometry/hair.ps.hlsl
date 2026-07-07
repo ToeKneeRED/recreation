@@ -37,13 +37,19 @@ float4 main(PsIn input) : SV_Target0 {
   float kd = sqrt(saturate(1.0 - td * td));
   float diffuse = saturate(kd * 0.75 + 0.25);
 
-  float spec1 = StrandSpec(t, l, v, 120.0, -0.06);
-  float spec2 = StrandSpec(t, l, v, 30.0, 0.08);
-  float root_dark = lerp(0.55, 1.0, input.along);
+  // Dual Kajiya-Kay lobes, tamed. The primary is kept dim and tinted toward the
+  // hair colour, never pure white, so bright grooms don't read as metal foil and
+  // dark ones don't sparkle white specks; a moderate exponent (roughness floor)
+  // stops thin sub-pixel strands aliasing the highlight into hard glints.
+  float spec1 = StrandSpec(t, l, v, 80.0, -0.05);
+  float spec2 = StrandSpec(t, l, v, 24.0, 0.08);
+  float root_dark = lerp(0.6, 1.0, input.along);
 
   float3 li = pc.sun_color.rgb * pc.sun.w;
-  float3 color = base_color * diffuse * root_dark * li * 0.35 +
-                 (spec1 * 0.2 + spec2 * 0.2 * base_color * 3.0) * li * 0.25 +
-                 base_color * 0.12;  // flat ambient fill
+  float3 gloss = lerp(base_color, float3(1, 1, 1), 0.35);  // primary lobe colour
+  float3 color = base_color * diffuse * root_dark * li * 0.38 +
+                 spec1 * 0.05 * gloss * li +
+                 spec2 * 0.16 * base_color * li +
+                 base_color * 0.13;  // flat ambient fill
   return float4(color, 1.0);
 }
