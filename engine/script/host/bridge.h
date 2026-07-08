@@ -98,6 +98,7 @@ enum class ManagedEventId : std::int32_t {
   kPlayerActivated = 5,     // a = activated target handle (the player pressed use on it)
   kItemRemoved = 6,         // a = container handle, b = item handle, i = count removed
   kLocationChanged = 7,     // a = interior cell id (0 outside), i = 1 if interior
+  kKeyPressed = 8,          // a = key code (the engine's Key enum)
 };
 
 struct ManagedEvent {

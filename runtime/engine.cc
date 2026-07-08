@@ -332,6 +332,15 @@ void Engine::ServerSimulateActors(f32 /*dt*/) {
 bool Engine::RunFrame() {
   if (quit_.load(std::memory_order_relaxed)) return false;
   if (window_ && !window_->PumpEvents()) return false;
+  // Forward key presses to the managed world (KeyPressed) so mods can bind
+  // hotkeys, unless the debug console is capturing the keyboard. Queued here and
+  // drained into managed below, in the same frame.
+  if (window_ && managed_ && !debug_ui_.wants_keyboard()) {
+    const InputState& keys = window_->input();
+    for (u8 k = 0; k < static_cast<u8>(Key::kCount); ++k)
+      if (keys.key_pressed(static_cast<Key>(k)))
+        managed_->QueueEvent({rec::script::host::ManagedEventId::kKeyPressed, k, 0, 0, 0.0f});
+  }
   {
     int steps = timer_.Tick();
     f32 dt = static_cast<f32>(timer_.fixed_step());
