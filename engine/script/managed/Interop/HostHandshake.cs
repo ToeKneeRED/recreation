@@ -14,6 +14,7 @@ public enum ManagedEventId : int
     PlayerActivated = 5,     // A = activated target handle
     ItemRemoved = 6,         // A = container handle, B = item handle, I = count removed
     LocationChanged = 7,     // A = interior cell id (0 outside), I = 1 if interior
+    KeyPressed = 8,          // A = key code (the engine's Key enum)
 }
 
 // An engine event payload. Byte-for-byte mirror of host/bridge.h ManagedEvent;

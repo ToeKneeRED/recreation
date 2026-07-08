@@ -86,6 +86,13 @@ public readonly struct LocationChanged(ulong cellHandle, bool isInterior) : IGam
     public Cell Cell => Cell.From(CellHandle);
 }
 
+// Raised when the player presses one of the engine's bound keys, the basis for
+// mod hotkeys. Use Hotkeys.Bind for the common case.
+public readonly struct KeyPressed(Key key) : IGameEvent
+{
+    public Key Key { get; } = key;
+}
+
 // Raised by the time service when a new in-game hour begins. Mods drive NPC
 // schedules, shop hours and day/night mechanics off it.
 public readonly struct GameHourStarted(int hour, int day) : IGameEvent

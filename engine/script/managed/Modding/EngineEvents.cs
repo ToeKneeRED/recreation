@@ -33,6 +33,9 @@ public static class EngineEvents
             case ManagedEventId.LocationChanged:
                 EventBus.Publish(new LocationChanged(e.A, e.I != 0));
                 break;
+            case ManagedEventId.KeyPressed:
+                EventBus.Publish(new KeyPressed((Key)e.A));
+                break;
         }
     }
 }
