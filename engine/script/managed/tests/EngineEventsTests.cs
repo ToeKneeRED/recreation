@@ -47,6 +47,19 @@ public static class EngineEventsTests
         EngineEvents.Dispatch(new ManagedEvent { Id = ManagedEventId.LocationChanged, A = 0x77, I = 1 });
         check.That("LocationChanged maps cell and interior flag", loc == (0x77UL, true));
 
+        Key key = Key.W;
+        using var s7 = EventBus.Subscribe<KeyPressed>(e => key = e.Key);
+        EngineEvents.Dispatch(new ManagedEvent { Id = ManagedEventId.KeyPressed, A = (ulong)Key.F });
+        check.Equal("KeyPressed maps the key code", Key.F, key);
+
+        // Hotkeys.Bind fires only for its key.
+        int fHits = 0, tHits = 0;
+        using var bf = Hotkeys.Bind(Key.F, () => fHits++);
+        using var bt = Hotkeys.Bind(Key.T, () => tHits++);
+        EngineEvents.Dispatch(new ManagedEvent { Id = ManagedEventId.KeyPressed, A = (ulong)Key.F });
+        check.Equal("bound key fires", 1, fHits);
+        check.Equal("other binding does not fire", 0, tHits);
+
         EventBus.Clear();
     }
 }
