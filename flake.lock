@@ -34,6 +34,7 @@
         "nanobuf-src": "nanobuf-src",
         "nixpkgs": "nixpkgs",
         "rx-src": "rx-src",
+        "sse2neon-src": "sse2neon-src",
         "vma-src": "vma-src",
         "volk-src": "volk-src",
         "vulkan-headers-src": "vulkan-headers-src",
@@ -51,6 +52,22 @@
       "original": {
         "path": "/home/captainspark/Documents/Projects/rx",
         "type": "path"
+      }
+    },
+    "sse2neon-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775761621,
+        "narHash": "sha256-BAppx3NndGXbd2wU0+gNqsmiNtpwCYxWLgHBnzcWIt0=",
+        "owner": "DLTcollab",
+        "repo": "sse2neon",
+        "rev": "3b70b3727edc9a151c113814129258c3423a771c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DLTcollab",
+        "repo": "sse2neon",
+        "type": "github"
       }
     },
     "vma-src": {
