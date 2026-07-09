@@ -42,5 +42,9 @@ public sealed class SkyrimMod : IMod
         // "survivalNeeds": true in Skyrim.json.
         if (config.GetBool("survivalNeeds", false))
             ModHost.Register(new SurvivalNeeds());
+
+        // The meditate-to-rest power binds a key, so it is opt-in too.
+        if (config.GetBool("meditationPower", false))
+            ModHost.Register(new MeditationPower());
     }
 }
