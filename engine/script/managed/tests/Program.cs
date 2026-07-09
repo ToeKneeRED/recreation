@@ -33,6 +33,7 @@ internal static class Program
         FastTravelTests.Run(check);
         LocationDiscoveryTests.Run(check);
         HarvestingTests.Run(check);
+        MeditationPowerTests.Run(check);
 
         Console.WriteLine($"[tests] {check.Passed} passed, {check.Failed} failed");
         return check.Failed;
