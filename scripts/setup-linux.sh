@@ -94,10 +94,8 @@ build_dxc_from_source() {
 do_thirdparty() {
   log "fetching third-party dependencies"
   bash "$REPO_DIR/tools/get_nanobuf.sh"
-  bash "$REPO_DIR/tools/get_fidelityfx.sh"
-  [ "$ARCH" = "x86_64" ] && bash "$REPO_DIR/tools/get_dlss.sh"   # DLSS is x86_64 only
-  bash "$REPO_DIR/tools/get_nrd.sh"
-  bash "$REPO_DIR/tools/get_jolt.sh"
+  # The engine SDKs (FidelityFX/DLSS/NRD/Jolt) live in the rx sibling now and
+  # are fetched into the rx checkout by do_siblings.
 }
 
 clone_sibling() { # name repo
@@ -108,11 +106,17 @@ clone_sibling() { # name repo
 }
 
 do_siblings() {
-  clone_sibling zetanet    https://github.com/Force67/zetanet
+  clone_sibling rx          https://github.com/Force67/rx.git
+  clone_sibling zetanet     https://github.com/Force67/zetanet
   clone_sibling libultragui https://github.com/Force67/libultragui
   # recreation tracks zetanet's develop branch.
   git -C "$REPO_DIR/../zetanet" checkout develop 2>/dev/null || true
   git -C "$REPO_DIR/../zetanet" submodule update --init --recursive 2>/dev/null || true
+  # rx carries the engine SDKs; fetch them into the rx checkout.
+  bash "$REPO_DIR/../rx/tools/get_fidelityfx.sh"
+  [ "$ARCH" = "x86_64" ] && bash "$REPO_DIR/../rx/tools/get_dlss.sh"   # DLSS is x86_64 only
+  bash "$REPO_DIR/../rx/tools/get_nrd.sh"
+  bash "$REPO_DIR/../rx/tools/get_jolt.sh"
 }
 
 # ---- doctor ---------------------------------------------------------------

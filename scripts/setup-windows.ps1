@@ -98,10 +98,9 @@ function Do-Dxc {
 function Do-ThirdParty {
   Log "fetching third-party dependencies"
   # The get_*.sh helpers run under Git Bash, shipped with Git for Windows.
+  # The engine SDKs (FidelityFX/NRD/Jolt) live in the rx sibling now and are
+  # fetched into the rx checkout by Do-Siblings.
   bash "$RepoDir/tools/get_nanobuf.sh"
-  bash "$RepoDir/tools/get_fidelityfx.sh"
-  bash "$RepoDir/tools/get_nrd.sh"
-  bash "$RepoDir/tools/get_jolt.sh"
 }
 
 function Clone-Sibling($name, $repo) {
@@ -112,10 +111,15 @@ function Clone-Sibling($name, $repo) {
 }
 
 function Do-Siblings {
+  Clone-Sibling 'rx' 'https://github.com/Force67/rx.git'
   Clone-Sibling 'zetanet' 'https://github.com/Force67/zetanet'
   Clone-Sibling 'libultragui' 'https://github.com/Force67/libultragui'
   git -C (Join-Path $RepoDir '..\zetanet') checkout develop 2>$null
   git -C (Join-Path $RepoDir '..\zetanet') submodule update --init --recursive 2>$null
+  # rx carries the engine SDKs; fetch them into the rx checkout.
+  bash "$RepoDir/../rx/tools/get_fidelityfx.sh"
+  bash "$RepoDir/../rx/tools/get_nrd.sh"
+  bash "$RepoDir/../rx/tools/get_jolt.sh"
 }
 
 function Do-Doctor {

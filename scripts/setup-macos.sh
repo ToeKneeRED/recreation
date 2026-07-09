@@ -61,8 +61,8 @@ do_dxc() {
 do_thirdparty() {
   log "fetching third-party dependencies"
   # DLSS/FSR3/NRD are off on Apple (MoltenVK), so only these are needed.
+  # Jolt lives in the rx sibling now and is fetched by do_siblings.
   bash "$REPO_DIR/tools/get_nanobuf.sh"
-  bash "$REPO_DIR/tools/get_jolt.sh"
 }
 
 clone_sibling() { # name repo
@@ -73,10 +73,13 @@ clone_sibling() { # name repo
 }
 
 do_siblings() {
+  clone_sibling rx          https://github.com/Force67/rx.git
   clone_sibling zetanet     https://github.com/Force67/zetanet
   clone_sibling libultragui https://github.com/Force67/libultragui
   git -C "$REPO_DIR/../zetanet" checkout develop 2>/dev/null || true
   git -C "$REPO_DIR/../zetanet" submodule update --init --recursive 2>/dev/null || true
+  # rx carries the engine SDKs; Jolt is the only one enabled on Apple.
+  bash "$REPO_DIR/../rx/tools/get_jolt.sh"
 }
 
 do_doctor() {

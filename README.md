@@ -29,7 +29,11 @@ networking) only knows engine formats.
 
 New box? The setup scripts take an unknown machine to a buildable state:
 install the toolchain and shader compilers, fetch the third-party deps, clone
-the sibling repos (zetanet, libultragui) and report anything still missing.
+the sibling repos (rx, zetanet, libultragui) and report anything still missing.
+Building recreation requires a sibling rx checkout (the engine); its SDK deps
+(FidelityFX/DLSS/NRD/Jolt) are fetched into that checkout by
+`../rx/tools/get_*.sh`. Point at an rx elsewhere with
+`-DRECREATION_RX_DIR=/path/to/rx`.
 
 ```sh
 scripts/setup.sh                 # Linux/macOS: do everything
