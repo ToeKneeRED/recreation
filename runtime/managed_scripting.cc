@@ -108,7 +108,7 @@ void BootManagedScripting(Engine& engine) {
   // The symmetric unload: when a tracked reference streams out, tell managed code
   // so per-form behaviours detach instead of ticking on a stale handle. Fires on
   // the main thread (cell streaming); QueueEvent is drained next frame.
-  self->quest_world_.set_on_unregister([host](u64 form) {
+  self->quest_world_->set_on_unregister([host](u64 form) {
     host->QueueEvent({rx::script::host::ManagedEventId::kFormUnloaded, form, 0, 0, 0.0f});
   });
   self->ctx_.managed = host;  // let subsystems (interaction, ...) raise managed events

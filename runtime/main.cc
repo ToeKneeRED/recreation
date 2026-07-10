@@ -126,12 +126,22 @@ int main(int argc, char** argv) {
     config.plugins_txt = config.data_dir + "/../plugins.txt";
   }
 
-  rx::Engine engine;
-  if (!engine.Initialize(config)) {
+  // The app::Host owns the generic subsystems and the fixed-step loop; the game
+  // is its Application. The renderer/preset/headless choices cross over; the game
+  // gathers its own world::Transform draws, so the host's entity gather is off.
+  rx::app::AppConfig app_config;
+  app_config.renderer = config.renderer;
+  app_config.preset = config.preset;
+  app_config.headless = config.headless;
+  app_config.gather_entity_draws = false;
+
+  rx::Engine engine(config);
+  rx::app::Host host;
+  if (!host.Initialize(app_config, engine)) {
     RX_ERROR("engine initialization failed");
     return 1;
   }
-  int rc = engine.Run();
-  engine.Shutdown();
+  int rc = host.Run();
+  host.Shutdown();
   return rc;
 }

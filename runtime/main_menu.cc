@@ -232,13 +232,13 @@ void Engine::UpdateMainMenu(f32 dt) {
   // Menu actions (keyboard arrows + gamepad dpad/stick + South/East) drive the
   // NEXUS menu; WASD and Space are kept as extra keyboard conveniences. Routed
   // through the same helpers so mouse, keyboard, and pad share one selection.
-  if (actions_.pressed(Action::kMenuUp) || in.key_pressed(Key::kW)) game_ui_.MainMenuMove(0, -1);
-  if (actions_.pressed(Action::kMenuDown) || in.key_pressed(Key::kS)) game_ui_.MainMenuMove(0, +1);
-  if (actions_.pressed(Action::kMenuLeft) || in.key_pressed(Key::kA)) game_ui_.MainMenuMove(-1, 0);
-  if (actions_.pressed(Action::kMenuRight) || in.key_pressed(Key::kD)) game_ui_.MainMenuMove(+1, 0);
-  if (actions_.pressed(Action::kMenuAccept) || in.key_pressed(Key::kSpace))
+  if (actions_->pressed(Action::kMenuUp) || in.key_pressed(Key::kW)) game_ui_.MainMenuMove(0, -1);
+  if (actions_->pressed(Action::kMenuDown) || in.key_pressed(Key::kS)) game_ui_.MainMenuMove(0, +1);
+  if (actions_->pressed(Action::kMenuLeft) || in.key_pressed(Key::kA)) game_ui_.MainMenuMove(-1, 0);
+  if (actions_->pressed(Action::kMenuRight) || in.key_pressed(Key::kD)) game_ui_.MainMenuMove(+1, 0);
+  if (actions_->pressed(Action::kMenuAccept) || in.key_pressed(Key::kSpace))
     game_ui_.MainMenuActivate();
-  if (actions_.pressed(Action::kMenuCancel)) game_ui_.MainMenuBack();
+  if (actions_->pressed(Action::kMenuCancel)) game_ui_.MainMenuBack();
 
   RefreshMenuData();
 
@@ -749,7 +749,7 @@ void Engine::GenerateMenuBackdrops() {
   // at the centre of the screen (mm_hero). Tinted a cool platinum.
   {
     Thumbnailer thumber;
-    if (thumber.Init(renderer_, 640)) {
+    if (thumber.Init(*renderer_, 640)) {
       const int S = thumber.size();
       std::vector<unsigned char> px;
       if (thumber.Render(MakeGem(1, 1.0f), px)) {
@@ -779,7 +779,7 @@ void Engine::TickMenuCapture() {
     game_ui_.SetHudVisible(false);
     debug_ui_.SetAllVisible(false);
   } else if (c == 2) {  // arm: this frame's RenderFrame writes the clean backbuffer
-    renderer_.CaptureScreenshot(menu_capture_path_);
+    renderer_->CaptureScreenshot(menu_capture_path_);
   } else if (c == 1) {  // restore the overlays for play
     game_ui_.SetHudVisible(true);
     debug_ui_.SetAllVisible(!HideDebugUi);

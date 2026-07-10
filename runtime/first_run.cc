@@ -246,8 +246,8 @@ void Engine::UpdateFirstRun(f32 dt) {
 
   // Keyboard conveniences: Accept advances the page (the primary button), Cancel
   // steps back / cancels at the first page. The mouse drives everything else.
-  if (actions_.pressed(Action::kMenuAccept)) game_ui_.FirstRunNext();
-  if (actions_.pressed(Action::kMenuCancel)) game_ui_.FirstRunBack();
+  if (actions_->pressed(Action::kMenuAccept)) game_ui_.FirstRunNext();
+  if (actions_->pressed(Action::kMenuCancel)) game_ui_.FirstRunBack();
 
   // Mirror the resolved games + chosen mods dir into the wizard each frame.
   FirstRunView view;

@@ -37,6 +37,7 @@ set(RECREATION_RUNTIME_MODULES
   rx::core
   rx::ecs
   rx::asset
+  rx::app
   recreation::audio
   rx::render
   rx::physics

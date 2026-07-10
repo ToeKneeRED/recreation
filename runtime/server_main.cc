@@ -70,8 +70,16 @@ int main(int argc, char** argv) {
     config.plugins_txt = config.data_dir + "/../plugins.txt";
   }
 
-  rx::Engine engine;
-  if (!engine.Initialize(config)) {
+  // Headless app::Host + the game as its Application; the host runs the
+  // fixed-step + OnSimulate loop without a renderer.
+  rx::app::AppConfig app_config;
+  app_config.preset = config.preset;
+  app_config.headless = config.headless;
+  app_config.gather_entity_draws = false;
+
+  rx::Engine engine(config);
+  rx::app::Host host;
+  if (!host.Initialize(app_config, engine)) {
     RX_ERROR("server initialization failed");
     return 1;
   }
@@ -84,8 +92,8 @@ int main(int argc, char** argv) {
 #endif
 
   RX_INFO("dedicated server up on port {}, ctrl-c to stop", config.port);
-  int rc = engine.Run();
-  engine.Shutdown();
+  int rc = host.Run();
+  host.Shutdown();
   RX_INFO("server stopped");
   return rc;
 }

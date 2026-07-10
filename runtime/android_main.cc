@@ -98,8 +98,11 @@ rx::EngineConfig LoadConfig(android_app* app) {
 }
 
 struct AppState {
-  rx::Engine engine;
-  rx::AndroidWindowBase* window = nullptr;  // owned by the engine post-Initialize
+  // engine before host so the host (which holds a pointer into the game) tears
+  // down first.
+  std::unique_ptr<rx::Engine> engine;    // the game, built once the config is known
+  rx::app::Host host;                    // owns the subsystems + the loop
+  rx::AndroidWindowBase* window = nullptr;  // owned by the host post-Initialize
   rx::EngineConfig config;
   bool initialized = false;
   bool finished = false;
@@ -144,7 +147,13 @@ void HandleCmd(android_app* app, int32_t cmd) {
       if (!state->initialized) {
         auto window = rx::CreateAndroidWindow(app->window);  // acquires the window
         state->window = window.get();
-        if (!state->engine.Initialize(state->config, std::move(window))) {
+        rx::app::AppConfig app_config;
+        app_config.renderer = state->config.renderer;
+        app_config.preset = state->config.preset;
+        app_config.headless = state->config.headless;
+        app_config.gather_entity_draws = false;  // the game gathers its own draws
+        state->engine = std::make_unique<rx::Engine>(state->config);
+        if (!state->host.Initialize(app_config, *state->engine, std::move(window))) {
           __android_log_print(ANDROID_LOG_ERROR, kTag, "engine initialization failed");
           state->finished = true;
           ANativeActivity_finish(app->activity);
@@ -156,7 +165,7 @@ void HandleCmd(android_app* app, int32_t cmd) {
       } else {
         // Foregrounded: rebind the renderer to the new activity window.
         state->window->SetNativeWindow(app->window);
-        state->engine.OnSurfaceCreated();
+        state->host.OnSurfaceCreated();
         state->has_surface = true;
         __android_log_print(ANDROID_LOG_INFO, kTag, "surface recreated");
       }
@@ -165,7 +174,7 @@ void HandleCmd(android_app* app, int32_t cmd) {
       // Backgrounded or rotated: drop the surface but keep the engine alive so
       // it resumes on the next INIT_WINDOW.
       if (state->initialized) {
-        state->engine.OnSurfaceDestroyed();
+        state->host.OnSurfaceDestroyed();
         state->window->SetNativeWindow(nullptr);
         state->has_surface = false;
       }
@@ -297,9 +306,9 @@ void android_main(android_app* app) {
     }
     if (state.finished) break;
     if (state.initialized && state.has_surface) {
-      if (!state.engine.RunFrame()) break;
+      if (!state.host.RunFrame()) break;
     }
   }
 
-  if (state.initialized) state.engine.Shutdown();
+  if (state.initialized) state.host.Shutdown();
 }

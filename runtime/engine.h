@@ -15,9 +15,9 @@
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
-#include "core/frame_timer.h"
+#include "app/application.h"
+#include "app/host.h"
 #include "core/input_bindings.h"
-#include "core/job_system.h"
 #include "core/window.h"
 #include "core/world_clock.h"
 #include "script/host/managed_host.h"
@@ -131,37 +131,38 @@ class RuntimeWorldSink : public script::WorldEffectSink {
   std::atomic<u32> next_handle_{1};
 };
 
-// Top-level orchestrator. Owns the shared services, the main loop, networking,
-// data loading and the camera; the gameplay subsystems (actors, interaction,
-// quest, npc, demos) own their own state and are driven from here through the
-// EngineContext.
-class Engine {
+// The game: recreation's app::Application. Owns the gameplay layer (actors,
+// interaction, quest, npc, demos, weather, networking, data loading, the camera
+// and the UI) and drives it from the app::Host callbacks; the generic
+// subsystems and the fixed-step loop live in app::Host. The gameplay subsystems
+// own their own state and are driven from here through the EngineContext, which
+// is filled from the host's Services.
+class Engine : public app::Application {
  public:
-  Engine() = default;
-  ~Engine();
+  explicit Engine(const EngineConfig& config) : config_(config) {}
+  ~Engine() override;
 
-  // `window` lets a platform supply its own surface (Android hands the engine
-  // the activity's ANativeWindow); when null the engine creates one itself. A
-  // failed Initialize tears down whatever it had brought up (the destructor
-  // calls Shutdown), so callers need not Shutdown after a failure.
-  bool Initialize(const EngineConfig& config, std::unique_ptr<Window> window = nullptr);
-  int Run();
-  // One iteration of the main loop. Returns false when the engine wants to
-  // stop. Platforms that own the loop (Android's activity) drive this directly
-  // instead of the blocking Run().
-  bool RunFrame();
-  void Shutdown();
+  // app::Application: the host brings the subsystems up, then hands them over in
+  // `services`. Loads content, registers ECS systems and spawns the world.
+  bool OnInitialize(app::Services& services) override;
+  // Frame-cadence game simulation (scripting, quests, npc/combat, networking);
+  // runs in both windowed and headless (dedicated-server) modes.
+  void OnSimulate(f32 frame_delta) override;
+  // Windowed-only per-frame policy: weather/sky, camera, menus, UI begin.
+  void OnUpdate(f32 frame_delta) override;
+  // Windowed-only: builds this frame's FrameView (camera, gathered draws,
+  // actors, lights, decals, HUD).
+  void OnBuildView(f32 frame_delta, render::FrameView& view) override;
+  // Windowed-only: the capture/quit hooks after the frame submitted.
+  void OnFrameEnd() override;
+  // The renderer is idle but alive: drop the game's GPU-dependent resources.
+  void OnShutdown() override;
 
-  // Android lifecycle: the activity's presentation surface is lost when its
-  // window goes away (background) and rebound when it returns. The platform
-  // entry drives these around RunFrame; the window must already point at the
-  // new ANativeWindow before OnSurfaceCreated.
-  void OnSurfaceDestroyed();
-  void OnSurfaceCreated();
-
-  // Safe to call from a signal handler; Run() returns after the current
-  // frame.
-  void RequestQuit() { quit_.store(true, std::memory_order_relaxed); }
+  // Safe to call from a signal handler; the host's Run() returns after the
+  // current frame. Forwards to the host once OnInitialize has run.
+  void RequestQuit() {
+    if (host_) host_->RequestQuit();
+  }
 
   // Global debug toggles set by Debug.* console natives (tgm/tcl/tai/tm, foot IK).
   // Tracked here so the state persists and any system can honour it.
@@ -223,14 +224,6 @@ class Engine {
   // its world (HUD/overlays hidden) into the backdrop cache for next time.
   void TickMenuCapture();
   bool LoadGltfScene();
-  // Resolves the configured quality tier from the gpu (or a forced preset) and
-  // applies it to the renderer's live settings.
-  void ApplyRenderPreset();
-  // (Re)seeds the day/night clock. base_timescale is the game's authored
-  // TimeScale (or 20 before a game loads); RX_TIMESCALE / RX_GAME_HOUR
-  // override the timescale and start hour. Called once at boot and again when a
-  // game loads with its real timescale.
-  void ConfigureClock(f32 base_timescale);
 
   void ThrowPhysicsCube();
   void UpdateCamera(f32 frame_delta);
@@ -299,16 +292,17 @@ class Engine {
   int menu_capture_countdown_ = 0;
   std::string menu_capture_path_;
 
-  std::unique_ptr<Window> window_;
-  std::unique_ptr<JobSystem> jobs_;
-  FrameTimer timer_;
-  // The in-world clock driving the day/night cycle. Advanced each frame from the
-  // real frame delta; the Papyrus time natives read it through the bindings, and
-  // the render loop derives the sun/sky from it. drive_sun_from_clock_ is false
-  // when RX_SUN_DIR pins a fixed sun (headless lighting tests), leaving the sun
+  // The app::Host owns the window/jobs/frame-timer/clock and drives the loop;
+  // these are non-owning views cached from Services at OnInitialize.
+  app::Host* host_ = nullptr;
+  Window* window_ = nullptr;  // null when headless
+  // The in-world clock driving the day/night cycle, owned and advanced by the
+  // host; the Papyrus time natives read it through the bindings, and the render
+  // loop derives the sun/sky from it. drive_sun_from_clock_ is false when
+  // RX_SUN_DIR pins a fixed sun (headless lighting tests), leaving the sun
   // static. last_sky_hour_ throttles the sun update so the IBL environment is
   // not rebuilt every frame for sub-degree motion.
-  WorldClock clock_;
+  WorldClock* clock_ = nullptr;
   bool drive_sun_from_clock_ = true;
   f32 last_sky_hour_ = -1000.0f;
   // Weather, parsed from the game's WTHR/CLMT and driven off the world clock; it
@@ -339,25 +333,27 @@ class Engine {
   f32 strike_time_ = -100.0f;
   u32 lightning_seed_ = 0x1234567u;
 
-  ecs::World world_;
-  ecs::Scheduler scheduler_;
+  // ECS world + scheduler, owned by the host; non-owning views cached here.
+  ecs::World* world_ = nullptr;
+  ecs::Scheduler* scheduler_ = nullptr;
   // Quest-driven world effects: the bindings push commands onto the queue (guest
   // thread); the main thread drains them into QuestWorld, which spawns/moves ECS
   // entities and records per-quest provenance so a quest can be rolled back.
   world::WorldCommandQueue quest_world_queue_;
-  world::QuestWorld quest_world_{world_};
+  // Built in OnInitialize once the host's ECS world is available (it holds a
+  // World&, so it cannot be constructed before the world exists).
+  std::unique_ptr<world::QuestWorld> quest_world_;
   // Guest -> main combat enrollment (StartCombat/StopCombat/death), drained each
   // frame into the npc director's combat driver.
   world::CombatEventQueue combat_event_queue_;
   RuntimeWorldSink runtime_world_sink_{&quest_world_queue_, &combat_event_queue_};
 
-  asset::Vfs vfs_;
-  // Audio: SDL-backed mixer + decoders, fed sound bytes through the Vfs. Reads
-  // assets lazily, so it is brought up here before any archives are mounted. The
-  // sound catalog (SOUN/SNDR -> file) and region ambience (REGN -> sounds) are
-  // built once game data loads; the director cross-fades the ambient bed as the
-  // player's region changes.
-  std::unique_ptr<audio::AudioSystem> audio_;
+  // The Vfs + audio system are owned by the host; non-owning views cached here.
+  // Audio reads sound bytes lazily through the Vfs; the sound catalog (SOUN/SNDR
+  // -> file) and region ambience (REGN -> sounds) are built once game data loads;
+  // the director cross-fades the ambient bed as the player's region changes.
+  asset::Vfs* vfs_ = nullptr;
+  audio::AudioSystem* audio_ = nullptr;
   audio::SoundCatalog sound_catalog_;
   audio::RegionAmbience region_ambience_;
   audio::AmbientDirector ambient_director_;
@@ -392,13 +388,15 @@ class Engine {
   // Previous frame's positions, to derive each ref's speed for Actor.IsRunning.
   std::unordered_map<u64, std::array<f32, 3>> prev_positions_;
 
-  render::Renderer renderer_;
+  render::Renderer* renderer_ = nullptr;  // owned by the host
   FlyCamera camera_;
   // Device-agnostic input: bindings + the per-frame resolved action snapshot.
   // Raw window_->input() / gamepad() stay available for text fields and the C#
   // key bridge; gameplay reads actions_ instead of hardcoded keys.
-  InputMap input_map_;
-  ActionState actions_;
+  // Owned by the host: the input bindings and the per-frame resolved action
+  // snapshot the host fills each pump. Non-owning views cached here.
+  InputMap* input_map_ = nullptr;
+  const ActionState* actions_ = nullptr;
   // Controls config persistence + in-game rebinding (controls_settings.cc).
   void LoadControls();   // read controls.ini into input_map_, then ApplyControls
   void SaveControls();   // write input_map_ back to controls.ini
@@ -493,7 +491,7 @@ class Engine {
   // Resolved NetEntity model (editor id) -> base form, so a mod spawns a specific
   // object by name. Cached because the lookup scans the record store.
   std::unordered_map<std::string, bethesda::GlobalFormId> net_model_cache_;
-  physics::PhysicsWorld physics_;
+  physics::PhysicsWorld* physics_ = nullptr;  // owned by the host
   // Dynamic bodies mirrored into ECS transforms after each step.
   base::Vector<PhysicsEntity> physics_entities_;
   asset::AssetId physics_cube_mesh_;
@@ -533,9 +531,6 @@ class Engine {
   std::unique_ptr<MapEditor> editor_;
   // Character-creation screen (RX_CHARGEN boot mode). Null in headless.
   std::unique_ptr<CharGen> chargen_;
-
-  std::atomic<bool> quit_ = false;
-  bool shut_down_ = false;
 };
 
 // Engine bring-up steps, written as free functions over the engine (each a

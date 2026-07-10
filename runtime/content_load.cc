@@ -69,9 +69,9 @@ bool LoadGameData(Engine& engine) {
 
   MountArchives(engine);
   // Loose files mount last so they win over archives.
-  self->vfs_.Mount(asset::MakeLooseFileProvider(self->config_.data_dir));
+  self->vfs_->Mount(asset::MakeLooseFileProvider(self->config_.data_dir));
 
-  self->assets_ = std::make_unique<asset::AssetDatabase>(self->vfs_);
+  self->assets_ = std::make_unique<asset::AssetDatabase>(*self->vfs_);
   self->ctx_.assets = self->assets_.get();
   bethesda::RegisterConverters(*self->assets_, profile);
 
@@ -83,7 +83,7 @@ bool LoadGameData(Engine& engine) {
   // a single id-keyed table cannot avoid (the main quest text lives in the base
   // game master). Plugins without string files (non-localized) are skipped.
   for (const std::string& plugin : order.plugins())
-    self->strings_.Load(self->vfs_, plugin, profile.string_language);
+    self->strings_.Load(*self->vfs_, plugin, profile.string_language);
   RX_INFO("loaded {} localized strings", self->strings_.size());
 
   // Index dialogue topics by quest so an NPC conversation opens without
@@ -98,7 +98,7 @@ bool LoadGameData(Engine& engine) {
   self->ctx_.bindings = self->script_bindings_.get();
   self->script_bindings_->set_strings(&self->strings_);
   self->script_bindings_->set_player(rx::script::papyrus::ObjectRef{0x14});  // Skyrim player ref
-  self->script_bindings_->set_audio(self->audio_.get());  // Sound.Play routes here
+  self->script_bindings_->set_audio(self->audio_);  // Sound.Play routes here
   // Route quest-driven world mutations (PlaceAtMe/MoveTo/Enable/Delete + cleanup)
   // through the provenance layer; the player teleports through a host hook since
   // it is an actor/capsule, not a registry entity.
@@ -106,7 +106,7 @@ bool LoadGameData(Engine& engine) {
   // Day/night clock: map the time globals (resolved by editor id, so it works
   // across Skyrim/Fallout/Starfield) onto the clock, then reseed it with the
   // game's authored TimeScale (Bethesda default 20), honouring the env overrides.
-  self->script_bindings_->set_clock(&self->clock_);
+  self->script_bindings_->set_clock(self->clock_);
   const auto game_hour = self->records_.FindGlobal("GameHour");
   const auto days_passed = self->records_.FindGlobal("GameDaysPassed");
   auto timescale_glob = self->records_.FindGlobal("TimeScale");
@@ -117,7 +117,7 @@ bool LoadGameData(Engine& engine) {
     authored_timescale = self->script_bindings_->GetGlobalValue(
         rx::script::papyrus::ObjectRef{timescale_glob.packed()});
   }
-  self->ConfigureClock(authored_timescale);
+  self->host_->ConfigureClock(authored_timescale);
   self->script_bindings_->set_time_globals(game_hour.plugin == 0xffff ? 0 : game_hour.packed(),
                                            days_passed.plugin == 0xffff ? 0 : days_passed.packed(),
                                            timescale_glob.plugin == 0xffff ? 0
@@ -160,7 +160,7 @@ bool LoadGameData(Engine& engine) {
     self->default_climate_ = climate;  // restored when the player leaves all regions
     self->weather_.SetClimate(std::move(climate));
     self->weather_.set_seed(0xBEE71Eull ^ static_cast<u64>(self->game_));
-    self->ap_base_ = self->renderer_.settings().aerial_perspective;
+    self->ap_base_ = self->renderer_->settings().aerial_perspective;
     RX_INFO("weather: {} WTHR records, climate {} entries", n, self->weather_.size());
 
     // Per-region weather: the REGN areas override the worldspace climate where
@@ -188,7 +188,7 @@ bool LoadGameData(Engine& engine) {
                             : bethesda::GlobalFormId{};
     self->sound_catalog_.Build(self->records_);
     self->region_ambience_.Build(self->records_, ws);
-    self->ambient_director_.Configure(self->audio_.get(), &self->sound_catalog_,
+    self->ambient_director_.Configure(self->audio_, &self->sound_catalog_,
                                       &self->region_ambience_);
 
     // audio.dump (RX_AUDIO_DUMP): resolve and decode each region's ambient bed
@@ -223,9 +223,9 @@ bool LoadGameData(Engine& engine) {
   }
 
   // Skyrim's northern lights: the night-sky aurora (other games don't have it).
-  self->renderer_.settings().aurora = self->game_ == bethesda::Game::kSkyrimSe;
+  self->renderer_->settings().aurora = self->game_ == bethesda::Game::kSkyrimSe;
 
-  self->quest_world_.set_on_move_player([self](u64 dest_ref, f32 x, f32 y, f32 z) {
+  self->quest_world_->set_on_move_player([self](u64 dest_ref, f32 x, f32 y, f32 z) {
     // The open-field battle demo anchors the player on its staged dry venue, so a
     // background quest (a follower/pet setup, an auto-started scene) must not warp
     // the player off it mid-demo.
@@ -243,11 +243,11 @@ bool LoadGameData(Engine& engine) {
       const bethesda::GlobalFormId interior = self->records_.InteriorCellOfRef(ref);
       if (interior.plugin != 0xffff) {
         Vec3 spawn;
-        if (self->streamer_->EnterInterior(self->world_, interior, &spawn))
+        if (self->streamer_->EnterInterior(*self->world_, interior, &spawn))
           RX_INFO("quest: entered interior {:04x}:{:06x} to move the player", interior.plugin,
                    interior.local_id);
       } else if (self->streamer_->in_interior()) {
-        self->streamer_->EnterExterior(self->world_);  // a move back out to the worldspace
+        self->streamer_->EnterExterior(*self->world_);  // a move back out to the worldspace
       }
     }
     self->actors_->TeleportPlayer(x, y, z);
@@ -260,7 +260,7 @@ bool LoadGameData(Engine& engine) {
   self->script_bindings_->set_replica_mode(!self->config_.connect_address.empty());
   if (self->script_bindings_->replica_mode())
     RX_INFO("multiplayer client: quests run server-authoritative (replica mode)");
-  self->scripts_ = std::make_unique<rx::script::ScriptSystem>(self->game_, &self->vfs_, self->script_bindings_.get());
+  self->scripts_ = std::make_unique<rx::script::ScriptSystem>(self->game_, self->vfs_, self->script_bindings_.get());
   self->ctx_.scripts = self->scripts_.get();
   // Run engine-triggered stage fragments on a fiber, so a latent Wait inside one
   // suspends like a script-triggered fragment instead of returning at once.
@@ -314,7 +314,7 @@ bool LoadGameData(Engine& engine) {
         std::lock_guard<std::mutex> lock(self->debug_cmd_mutex_);
         self->pending_debug_cmds_.emplace_back(verb, arg);
       });
-      guest->set_game_time_provider([self]() { return self->clock_.game_days(); });
+      guest->set_game_time_provider([self]() { return self->clock_->game_days(); });
       guest->set_los_provider([self](u64 viewer, u64 target) {
         return self->script_bindings_->HasLos(rx::script::papyrus::ObjectRef{viewer},
                                               rx::script::papyrus::ObjectRef{target});
@@ -344,37 +344,37 @@ bool LoadGameData(Engine& engine) {
   if (WarMap) self->war_map_open_ = true;
   if (const char* want = QuestList.get()) {
     self->quest_->ReportQuestList(want);
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   if (const char* want = QuestReport.get()) {
     self->quest_->ReportQuestToCompletion(want);
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   if (CwReinfTest) {
     self->quest_->ReportReinforcementTest();
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   if (const char* want = DialogueReport.get()) {
     self->quest_->ReportDialogue(want);
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   // RX_DIALOGUE_PROBE=<0xNpcOrAchrForm> logs the topics an NPC would offer (the
   // speaker-gated, priority-ordered set), to verify dialogue without the UI.
   if (const char* want = DialogueProbe.get()) {
     self->interaction_->ReportDialogueWith(std::strtoull(want, nullptr, 0));
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   if (const char* want = SceneReport.get()) {
     self->quest_->ReportSceneFragments(want);
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   if (const char* want = ScenePlay.get()) {
     self->quest_->ReportScenePlay(want);
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   if (const char* want = SceneLive.get()) {
     self->quest_->ReportSceneLive(want);
-    self->quit_.store(true, std::memory_order_relaxed);
+    self->host_->RequestQuit();
   }
   // Headless reports drive quests during init and quit before the main loop, so
   // deliver any events they queued to managed hooks here too.
@@ -411,10 +411,10 @@ bool LoadGameData(Engine& engine) {
   }
   // Register streamed NPCs in the quest world so quests can target them and
   // clients can apply replicated actor transforms by form id.
-  self->streamer_->set_quest_world(&self->quest_world_);
-  if (self->physics_.initialized()) {
-    self->streamer_->set_physics(&self->physics_);
-    self->physics_.set_water_height([self](const Vec3& position, f32* height, Vec3* flow) {
+  self->streamer_->set_quest_world(self->quest_world_.get());
+  if (self->physics_->initialized()) {
+    self->streamer_->set_physics(self->physics_);
+    self->physics_->set_water_height([self](const Vec3& position, f32* height, Vec3* flow) {
       return self->streamer_->WaterHeightAt(position, height, flow);
     });
   }
@@ -426,12 +426,12 @@ bool LoadGameData(Engine& engine) {
   self->streamer_->Configure(settings);
   if (!self->config_.headless) {
     world::CellStreamer::Uploads uploads;
-    uploads.mesh = [self](const asset::Mesh& mesh) { return self->renderer_.UploadMesh(mesh); };
+    uploads.mesh = [self](const asset::Mesh& mesh) { return self->renderer_->UploadMesh(mesh); };
     uploads.texture = [self](const asset::Texture& texture) {
-      return self->renderer_.UploadTexture(texture);
+      return self->renderer_->UploadTexture(texture);
     };
     uploads.material = [self](const asset::Material& material) {
-      return self->renderer_.UploadMaterial(material);
+      return self->renderer_->UploadMaterial(material);
     };
     self->streamer_->SetUploads(std::move(uploads));
   }
@@ -587,13 +587,13 @@ void SetupExtraStreamers(Engine& engine) {
     streamer->Configure(settings);
     world::CellStreamer::Uploads uploads;
     uploads.mesh = [self, salt](const asset::Mesh& mesh) {
-      return self->renderer_.UploadMesh(mesh, salt);
+      return self->renderer_->UploadMesh(mesh, salt);
     };
     uploads.texture = [self, salt](const asset::Texture& texture) {
-      return self->renderer_.UploadTexture(texture, salt);
+      return self->renderer_->UploadTexture(texture, salt);
     };
     uploads.material = [self, salt](const asset::Material& material) {
-      return self->renderer_.UploadMaterial(material, salt);
+      return self->renderer_->UploadMaterial(material, salt);
     };
     streamer->SetUploads(std::move(uploads));
     if (streamer->SelectWorldspace(domain.profile().exterior_worldspace)) {
@@ -629,7 +629,7 @@ bool LoadInterior(Engine& engine) {
   }
 
   Vec3 start{};
-  if (!self->streamer_->LoadInterior(self->world_, cell_id, &start)) return false;
+  if (!self->streamer_->LoadInterior(*self->world_, cell_id, &start)) return false;
   self->camera_.set_position(start);
   self->camera_.set_yaw_pitch(0.0f, 0.0f);
   self->camera_.speed = 5.0f;
@@ -662,7 +662,7 @@ void LoadExtraDomains(Engine& engine) {
         std::lock_guard<std::mutex> lock(self->debug_cmd_mutex_);
         self->pending_debug_cmds_.emplace_back(verb, arg);
       });
-      guest->set_game_time_provider([self]() { return self->clock_.game_days(); });
+      guest->set_game_time_provider([self]() { return self->clock_->game_days(); });
       guest->set_los_provider([self](u64 viewer, u64 target) {
         return self->script_bindings_->HasLos(rx::script::papyrus::ObjectRef{viewer},
                                               rx::script::papyrus::ObjectRef{target});
@@ -689,7 +689,7 @@ void MountArchives(Engine& engine) {
     std::string path = entry.path().string();
     // TODO: archive order should follow plugin order plus the ini resource
     // lists, alphabetical is a placeholder.
-    if (auto provider = bethesda::OpenArchive(path)) self->vfs_.Mount(std::move(provider));
+    if (auto provider = bethesda::OpenArchive(path)) self->vfs_->Mount(std::move(provider));
   }
 }
 
@@ -699,22 +699,22 @@ bool Engine::LoadGltfScene() {
 
   if (!config_.headless) {
     for (const asset::Texture& texture : scene.textures) {
-      if (texture.id) renderer_.UploadTexture(texture);
+      if (texture.id) renderer_->UploadTexture(texture);
     }
-    for (const asset::Material& material : scene.materials) renderer_.UploadMaterial(material);
-    for (const asset::Mesh& mesh : scene.meshes) renderer_.UploadMesh(mesh);
+    for (const asset::Material& material : scene.materials) renderer_->UploadMaterial(material);
+    for (const asset::Mesh& mesh : scene.meshes) renderer_->UploadMesh(mesh);
   }
 
   for (const asset::GltfScene::Instance& instance : scene.instances) {
-    ecs::Entity entity = world_.Create();
+    ecs::Entity entity = world_->Create();
     world::Transform transform;
     transform.position[0] = instance.position.x;
     transform.position[1] = instance.position.y;
     transform.position[2] = instance.position.z;
     std::memcpy(transform.rotation, instance.rotation, sizeof(transform.rotation));
     transform.scale = instance.scale;
-    world_.Add(entity, transform);
-    world_.Add(entity, world::Renderable{scene.meshes[instance.mesh_index].id});
+    world_->Add(entity, transform);
+    world_->Add(entity, world::Renderable{scene.meshes[instance.mesh_index].id});
   }
 
   // Sponza-friendly start: inside the atrium looking down the long axis.

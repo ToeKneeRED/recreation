@@ -32,21 +32,21 @@ constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
 }  // namespace
 
 void Engine::ApplyControls() {
-  camera_.sensitivity = input_map_.look_sens_kbm;
-  camera_.pad_sensitivity = input_map_.look_sens_pad;
-  camera_.invert_y = input_map_.invert_y;
-  if (window_) window_->SetLedColor(input_map_.led_r, input_map_.led_g, input_map_.led_b);
+  camera_.sensitivity = input_map_->look_sens_kbm;
+  camera_.pad_sensitivity = input_map_->look_sens_pad;
+  camera_.invert_y = input_map_->invert_y;
+  if (window_) window_->SetLedColor(input_map_->led_r, input_map_->led_g, input_map_->led_b);
 }
 
 void Engine::LoadControls() {
   // The engine owns no actions; register the game's set (names, folds and
   // default bindings) before any controls.ini overrides them.
-  RegisterGameInput(input_map_);
+  RegisterGameInput(*input_map_);
   controls_path_ = InputMap::DefaultConfigPath();
   if (!controls_path_.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(controls_path_).parent_path(), ec);
-    if (input_map_.LoadFromIni(controls_path_))
+    if (input_map_->LoadFromIni(controls_path_))
       RX_INFO("controls loaded from {}", controls_path_);
     else
       RX_INFO("no controls config at {}, using defaults", controls_path_);
@@ -55,7 +55,7 @@ void Engine::LoadControls() {
 }
 
 void Engine::SaveControls() {
-  if (!controls_path_.empty()) input_map_.SaveToIni(controls_path_);
+  if (!controls_path_.empty()) input_map_->SaveToIni(controls_path_);
 }
 
 void Engine::UpdateSettings() {
@@ -94,7 +94,7 @@ void Engine::UpdateSettings() {
     if (cancel) {
       capturing_row_ = -1;
     } else if (captured) {
-      input_map_.Rebind(kRows[capturing_row_].action, b);
+      input_map_->Rebind(kRows[capturing_row_].action, b);
       capturing_row_ = -1;
       SaveControls();
     }
@@ -109,30 +109,30 @@ void Engine::UpdateSettings() {
         }
         break;
       case SettingsRequest::Kind::kSensKbm:
-        input_map_.look_sens_kbm = std::clamp(
-            input_map_.look_sens_kbm + static_cast<f32>(req.delta) * 0.0005f, 0.0005f, 0.01f);
+        input_map_->look_sens_kbm = std::clamp(
+            input_map_->look_sens_kbm + static_cast<f32>(req.delta) * 0.0005f, 0.0005f, 0.01f);
         ApplyControls();
         SaveControls();
         break;
       case SettingsRequest::Kind::kSensPad:
-        input_map_.look_sens_pad = std::clamp(
-            input_map_.look_sens_pad + static_cast<f32>(req.delta) * 0.2f, 0.5f, 6.0f);
+        input_map_->look_sens_pad = std::clamp(
+            input_map_->look_sens_pad + static_cast<f32>(req.delta) * 0.2f, 0.5f, 6.0f);
         ApplyControls();
         SaveControls();
         break;
       case SettingsRequest::Kind::kInvertToggle:
-        input_map_.invert_y = !input_map_.invert_y;
+        input_map_->invert_y = !input_map_->invert_y;
         ApplyControls();
         SaveControls();
         break;
       case SettingsRequest::Kind::kReset:
-        input_map_.ResetToDefaults();
+        input_map_->ResetToDefaults();
         ApplyControls();
         SaveControls();
         break;
       case SettingsRequest::Kind::kTestRumble:
         window_->SetRumble(0.5f, 0.85f, 300);
-        if (input_map_.adaptive_triggers) {
+        if (input_map_->adaptive_triggers) {
           TriggerEffect fx;
           fx.type = TriggerEffect::Type::kResistance;
           fx.start = 80;
@@ -155,7 +155,7 @@ void Engine::UpdateSettings() {
       row.binding = "Press input...";
     } else {
       std::string s;
-      for (const Binding& b : input_map_.bindings(kRows[i].action)) {
+      for (const Binding& b : input_map_->bindings(kRows[i].action)) {
         if (!s.empty()) s += " / ";
         s += BindingLabel(b);
       }
@@ -164,11 +164,11 @@ void Engine::UpdateSettings() {
     view.rows.push_back(std::move(row));
   }
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "%.4f", input_map_.look_sens_kbm);
+  std::snprintf(buf, sizeof(buf), "%.4f", input_map_->look_sens_kbm);
   view.sens_kbm = buf;
-  std::snprintf(buf, sizeof(buf), "%.1f", input_map_.look_sens_pad);
+  std::snprintf(buf, sizeof(buf), "%.1f", input_map_->look_sens_pad);
   view.sens_pad = buf;
-  view.invert_y = input_map_.invert_y;
+  view.invert_y = input_map_->invert_y;
   view.gamepad = pad.connected;
   game_ui_.SetControlsView(view);
 }

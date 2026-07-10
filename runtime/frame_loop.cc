@@ -43,15 +43,13 @@ static base::Option<float> Lightning{"lightning", 0.0f, "RX_LIGHTNING"};
 static base::Option<bool> AuthoredInterior{"interior.lighting", true, "RX_INTERIOR_LIGHTING"};
 static base::Option<const char*> UiShot{"ui.shot", nullptr, "RX_UI_SHOT"};
 static base::Option<int> UiShotFrames{"ui.shot.frames", 30, "RX_UI_SHOT_FRAMES"};
-// RX_FIXED_DT=<seconds> locks every frame to one delta (frame-index-pure
-// animation for golden-image captures; wall clock stops mattering).
-static base::Option<float> FixedDt{"fixed.dt", 0.0f, "RX_FIXED_DT"};
+// RX_FIXED_DT (golden-image capture) is owned by app::Host now.
 
 void Engine::ApplyDebugCommand(const std::string& verb, const std::string& arg) {
   if (verb == "QuitGame") {
     RequestQuit();
   } else if (verb == "TakeScreenshot") {
-    renderer_.CaptureScreenshot("Screenshot" + std::to_string(screenshot_index_++) + ".png");
+    renderer_->CaptureScreenshot("Screenshot" + std::to_string(screenshot_index_++) + ".png");
   } else if (verb == "ToggleCollisions") {
     debug_flags_.collisions_disabled = !debug_flags_.collisions_disabled;
   } else if (verb == "ToggleAI") {
@@ -69,7 +67,7 @@ void Engine::ApplyDebugCommand(const std::string& verb, const std::string& arg) 
 void Engine::ApplyQuestWorld() {
   std::vector<world::WorldCommand> commands = quest_world_queue_.Drain();
   if (commands.empty()) return;
-  quest_world_.Apply(commands);  // host/single-player: apply locally + record provenance
+  quest_world_->Apply(commands);  // host/single-player: apply locally + record provenance
 #if RECREATION_HAS_NET
   if (server_session_) server_session_->SendWorldCommands(commands);  // mirror to clients
 #endif
@@ -81,11 +79,11 @@ void Engine::ServerSimulateActors(f32 /*dt*/) {
   // harmless (the second shove is a no-op once the first cleared the radius).
   base::Vector<Vec3> pushers;
   const ecs::Entity local = actors_->PlayerEntity();
-  if (world_.IsAlive(local))
-    if (const world::Transform* t = world_.Get<world::Transform>(local))
+  if (world_->IsAlive(local))
+    if (const world::Transform* t = world_->Get<world::Transform>(local))
       pushers.push_back({t->position[0], t->position[1], t->position[2]});
 #if RECREATION_HAS_NET
-  world_.Each<net::NetworkId, world::Transform>(
+  world_->Each<net::NetworkId, world::Transform>(
       [&](ecs::Entity, net::NetworkId&, world::Transform& t) {
         pushers.push_back({t.position[0], t.position[1], t.position[2]});
       });
@@ -93,7 +91,7 @@ void Engine::ServerSimulateActors(f32 /*dt*/) {
   if (pushers.empty()) return;
 
   constexpr f32 kPushRadius = 0.6f;  // ~capsule radius in meters
-  world_.Each<world::Npc, world::Transform>([&](ecs::Entity, world::Npc&, world::Transform& nt) {
+  world_->Each<world::Npc, world::Transform>([&](ecs::Entity, world::Npc&, world::Transform& nt) {
     for (const Vec3& p : pushers) {
       const float pusher[3] = {p.x, p.y, p.z};
       float out[3];
@@ -106,17 +104,17 @@ void Engine::ServerSimulateActors(f32 /*dt*/) {
   });
 }
 
-bool Engine::RunFrame() {
-  if (quit_.load(std::memory_order_relaxed)) return false;
-  if (FixedDt.get() > 0.0f) timer_.set_fixed_delta(static_cast<f64>(FixedDt.get()));
+// Frame-cadence game simulation, driven by app::Host::OnSimulate in both
+// windowed and headless (dedicated-server) modes, after the host ran the
+// fixed-step ECS stages. The host advanced the clock and resolved input; the
+// pre-sim capsule sync runs as a kPreSim ECS system (registered in
+// OnInitialize).
+void Engine::OnSimulate(f32 frame_delta) {
 #if RECREATION_HAS_NET
-  // Apply a requested live mod reload here, before any stage reads the Vfs.
+  // Apply a requested live mod reload; drained on the main thread where the Vfs
+  // is not being read (a fresh mount is picked up by next frame's streaming).
   if (mod_reload_requested_.exchange(false, std::memory_order_relaxed)) ReloadMods(*this);
 #endif
-  if (window_ && !window_->PumpEvents()) return false;
-  // Resolve this pump's raw keyboard/mouse + gamepad state into semantic
-  // actions for the gameplay/camera/menu code to read.
-  if (window_) input_map_.Resolve(window_->input(), window_->gamepad(), &actions_);
   // Forward key presses to the managed world (KeyPressed) so mods can bind
   // hotkeys, unless the debug console is capturing the keyboard. Queued here and
   // drained into managed below, in the same frame.
@@ -127,31 +125,15 @@ bool Engine::RunFrame() {
         managed_->QueueEvent({rx::script::host::ManagedEventId::kKeyPressed, k, 0, 0, 0.0f});
   }
   {
-    int steps = timer_.Tick();
-    f32 dt = static_cast<f32>(timer_.fixed_step());
-    // Advance the in-world clock (day/night cycle) by the real frame time. The
-    // Papyrus time natives read it through the bindings; the render path below
-    // derives the sun and sky tint from it.
-    clock_.Advance(timer_.frame_delta());
-    // Place NPC / other-player collision capsules at their current transforms
-    // before the sim step, so the player's character controller collides with
-    // them where they are this frame.
-    actors_->SyncSolidBodies();
-    for (int i = 0; i < steps; ++i) {
-      scheduler_.RunStage(ecs::Stage::kPreSim, world_, dt);
-      scheduler_.RunStage(ecs::Stage::kSim, world_, dt);
-      scheduler_.RunStage(ecs::Stage::kPostSim, world_, dt);
-    }
-
     // The guest advances on the main loop's clock; it does its work on its own
     // thread, so this only posts a tick.
-    if (scripts_) scripts_->Tick(static_cast<f32>(timer_.frame_delta()));
+    if (scripts_) scripts_->Tick(frame_delta);
     // Secondary game domains tick their own isolated microvms in lockstep.
-    for (auto& domain : extra_domains_) domain->Tick(static_cast<f32>(timer_.frame_delta()));
+    for (auto& domain : extra_domains_) domain->Tick(frame_delta);
     // Refresh the world-space position snapshot the managed proximity query reads
     // (registered refs plus the player), so mods see this frame's positions.
     if (managed_ && ctx_.bindings) {
-      quest_world_.SnapshotPositions(position_snapshot_);
+      quest_world_->SnapshotPositions(position_snapshot_);
       Vec3 pp;
       if (actors_->PlayerWorldPos(&pp)) position_snapshot_.push_back({0x14, {pp.x, pp.y, pp.z}});
       ctx_.bindings->UpdatePositionSnapshot(position_snapshot_);
@@ -159,7 +141,7 @@ bool Engine::RunFrame() {
       // Actor.IsRunning reflects real motion. Skyrim run speed is a few hundred
       // units/s; gate above a walk to avoid flagging idle drift.
       constexpr f32 kRunSpeed = 175.0f;  // units per second
-      const f32 fd = static_cast<f32>(timer_.frame_delta());
+      const f32 fd = frame_delta;
       std::vector<u64> running;
       if (fd > 0.0f) {
         for (const auto& [handle, pos] : position_snapshot_) {
@@ -179,7 +161,7 @@ bool Engine::RunFrame() {
     // into the engine through the bridge.
     if (managed_) {
       managed_->DrainEvents();
-      managed_->Tick(static_cast<f32>(timer_.frame_delta()));
+      managed_->Tick(frame_delta);
     }
     // Advance any scenes a quest fragment Started; the ScenePlayer fires their
     // phase fragments over time (host-authoritative; runs on the guest thread).
@@ -189,7 +171,7 @@ bool Engine::RunFrame() {
     if (scripts_ && ctx_.bindings) {
 #endif
       auto* binds = ctx_.bindings;
-      const f32 sdt = static_cast<f32>(timer_.frame_delta());
+      const f32 sdt = frame_delta;
       scripts_->guest().Submit(
           [binds, sdt](rx::script::papyrus::VirtualMachine&) { binds->TickScenes(sdt); });
     }
@@ -201,15 +183,15 @@ bool Engine::RunFrame() {
     // Authoritative NPC simulation runs on the host / single-player only; a
     // client receives the results via actor sync instead of simulating.
 #if RECREATION_HAS_NET
-    if (!client_session_) ServerSimulateActors(static_cast<f32>(timer_.frame_delta()));
+    if (!client_session_) ServerSimulateActors(frame_delta);
 #else
-    ServerSimulateActors(static_cast<f32>(timer_.frame_delta()));
+    ServerSimulateActors(frame_delta);
 #endif
     // Steer follower NPCs toward the player and scene guides toward their
     // targets (host authoritative; streams to clients via actor sync).
-    npc_->UpdateFollowers(static_cast<f32>(timer_.frame_delta()));
-    npc_->UpdateGuides(static_cast<f32>(timer_.frame_delta()));
-    npc_->UpdateAmbient(static_cast<f32>(timer_.frame_delta()));  // idle sandbox for streamed NPCs
+    npc_->UpdateFollowers(frame_delta);
+    npc_->UpdateGuides(frame_delta);
+    npc_->UpdateAmbient(frame_delta);  // idle sandbox for streamed NPCs
     // Combat enrollment from the guest thread (StartCombat/StopCombat/death),
     // then drive the melee simulation (host/single-player authoritative).
     for (const world::CombatEvent& e : combat_event_queue_.Drain()) {
@@ -222,10 +204,10 @@ bool Engine::RunFrame() {
         case world::CombatOp::kUnfollow: npc_->SetFollower(e.actor, false); break;
       }
     }
-    npc_->Cw00DemoTick(static_cast<f32>(timer_.frame_delta()));
-    npc_->CwBattleTick(static_cast<f32>(timer_.frame_delta()));
-    npc_->CwFieldBattleTick(static_cast<f32>(timer_.frame_delta()));
-    npc_->UpdateCombat(static_cast<f32>(timer_.frame_delta()));
+    npc_->Cw00DemoTick(frame_delta);
+    npc_->CwBattleTick(frame_delta);
+    npc_->CwFieldBattleTick(frame_delta);
+    npc_->UpdateCombat(frame_delta);
     // Mirror any soldiers the battle spawned to clients (so they render the same
     // bipeds); the actor sync then streams their movement. Drained every frame so
     // single-player simply discards them.
@@ -235,14 +217,20 @@ bool Engine::RunFrame() {
       if (server_session_ && !spawns.empty()) server_session_->SendWorldCommands(spawns);
 #endif
     }
-    npc_->Mq101DemoTick(static_cast<f32>(timer_.frame_delta()));
-    npc_->Mq101SceneTick(static_cast<f32>(timer_.frame_delta()));
+    npc_->Mq101DemoTick(frame_delta);
+    npc_->Mq101SceneTick(frame_delta);
     // World-driven progression: the player walking into a scripted trigger box
     // fires its OnTriggerEnter, the native way Skyrim advances a quest.
     interaction_->UpdateTriggers();
+  }
+}
 
-    if (!config_.headless) {
-      f32 frame_delta = static_cast<f32>(timer_.frame_delta());
+// Windowed-only per-frame policy driven by app::Host::OnUpdate: weather/sky, the
+// menus, the camera and the UI begin. The host runs the kPreRender ECS stage
+// after this returns, then calls OnBuildView.
+void Engine::OnUpdate(f32 frame_delta) {
+  {
+    {
       // Weather, parsed from the game's WTHR/CLMT, drives our physical sky/clouds
       // (never its baked skydome). Cloud coverage + aerial-perspective haze update
       // every frame (cheap, no IBL rebuild); the sun tint/dimming folds into the
@@ -261,7 +249,7 @@ bool Engine::RunFrame() {
         if (region != active_region_) {
           // Capture the weather we are leaving (old climate) to cross-fade from.
           region_blend_from_ =
-              weather_.empty() ? weather::WeatherState{} : weather_.At(clock_.game_days());
+              weather_.empty() ? weather::WeatherState{} : weather_.At(clock_->game_days());
           region_blend_t_ = 0.0f;
           active_region_ = region;
           weather_.SetClimate(climate ? *climate : default_climate_);
@@ -292,21 +280,21 @@ bool Engine::RunFrame() {
       if (weather_override_)
         w = weather_override_state_;
       else if (!weather_.empty())
-        w = weather_.At(clock_.game_days());
+        w = weather_.At(clock_->game_days());
       // Cross-fade over ~5 s when the region changed, so weather eases in.
       if (!weather_override_ && region_blend_t_ < 1.0f) {
         region_blend_t_ =
-            std::min(1.0f, region_blend_t_ + static_cast<f32>(timer_.frame_delta()) / 5.0f);
+            std::min(1.0f, region_blend_t_ + frame_delta / 5.0f);
         const f32 s = region_blend_t_ * region_blend_t_ * (3.0f - 2.0f * region_blend_t_);
         w = weather::Lerp(region_blend_from_, w, s);
       }
       if (has_weather) {
-        renderer_.settings().cloud_coverage = w.cloud_coverage;
-        renderer_.settings().aerial_perspective = ap_base_ * (1.0f + w.aerosol * 2.0f);
+        renderer_->settings().cloud_coverage = w.cloud_coverage;
+        renderer_->settings().aerial_perspective = ap_base_ * (1.0f + w.aerosol * 2.0f);
         // No rain/snow (or wetness) indoors: interior cells have no sky overhead.
         const bool indoors = streamer_ && streamer_->in_interior();
-        renderer_.settings().precipitation = indoors ? 0.0f : w.precipitation;
-        renderer_.settings().precip_snow = w.snow;
+        renderer_->settings().precipitation = indoors ? 0.0f : w.precipitation;
+        renderer_->settings().precip_snow = w.snow;
       }
       // Thunderstorm lightning: a decaying flash (with a flicker) scheduled at
       // random intervals while a thundery weather is active (heavy rain, FO4
@@ -314,7 +302,7 @@ bool Engine::RunFrame() {
       {
         const bool indoors = streamer_ && streamer_->in_interior();
         const bool storm = has_weather && !indoors && w.thunder;
-        const f32 now = clock_.real_hours() * 3600.0f;
+        const f32 now = clock_->real_hours() * 3600.0f;
         if (!storm) {
           lightning_ = 0.0f;
           next_strike_ = now + 3.0f;  // first possible strike once a storm begins
@@ -332,7 +320,7 @@ bool Engine::RunFrame() {
         }
         // RX_LIGHTNING holds the flash at a fixed level (testing the brief, random strike).
         if (Lightning.overridden()) lightning_ = Lightning.get();
-        renderer_.settings().lightning = lightning_;
+        renderer_->settings().lightning = lightning_;
       }
       // Day/night: derive the sun direction/intensity/color/ambient from the
       // clock's time of day (unless RX_SUN_DIR pinned a fixed sun), tinted and
@@ -340,7 +328,7 @@ bool Engine::RunFrame() {
       // environment is not rebuilt every frame, also re-firing when the weather
       // light changes.
       if (drive_sun_from_clock_ && !ctx_.scene_owns_sun) {
-        const f32 hour = clock_.hour();
+        const f32 hour = clock_->hour();
         const bool weather_dirty = std::abs(w.light_scale - last_weather_scale_) > 0.01f ||
                                    std::abs(w.light_tint.x - last_weather_tint_.x) > 0.01f ||
                                    std::abs(w.light_tint.y - last_weather_tint_.y) > 0.01f ||
@@ -350,7 +338,7 @@ bool Engine::RunFrame() {
           last_weather_scale_ = w.light_scale;
           last_weather_tint_ = w.light_tint;
           const SkyLighting sky = ComputeSkyLighting(hour);
-          auto& s = renderer_.settings();
+          auto& s = renderer_->settings();
           s.sun_direction = sky.sun_direction;
           s.sun_intensity = sky.sun_intensity * w.light_scale;
           s.sun_color = {sky.sun_color.x * w.light_tint.x, sky.sun_color.y * w.light_tint.y,
@@ -362,7 +350,7 @@ bool Engine::RunFrame() {
       // sky-derived lighting with the resolved flat ambient + directional fill +
       // fog, and flag the renderer to suppress the sky/atmosphere.
       {
-        auto& s = renderer_.settings();
+        auto& s = renderer_->settings();
         const bool inside = streamer_ && streamer_->in_interior() && AuthoredInterior;
         s.interior = inside;
         if (inside && streamer_->interior_lighting().valid) {
@@ -385,9 +373,17 @@ bool Engine::RunFrame() {
       UpdateSettings();  // pause-menu controls: rebind capture + sensitivity
       actors_->SyncNpcActors();  // add/remove NPC actors as cells stream in/out
       actors_->Update(frame_delta);
-      scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
+    }
+  }
+}
 
-      render::FrameView view;
+// Windowed-only: builds this frame's FrameView. The host created `view`, set its
+// frame delta and (entity gather disabled for the game via AppConfig) left the
+// draw list for us; it runs the kPreRender ECS stage before this, moves the
+// audio listener to view.camera and submits the frame after we return.
+void Engine::OnBuildView(f32 frame_delta, render::FrameView& view) {
+  {
+    {
       if (ctx_.walk_mode && actors_->HasPlayer()) {
         view.camera.eye = ctx_.walk_eye;
         view.camera.target = ctx_.walk_target;
@@ -395,25 +391,17 @@ bool Engine::RunFrame() {
         view.camera.eye = camera_.position();
         view.camera.target = camera_.target();
       }
-      view.frame_delta_seconds = frame_delta;
       // Sink the distant terrain-LOD proxies under the primary streamer's
       // fully loaded cells (secondary --add-game streamers keep the old
       // depth-sink behavior; the view carries a single rect).
       if (streamer_ && !streamer_->in_interior()) {
         std::memcpy(view.detail_rect, streamer_->detail_rect(), sizeof(view.detail_rect));
       }
-      // Move the audio listener to this frame's viewpoint (the walk-mode player or
-      // the fly camera), so positional voices pan and attenuate around the player.
-      if (audio_) {
-        const Vec3 eye = view.camera.eye;
-        const Vec3 forward = Normalize(view.camera.target - eye);
-        audio_->SetListener(eye, forward, Vec3{0, 1, 0});
-      }
       // Rebuilt every frame so destroyed entities drop out on their own.
       base::UnorderedMap<u64, Mat4> transforms;
-      world_.Each<world::Transform, world::Renderable>(
+      world_->Each<world::Transform, world::Renderable>(
           [&](ecs::Entity entity, world::Transform& transform, world::Renderable& renderable) {
-            if (world_.Has<world::Hidden>(entity)) return;  // Disable()d by a quest
+            if (world_->Has<world::Hidden>(entity)) return;  // Disable()d by a quest
             u64 key = static_cast<u64>(entity.generation) << 32 | entity.index;
             Mat4 current = TransformMatrix(transform);
             const Mat4* prev = prev_transforms_.find(key);
@@ -430,7 +418,7 @@ bool Engine::RunFrame() {
         // Keep the clustered decal sampler on the streamer's atlas once built
         // (cheap texture lookup; a fresh streamer re-points it on its own).
         if (streamer_->decal_atlas_version() > 0) {
-          renderer_.SetDecalAtlas(streamer_->decal_atlas_id(),
+          renderer_->SetDecalAtlas(streamer_->decal_atlas_id(),
                                   streamer_->decal_atlas_normal_id());
         }
       }
@@ -444,7 +432,7 @@ bool Engine::RunFrame() {
         ctx_.auto_walk_has_goal = quest_->CurrentObjectiveTarget(&goal);
         if (ctx_.auto_walk_has_goal) ctx_.auto_walk_goal = goal;
       }
-      debug_ui_.Build(renderer_, camera_, frame_delta, &view, quest_->quest_panel(),
+      debug_ui_.Build(*renderer_, camera_, frame_delta, &view, quest_->quest_panel(),
                       quest_->native_trace_panel());
       // Drain queued Debug.Notification messages onto the HUD toast.
       {
@@ -542,8 +530,8 @@ bool Engine::RunFrame() {
         const Vec3 cf = camera_.forward();
         const Vec3 cr = Normalize(Cross(cf, Vec3{0, 1, 0}));
         const Vec3 cu = Cross(cr, cf);
-        const f32 w = static_cast<f32>(renderer_.output_width());
-        const f32 h = static_cast<f32>(renderer_.output_height());
+        const f32 w = static_cast<f32>(renderer_->output_width());
+        const f32 h = static_cast<f32>(renderer_->output_height());
         const f32 aspect = h > 0 ? w / h : 1.0f;
         const f32 tan_half = std::tan(1.0472f * 0.5f);  // kFovY 60deg
         for (const PlatformNametag& n : tags) {
@@ -627,11 +615,11 @@ bool Engine::RunFrame() {
           // drawn by the normal frame draw pass above.
           const Vec3 pos{op.x, op.y, op.z};
           const f32 rot[4] = {0, 0, 0, 1};
-          ecs::Entity e = streamer_->PlaceObject(world_, form, pos, rot, 1.0f);
+          ecs::Entity e = streamer_->PlaceObject(*world_, form, pos, rot, 1.0f);
           if (e != ecs::kInvalidEntity) net_entities_.insert(op.id, e);
         } else if (op.kind == PlatformEntityOp::Kind::kMove) {
           if (ecs::Entity* e = net_entities_.find(op.id)) {
-            if (world::Transform* t = world_.Get<world::Transform>(*e)) {
+            if (world::Transform* t = world_->Get<world::Transform>(*e)) {
               t->position[0] = op.x;
               t->position[1] = op.y;
               t->position[2] = op.z;
@@ -639,7 +627,7 @@ bool Engine::RunFrame() {
           }
         } else if (op.kind == PlatformEntityOp::Kind::kDelete) {
           if (ecs::Entity* e = net_entities_.find(op.id)) {
-            world_.Destroy(*e);
+            world_->Destroy(*e);
             net_entities_.erase(op.id);
           }
         }
@@ -673,34 +661,33 @@ bool Engine::RunFrame() {
         for (const auto& h : war_holds) holds.push_back({h.name, h.owner});
         game_ui_.SetWarMap(war_map_open_, holds, war_progress);
       }
-      game_ui_.Build(*window_, renderer_, camera_, frame_delta, &view);
-      renderer_.RenderFrame(view);
-      // Test/CI hook: RX_UI_SHOT=<path> grabs the frame after RX_UI_SHOT_FRAMES
-      // (default 30) and quits. Lets a headless GPU run capture the UI without
-      // loading a universe (the NEXUS menu renders at boot).
-      if (const char* shot = UiShot.get()) {
-        static int ui_shot_frames = 0;
-        static const int ui_shot_target = [] {
-          return UiShotFrames.get() > 0 ? UiShotFrames.get() : 30;
-        }();
-        ++ui_shot_frames;
-        // CaptureScreenshot is deferred: it is written by the NEXT RenderFrame.
-        // Request at the target frame, then quit one frame later so the write
-        // actually lands.
-        if (ui_shot_frames == ui_shot_target) {
-          renderer_.CaptureScreenshot(shot);
-          // Perf breadcrumb for headless A/B runs alongside the capture.
-          RX_INFO("gpu frame at capture: {:.2f} ms", renderer_.gpu_frame_ms());
-        }
-        else if (ui_shot_frames > ui_shot_target) quit_.store(true, std::memory_order_relaxed);
-      }
-    } else {
-      // No vsync to pace the loop; yield between fixed steps instead of
-      // spinning a core.
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      game_ui_.Build(*window_, *renderer_, camera_, frame_delta, &view);
     }
   }
-  return !quit_.load(std::memory_order_relaxed);
+  // The host submits the view (renderer_->RenderFrame) after this returns.
+}
+
+// Windowed-only: after the frame was submitted. Test/CI hook: RX_UI_SHOT=<path>
+// grabs the frame after RX_UI_SHOT_FRAMES (default 30) and quits, so a headless
+// GPU run can capture the NEXUS menu at boot without loading a universe.
+void Engine::OnFrameEnd() {
+  if (const char* shot = UiShot.get()) {
+    static int ui_shot_frames = 0;
+    static const int ui_shot_target = [] {
+      return UiShotFrames.get() > 0 ? UiShotFrames.get() : 30;
+    }();
+    ++ui_shot_frames;
+    // CaptureScreenshot is deferred: it is written by the NEXT RenderFrame.
+    // Request at the target frame, then quit one frame later so the write
+    // actually lands.
+    if (ui_shot_frames == ui_shot_target) {
+      renderer_->CaptureScreenshot(shot);
+      // Perf breadcrumb for headless A/B runs alongside the capture.
+      RX_INFO("gpu frame at capture: {:.2f} ms", renderer_->gpu_frame_ms());
+    } else if (ui_shot_frames > ui_shot_target) {
+      host_->RequestQuit();
+    }
+  }
 }
 
 }  // namespace rx

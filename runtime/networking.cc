@@ -58,7 +58,7 @@ bool StartNetworking(Engine& engine) {
       // Mount the host's own mods so a listen server (and headless physics/nav)
       // sees exactly what it streams to clients. Mounted after the base game, so
       // mods win, just like loose files.
-      modstream::MountCatalog(self->vfs_, *self->mod_catalog_);
+      modstream::MountCatalog(*self->vfs_, *self->mod_catalog_);
     }
   } else if (!self->config_.connect_address.empty()) {
     const std::string cache_dir = self->config_.asset_cache_dir.empty()
@@ -147,7 +147,7 @@ bool StartNetworking(Engine& engine) {
     }
     // Stream authoritative NPC transforms; the session deltas them so only the
     // NPCs that actually moved this tick go out.
-    self->server_session_->SetActorSource([self]() { return net::CollectActorStates(self->world_); });
+    self->server_session_->SetActorSource([self]() { return net::CollectActorStates(*self->world_); });
     // When a client finishes streaming the mods, raise a managed event so
     // server-side C# scripts can react (gate spawn, greet the player).
     self->server_session_->SetClientReadySink([self](u32 peer) {
@@ -182,8 +182,8 @@ bool StartNetworking(Engine& engine) {
           [self](const modstream::ModManifest& manifest) {
             // Replace any previous mount (a live reload re-fires this), on the main
             // thread where nothing is reading the Vfs.
-            self->vfs_.UnmountByPrefix("modstream:");
-            modstream::MountManifest(self->vfs_, manifest, *self->content_store_);
+            self->vfs_->UnmountByPrefix("modstream:");
+            modstream::MountManifest(*self->vfs_, manifest, *self->content_store_);
             RX_INFO("net: mounted {} streamed mod files into the asset vfs",
                      manifest.TotalFiles());
           });
@@ -218,11 +218,11 @@ bool StartNetworking(Engine& engine) {
       // cleanup). Runs in the net sim stage on the main thread, which owns the
       // ECS, so applying straight to QuestWorld is safe.
       self->client_session_->SetWorldCommandSink(
-          [self](const std::vector<world::WorldCommand>& cmds) { self->quest_world_.Apply(cmds); });
+          [self](const std::vector<world::WorldCommand>& cmds) { self->quest_world_->Apply(cmds); });
       // Mirror authoritative NPC movement onto our existing (cell-loaded) NPC
       // entities, interpolated between updates.
       self->client_session_->SetActorSink([self](const std::vector<net::ActorState>& actors) {
-        net::ApplyActorStates(self->world_, self->quest_world_, actors, 0.1f);
+        net::ApplyActorStates(*self->world_, *self->quest_world_, actors, 0.1f);
       });
       // Show the host's active objective waypoint on our own compass: store its
       // world position; UpdateObjectiveMarkers turns it into a local bearing.
@@ -244,13 +244,13 @@ bool StartNetworking(Engine& engine) {
     return true;
   }
 
-  self->scheduler_.AddSystem(ecs::Stage::kSim, "net",
+  self->scheduler_->AddSystem(ecs::Stage::kSim, "net",
                        [self](ecs::World& world, f32 dt) { self->session_->Tick(world, dt); });
   if (self->client_session_) {
     // Remote transforms blend between snapshots. With a renderer that runs
     // per frame; headless clients smooth at the fixed step instead.
     const ecs::Stage stage = self->config_.headless ? ecs::Stage::kPostSim : ecs::Stage::kPreRender;
-    self->scheduler_.AddSystem(stage, "net_interpolation",
+    self->scheduler_->AddSystem(stage, "net_interpolation",
                          [](ecs::World& world, f32 dt) { net::TickInterpolation(world, dt); });
   }
   // The managed world booted before the session, so forward any RPC names its
@@ -282,8 +282,8 @@ void ReloadMods(Engine& engine) {
 
   // Re-mount on the host: drop the old mod providers and mount the new catalog,
   // on the main thread where nothing is reading the Vfs.
-  self->vfs_.UnmountByPrefix("modstream:");
-  modstream::MountCatalog(self->vfs_, *self->mod_catalog_);
+  self->vfs_->UnmountByPrefix("modstream:");
+  modstream::MountCatalog(*self->vfs_, *self->mod_catalog_);
 }
 #endif  // RECREATION_HAS_NET
 

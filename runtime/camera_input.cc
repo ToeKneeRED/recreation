@@ -74,15 +74,15 @@ void Engine::UpdateCamera(f32 frame_delta) {
   // (clear brush / cancel move), so the pause menu yields to it.
   const bool editor_on = editor_ && editor_->active();
 
-  if (actions_.pressed(Action::kToggleWalk) && !menu && !kb && !modal && !editor_on &&
+  if (actions_->pressed(Action::kToggleWalk) && !menu && !kb && !modal && !editor_on &&
       actors_->HasPlayer()) {
     ctx_.walk_mode = !ctx_.walk_mode;
     RX_INFO("walk mode {}",
              ctx_.walk_mode ? "on (WASD move, Shift run, Space jump, C view)" : "off");
   }
-  if (actions_.pressed(Action::kToggleThirdPerson) && !menu && !kb && !modal && !editor_on)
+  if (actions_->pressed(Action::kToggleThirdPerson) && !menu && !kb && !modal && !editor_on)
     ctx_.third_person = !ctx_.third_person;
-  if (actions_.pressed(Action::kToggleJournal) && !menu && !kb && !modal && !editor_on)
+  if (actions_->pressed(Action::kToggleJournal) && !menu && !kb && !modal && !editor_on)
     quest_->ToggleJournal();
   // The war map (M): the Civil War campaign board, a modern overlay over the
   // managed campaign state.
@@ -94,17 +94,17 @@ void Engine::UpdateCamera(f32 frame_delta) {
     // box has the keyboard). The editor handles picking, placing and editing.
     const bool allow = !menu && !kb;
     const bool typing = editor_->wants_keyboard();
-    camera_.Update(input, actions_, allow, allow && !typing, frame_delta);
+    camera_.Update(input, *actions_, allow, allow && !typing, frame_delta);
     window_->SetRelativeMouseMode(!menu && camera_.looking());
     // The map editor is a keyboard dev tool (modifier combos: Ctrl+Z, Shift+R),
     // so it keeps reading raw keys rather than going through the action layer.
     editor_->Update(input, frame_delta, allow);
   } else if (interaction_->container_open()) {
-    interaction_->UpdateContainerInput(input, actions_);  // Esc / pad B closes the loot view
+    interaction_->UpdateContainerInput(input, *actions_);  // Esc / pad B closes the loot view
     interaction_->UpdateInteraction(false);  // freeze movement/activation while looting
   } else if (interaction_->dialogue_open()) {
     // dpad/arrows highlight, A/Enter or 1-4 select, B/Esc leaves.
-    interaction_->UpdateDialogueInput(input, actions_);
+    interaction_->UpdateDialogueInput(input, *actions_);
     interaction_->UpdateInteraction(false);  // freeze movement/activation while talking
   } else if (quest_->journal_open()) {
     // The journal is a modal overlay: a number key pins that quest to track,
@@ -112,15 +112,15 @@ void Engine::UpdateCamera(f32 frame_delta) {
     const Key num[4] = {Key::k1, Key::k2, Key::k3, Key::k4};
     for (int i = 0; i < 4; ++i)
       if (input.key_pressed(num[i])) quest_->PinJournalSlot(i);
-    if (actions_.pressed(Action::kMenuCancel)) quest_->ToggleJournal();
+    if (actions_->pressed(Action::kMenuCancel)) quest_->ToggleJournal();
     interaction_->UpdateInteraction(false);
   } else if (ctx_.walk_mode && actors_->HasPlayer()) {
     WalkUpdate(frame_delta, !menu && !kb);
-    interaction_->UpdateInteraction(actions_.pressed(Action::kActivate) && !menu && !kb);
+    interaction_->UpdateInteraction(actions_->pressed(Action::kActivate) && !menu && !kb);
   } else {
     bool allow_mouse = !menu && (!debug_ui_.wants_mouse() || camera_.looking());
     bool allow_keyboard = !menu && !kb;
-    camera_.Update(input, actions_, allow_mouse, allow_keyboard, frame_delta);
+    camera_.Update(input, *actions_, allow_mouse, allow_keyboard, frame_delta);
     window_->SetRelativeMouseMode(!menu && camera_.looking());
     interaction_->UpdateInteraction(false);  // clears any stale prompt outside walk mode
   }
@@ -128,16 +128,16 @@ void Engine::UpdateCamera(f32 frame_delta) {
   interaction_->SyncHud();   // mirror the conversation / loot view into the HUD
   DriveCamera(frame_delta);  // orbit / replay overrides + record
 
-  if (actions_.pressed(Action::kToggleDebug) && !kb) debug_ui_.ToggleVisible();
-  if (actions_.pressed(Action::kToggleTrace) && !kb) debug_ui_.ToggleTrace();
-  if (actions_.pressed(Action::kToggleQuests) && !kb) debug_ui_.ToggleQuests();
-  if (actions_.pressed(Action::kToggleEditor) && !kb && editor_) editor_->Toggle();
-  if (actions_.pressed(Action::kThrowDebug) && !menu && !kb && !ctx_.walk_mode && !editor_on)
+  if (actions_->pressed(Action::kToggleDebug) && !kb) debug_ui_.ToggleVisible();
+  if (actions_->pressed(Action::kToggleTrace) && !kb) debug_ui_.ToggleTrace();
+  if (actions_->pressed(Action::kToggleQuests) && !kb) debug_ui_.ToggleQuests();
+  if (actions_->pressed(Action::kToggleEditor) && !kb && editor_) editor_->Toggle();
+  if (actions_->pressed(Action::kThrowDebug) && !menu && !kb && !ctx_.walk_mode && !editor_on)
     ThrowPhysicsCube();
   // DualSense adaptive-trigger demo: readying a weapon toggles right-trigger
   // resistance (a no-op on Xbox / when disabled in settings).
-  if (actions_.pressed(Action::kReady) && !menu && !kb && !editor_on && window_ &&
-      input_map_.adaptive_triggers) {
+  if (actions_->pressed(Action::kReady) && !menu && !kb && !editor_on && window_ &&
+      input_map_->adaptive_triggers) {
     weapon_trigger_ = !weapon_trigger_;
     TriggerEffect fx;
     if (weapon_trigger_) {
@@ -148,7 +148,7 @@ void Engine::UpdateCamera(f32 frame_delta) {
     window_->SetTriggerEffect(false, true, fx);
   }
   // The editor owns Esc (cancel brush / move); only open the pause menu outside it.
-  if (actions_.pressed(Action::kToggleMenu) && !kb && !modal && !editor_on) game_ui_.ToggleMenu();
+  if (actions_->pressed(Action::kToggleMenu) && !kb && !modal && !editor_on) game_ui_.ToggleMenu();
   if (game_ui_.quit_requested()) RequestQuit();
 }
 
@@ -288,7 +288,7 @@ void Engine::DriveCamera(f32 dt) {
         char path[1024];
         std::snprintf(path, sizeof(path), "%s/%02d_%s.png", showcase_shot_dir_.c_str(), idx,
                       label.c_str());
-        renderer_.CaptureScreenshot(path);
+        renderer_->CaptureScreenshot(path);
         RX_INFO("showcase capture: {}", path);
       }
     }
@@ -421,7 +421,7 @@ void Engine::BuildTrailer() {
 }
 
 void Engine::ApplyTrailerRenderMode(TrailerRenderMode mode) {
-  render::RenderSettings& s = renderer_.settings();
+  render::RenderSettings& s = renderer_->settings();
   switch (mode) {
     case TrailerRenderMode::kRaster:
       // Pure raster fallbacks: cascaded shadows, screen-space AO/reflections/GI.
@@ -504,7 +504,7 @@ void Engine::SetupTrailerStreaming() {
     s->set_fixed_anchor(anchor);
     s->set_world_offset({center.x - anchor.x, center.y - ground, center.z - anchor.z});
     s->Configure(preload);
-    if (k != 0) s->UnloadAllCells(world_);  // only the active game stays resident
+    if (k != 0) s->UnloadAllCells(*world_);  // only the active game stays resident
   }
   // Collapse all regions onto the shared center: the drone repeats its hero move
   // in place for each game while the active domain switches under the fade-cut.
@@ -522,7 +522,7 @@ bool Engine::TrailerActiveLoaded() {
 void Engine::SwitchTrailerDomain(int region_index) {
   if (region_index == trailer_active_domain_) return;
   if (world::CellStreamer* prev = TrailerStreamer(trailer_active_domain_))
-    prev->UnloadAllCells(world_);  // drop the outgoing map; the incoming streams in
+    prev->UnloadAllCells(*world_);  // drop the outgoing map; the incoming streams in
   trailer_active_domain_ = region_index;
   if (region_index >= 0 && static_cast<size_t>(region_index) < showcase_regions_.size())
     RX_INFO("trailer: cut to {} (loading)", showcase_regions_[region_index].name);
@@ -536,10 +536,10 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
     // Mouse look plus right-stick look (rate based; invert/sensitivity from config).
     ctx_.cam_yaw += input.mouse_dx * camera_.sensitivity;
     cam_pitch_ = std::clamp(cam_pitch_ - input.mouse_dy * camera_.sensitivity, -1.4f, 1.4f);
-    const f32 inv = input_map_.invert_y ? -1.0f : 1.0f;
-    ctx_.cam_yaw += actions_.axis(Axis::kLookX) * input_map_.look_sens_pad * dt;
+    const f32 inv = input_map_->invert_y ? -1.0f : 1.0f;
+    ctx_.cam_yaw += actions_->axis(Axis::kLookX) * input_map_->look_sens_pad * dt;
     cam_pitch_ = std::clamp(
-        cam_pitch_ - actions_.axis(Axis::kLookY) * input_map_.look_sens_pad * dt * inv, -1.4f, 1.4f);
+        cam_pitch_ - actions_->axis(Axis::kLookY) * input_map_->look_sens_pad * dt * inv, -1.4f, 1.4f);
   }
 
   // Move relative to where the camera faces (flattened to the ground plane).
@@ -548,10 +548,10 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
   Vec3 right{std::cos(ctx_.cam_yaw), 0, std::sin(ctx_.cam_yaw)};
   Vec3 move{};
   if (allow) {
-    move = move + fwd * (-actions_.axis(Axis::kMoveY));
-    move = move + right * actions_.axis(Axis::kMoveX);
+    move = move + fwd * (-actions_->axis(Axis::kMoveY));
+    move = move + right * actions_->axis(Axis::kMoveX);
   }
-  f32 speed = (allow && actions_.down(Action::kSprint)) ? 4.8f : 1.8f;
+  f32 speed = (allow && actions_->down(Action::kSprint)) ? 4.8f : 1.8f;
   if (ctx_.auto_walk) {
     // Test hook: head for the active quest marker / guide mark when one is set,
     // so the guided playthrough follows the quest; otherwise coast forward.
@@ -578,7 +578,7 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
     velocity = move * speed;
     yaw = std::atan2(move.x, move.z);  // the biped's +Z faces movement
   }
-  bool jump = allow && actions_.pressed(Action::kJump);
+  bool jump = allow && actions_->pressed(Action::kJump);
 
   // The actor system owns the player capsule; it steps the character controller
   // and returns the body (feet) position for the follow camera.
@@ -589,7 +589,7 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
   // so the player can fight (clear a fort, join a battle). Aim is the camera yaw.
   // RX_AUTO_ATTACK swings on a timer for headless playthrough verification.
   const bool auto_attack = bool(AutoAttack);
-  bool swing = allow && actions_.pressed(Action::kAttack);
+  bool swing = allow && actions_->pressed(Action::kAttack);
   if (auto_attack) {
     auto_attack_timer_ -= dt;
     if (auto_attack_timer_ <= 0.0f) {
@@ -609,9 +609,9 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
     // boom rarely clips solid geometry, and a terrain/foliage hit there would
     // wrongly yank the camera onto the player's back.
     f32 boom = 3.2f;
-    if (physics_.initialized() && streamer_ && streamer_->in_interior()) {
+    if (physics_->initialized() && streamer_ && streamer_->in_interior()) {
       physics::PhysicsWorld::RayHit hit;
-      if (physics_.Raycast(pivot, cam_fwd * -1.0f, boom + 0.3f, &hit))
+      if (physics_->Raycast(pivot, cam_fwd * -1.0f, boom + 0.3f, &hit))
         boom = std::max(hit.distance - 0.3f, 0.5f);
     }
     ctx_.walk_eye = pivot - cam_fwd * boom;
@@ -631,18 +631,18 @@ void Engine::WalkUpdate(f32 dt, bool allow) {
 }
 
 void Engine::ThrowPhysicsCube() {
-  if (!physics_.initialized() || !physics_cube_mesh_) return;
+  if (!physics_->initialized() || !physics_cube_mesh_) return;
   Vec3 forward = camera_.forward();
   Vec3 origin = camera_.position() + forward * 0.8f;
   // Wood-ish density: heavy enough to splash, light enough to float.
   physics::BodyId body =
-      physics_.AddDynamicBox(origin, {0.25f, 0.25f, 0.25f}, 350.0f, forward * 14.0f);
+      physics_->AddDynamicBox(origin, {0.25f, 0.25f, 0.25f}, 350.0f, forward * 14.0f);
   if (!body) return;
-  ecs::Entity entity = world_.Create();
-  world_.Add(entity, world::Transform{.position = {origin.x, origin.y, origin.z}});
-  world_.Add(entity, world::Renderable{physics_cube_mesh_});
+  ecs::Entity entity = world_->Create();
+  world_->Add(entity, world::Transform{.position = {origin.x, origin.y, origin.z}});
+  world_->Add(entity, world::Renderable{physics_cube_mesh_});
   physics_entities_.push_back({body, entity});
-  if (window_ && input_map_.rumble) window_->SetRumble(0.35f, 0.7f, 180);  // toss kick
+  if (window_ && input_map_->rumble) window_->SetRumble(0.35f, 0.7f, 180);  // toss kick
 }
 
 }  // namespace rx
