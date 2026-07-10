@@ -60,6 +60,23 @@ static kinema::PoseView KinPoseView(anim::SkeletonPose& p) {
                           p.size()};
 }
 
+// The shared, immutable locomotion archetype: idle/walk/run baked in
+// skeleton-bone order, a 1D walk<->run blend space on the "speed" parameter and a
+// two-state (idle <-> locomotion) machine with inertialized transitions. Held by
+// shared_ptr and shared by every actor of the skeleton; the machine and blend
+// space hold raw Clip* into the owned clips, so those keep stable addresses
+// (unique_ptr, never moved after Build).
+struct LocomotionArchetype {
+  std::unique_ptr<kinema::OwnedClip> idle, walk, run;
+  std::unique_ptr<kinema::BlendSpace> loco_space;
+  kinema::StateMachine machine;
+  u32 bones = 0;
+  u16 idle_state = 0, loco_state = 1;
+  int speed_param = 0, phase_param = 1;  // PoseParams indices
+  f32 walk_speed = 1.4f, run_speed = 4.0f;  // authored planar speed (engine m/s)
+  f32 walk_duration = 1.0f;                 // walk clip loop period (seconds)
+};
+
 ActorSystem::ActorSystem(EngineContext& ctx)
     : ctx_(ctx),
       world_(*ctx.world),
@@ -830,6 +847,197 @@ void ActorSystem::SampleHavokClipToPose(const Actor& actor, const HavokClip& cli
   }
 }
 
+kinema::OwnedClip ActorSystem::BakeSkeletonSpaceClip(const Actor& actor,
+                                                    const HavokClip& clip) const {
+  return kinema::OwnedClip(bethesda::TranscodeToKinemaSkeleton(
+      clip.animation, clip.track_to_skeleton, actor.skeleton,
+      clip.has_motion ? &clip.motion : nullptr, &clip.events));
+}
+
+std::shared_ptr<const LocomotionArchetype> ActorSystem::BuildCharacterLocomotion(
+    const Actor& actor, const std::string& skeleton_hkx_path, const std::string& actor_name) {
+  if (character_locomotion_) return character_locomotion_;
+
+  // Try the vanilla character locomotion filenames (they vary a little across
+  // releases: mtwalkforward.hkx vs mt_walkforward.hkx). First that decodes wins.
+  auto load = [&](std::initializer_list<const char*> names) -> std::shared_ptr<HavokClip> {
+    for (const char* n : names) {
+      std::string path = std::string("meshes/actors/character/animations/") + n;
+      if (!vfs_.Contains(asset::NormalizePath(path))) continue;
+      if (auto c = LoadHavokClip(actor, path, skeleton_hkx_path, actor_name)) return c;
+    }
+    return nullptr;
+  };
+  auto idle = load({"male/mt_idle.hkx", "mt_idle.hkx", "mtidle.hkx"});
+  auto walk = load({"male/mt_walkforward.hkx", "mt_walkforward.hkx", "mtwalkforward.hkx"});
+  auto run = load({"male/mt_runforward.hkx", "mt_runforward.hkx", "mtrunforward.hkx"});
+  if (!idle || !walk || !run) {
+    RX_WARN("locomotion machine: missing clips (idle {} walk {} run {}); actor stays on the "
+            "direct-clip/procedural path",
+            static_cast<bool>(idle), static_cast<bool>(walk), static_cast<bool>(run));
+    return nullptr;
+  }
+
+  auto arch = std::make_shared<LocomotionArchetype>();
+  arch->bones = static_cast<u32>(actor.skeleton.bones.size());
+  arch->idle = std::make_unique<kinema::OwnedClip>(BakeSkeletonSpaceClip(actor, *idle));
+  arch->walk = std::make_unique<kinema::OwnedClip>(BakeSkeletonSpaceClip(actor, *walk));
+  arch->run = std::make_unique<kinema::OwnedClip>(BakeSkeletonSpaceClip(actor, *run));
+  if (!*arch->idle || !*arch->walk || !*arch->run) {
+    RX_WARN("locomotion machine: a clip failed to transcode; skipping");
+    return nullptr;
+  }
+
+  // Authored planar speed of a gait clip = its total root travel / duration,
+  // mapped from Bethesda game units (Z-up, ~70/m) to engine metres.
+  auto planar_speed = [](const HavokClip& c, f32 fallback) -> f32 {
+    if (!c.has_motion || c.animation.duration < 1e-3f) return fallback;
+    Vec3 d = bethesda::SampleMotionTranslation(c.motion, c.animation.duration);
+    constexpr f32 s = 0.01428f;
+    f32 metres = std::sqrt(d.x * d.x + d.y * d.y) * s;
+    f32 sp = metres / c.animation.duration;
+    return sp > 0.05f ? sp : fallback;
+  };
+  arch->walk_speed = planar_speed(*walk, 1.4f);
+  arch->run_speed = planar_speed(*run, 4.0f);
+  if (arch->run_speed <= arch->walk_speed + 0.1f) arch->run_speed = arch->walk_speed + 1.5f;
+  arch->walk_duration = std::max(arch->walk->get()->duration(), 1.0f / 30.0f);
+
+  // 1D walk<->run blend space on the "speed" parameter.
+  arch->loco_space = std::make_unique<kinema::BlendSpace>(kinema::BlendSpace::Dim::k1D);
+  arch->loco_space->Add(arch->walk->get(), arch->walk_speed);
+  arch->loco_space->Add(arch->run->get(), arch->run_speed);
+  arch->loco_space->Finalize();
+
+  // idle <-> locomotion, transitions gated on "speed". The locomotion state is a
+  // one-op blend-space program whose normalized phase (phase_param) the tick
+  // drives from a foot-sync group; walk supplies events + root motion.
+  kinema::StateMachineBuilder smb(arch->bones);
+  arch->idle_state = smb.AddClipState(arch->idle->get(), /*loop=*/true);
+  kinema::PoseOp loco{};
+  loco.kind = kinema::PoseOp::Kind::kBlendSpace;
+  loco.dst = 0;
+  loco.a = 1;  // scratch register
+  loco.space = arch->loco_space.get();
+  loco.coord_param = static_cast<kinema::i16>(arch->speed_param);
+  loco.time_param = static_cast<kinema::i16>(arch->phase_param);
+  arch->loco_state = smb.AddProgramState(&loco, 1, /*reg_count=*/2, /*clock_op=*/-1,
+                                         /*loop_duration=*/arch->walk_duration, /*loop=*/true,
+                                         /*speed=*/1.0f, /*clip=*/arch->walk->get(),
+                                         /*root_source=*/arch->walk->get());
+  kinema::TransitionDesc start;
+  start.duration = 0.22f;
+  kinema::ConditionAtom moving =
+      kinema::ConditionAtom::Greater(static_cast<kinema::i16>(arch->speed_param), 0.5f);
+  smb.AddTransition(arch->idle_state, arch->loco_state, start, &moving, 1);
+  kinema::TransitionDesc stop;
+  stop.duration = 0.28f;
+  kinema::ConditionAtom halting =
+      kinema::ConditionAtom::Less(static_cast<kinema::i16>(arch->speed_param), 0.35f);
+  smb.AddTransition(arch->loco_state, arch->idle_state, stop, &halting, 1);
+  arch->machine = smb.Build();
+
+  RX_INFO("locomotion machine: idle/walk/run baked ({} bones), walk {:.2f} m/s, run {:.2f} m/s",
+          arch->bones, arch->walk_speed, arch->run_speed);
+  character_locomotion_ = arch;
+  return arch;
+}
+
+void ActorSystem::AttachLocomotion(Actor& actor, std::shared_ptr<const LocomotionArchetype> arch) {
+  if (!arch) return;
+  actor.loco_arch = arch;
+  actor.loco_params.assign(2, 0.0f);
+  actor.loco_arena.Init(arch->bones, arch->machine.max_registers());
+  actor.loco_sm.Init(arch->machine, arch->idle_state);
+  // Foot-sync walk<->run only when both clips carry the same non-empty footfall
+  // marker set (their sidecar events); otherwise a plain phase clock drives it.
+  const kinema::Clip* w = arch->walk->get();
+  const kinema::Clip* r = arch->run->get();
+  actor.loco_synced = w && r && w->num_events() > 0 && w->num_events() == r->num_events();
+  actor.loco_sync.Clear();
+  if (actor.loco_synced) {
+    actor.loco_sync.AddClip(*w);
+    actor.loco_sync.AddClip(*r);
+    actor.loco_sync.Reset(0.0f);
+  }
+  actor.loco_prev_phase = 0.0f;
+  actor.loco_phase = 0.0f;
+  actor.foot_ik = false;  // the machine owns the pose
+}
+
+void ActorSystem::UpdateLocomotion(Actor& actor, f32 dt) {
+  const LocomotionArchetype& arch = *actor.loco_arch;
+
+  // RX_ANIM_B debug driver: script the speed parameter idle -> walk -> run so the
+  // otherwise-static bringup scene exercises the machine's inertialized
+  // transitions and its walk<->run blend space. The inertializer absorbs the
+  // stepped coordinate change into a smooth pose blend.
+  f32 speed = actor.speed;
+  if (actor.loco_debug_drive) {
+    actor.loco_debug_t += dt;
+    const f32 seg = 3.0f;  // seconds per gait phase
+    f32 cycle = std::fmod(actor.loco_debug_t, seg * 3.0f);
+    speed = cycle < seg ? 0.0f : (cycle < 2.0f * seg ? arch.walk_speed : arch.run_speed);
+  }
+  actor.loco_params[arch.speed_param] = speed;
+
+  // Shared normalized locomotion phase [0,1): foot-synced when the gaits share
+  // markers, else a plain clock whose cadence scales with speed.
+  f32 phase;
+  if (actor.loco_synced) {
+    f32 play_rate = (speed > 0.05f ? speed : 0.0f) / std::max(arch.walk_speed, 0.05f);
+    actor.loco_sync.Advance(dt, /*leader=*/0, play_rate);
+    u32 markers = actor.loco_sync.marker_count();
+    phase = markers > 0 ? actor.loco_sync.phase() / static_cast<f32>(markers) : 0.0f;
+  } else {
+    f32 cadence = (speed > 0.05f ? speed : arch.walk_speed) / std::max(arch.walk_speed, 0.05f);
+    actor.loco_phase += dt * cadence / arch.walk_duration;
+    actor.loco_phase -= std::floor(actor.loco_phase);
+    phase = actor.loco_phase;
+  }
+  actor.loco_params[arch.phase_param] = phase;
+
+  kinema::PoseParams pp{actor.loco_params.data(), static_cast<u32>(actor.loco_params.size())};
+  kinema::PoseView out = KinPoseView(actor.pose);
+
+  // Route the active state's footstep point events (and any ranged contact spans)
+  // to the log through the machine's event sink.
+  kinema::EventCallback ev{};
+  ev.point = [](void*, const kinema::ClipEvent& e) {
+    RX_DEBUG("anim event '{}' @ {:.2f}s", e.name ? e.name : "?", e.time);
+  };
+  ev.ranged = [](void*, const kinema::ClipRangedEvent& r, kinema::RangePhase p) {
+    const char* ph = p == kinema::RangePhase::kEnter    ? "enter"
+                     : p == kinema::RangePhase::kActive ? "active"
+                                                        : "exit";
+    RX_DEBUG("anim range '{}' {} [{:.2f},{:.2f}]", r.name ? r.name : "?", ph, r.begin, r.end);
+  };
+  const u16 prev_state = actor.loco_sm.state();
+  actor.loco_sm.Update(dt, pp, actor.loco_arena, out, &ev);
+  if (actor.loco_sm.state() != prev_state) {
+    RX_INFO("locomotion transition: state {} -> {} (speed {:.2f} m/s)", prev_state,
+            actor.loco_sm.state(), speed);
+  }
+  actor.loco_prev_phase = phase;
+
+  // Root motion: the machine's transition-blended, loop-aware delta (game units,
+  // Z-up) into engine space (Y-up, metres) and the actor's facing — the same
+  // basis the direct-clip path uses. Only for showcase actors; capsule-driven
+  // gameplay actors keep their controller-owned position.
+  if (actor.loco_apply_root && !PinRoot) {
+    kinema::Vec3 kd = actor.loco_sm.RootMotion();
+    constexpr f32 s = 0.01428f;
+    Vec3 local{kd.x * s, kd.z * s, -kd.y * s};
+    f32 cy = std::cos(actor.yaw), sy = std::sin(actor.yaw);
+    Vec3 step{local.x * cy + local.z * sy, local.y, -local.x * sy + local.z * cy};
+    if (world::Transform* t = world_.Get<world::Transform>(actor.entity)) {
+      t->position[0] += step.x;
+      t->position[1] += step.y;
+      t->position[2] += step.z;
+    }
+  }
+}
+
 // Spawns a creature rig (its own skeleton.nif + skinned mesh + skeleton.hkx)
 // on the bringup stage and plays a clip from its animation set.
 bool ActorSystem::CreateCreatureActor(const std::string& name, const std::string& clip_override) {
@@ -931,36 +1139,44 @@ bool ActorSystem::CreateSkyrimActor() {
   // Real Havok animation on the bringup actor; RX_ANIM overrides the clip,
   // and a failed load falls back to the procedural gait.
   const char* clip_override = AnimClipPath.get();
-  std::string clip_path = clip_override && clip_override[0]
+  const bool explicit_clip = clip_override && clip_override[0];
+  std::string clip_path = explicit_clip
                               ? clip_override
                               : "meshes/actors/character/animations/mt_idle_b_long_left.hkx";
   const std::string skel_hkx = "meshes/actors/character/character assets/skeleton.hkx";
+  // The idle clip stays resident as the RX_KINEMA=0 fallback pose; under
+  // RX_KINEMA the locomotion machine below takes precedence.
   PlayHavokClip(actors_[player_actor_], clip_path, skel_hkx, "character");
-  // Debug clip cycling: preload a second clip and arm the 4s inertialized swap.
-  if (const char* clip_b = AnimClipPathB.get(); clip_b && clip_b[0]) {
+
+  // Locomotion state machine: unless RX_ANIM pins one explicit clip, bind the
+  // bringup actor to the shared idle/walk/run machine so RX_KINEMA drives the
+  // pose through kinema's state layer. RX_ANIM_B scripts it idle->walk->run.
+  if (!explicit_clip) {
     Actor& a = actors_[player_actor_];
-    if (auto second = LoadHavokClip(a, clip_b, skel_hkx, "character")) {
-      a.havok_clip_b = std::move(second);
-      a.inert.Init(static_cast<u32>(a.skeleton.bones.size()));
-      a.inert_from.ResetToBind(a.skeleton);
-      a.inert_to.ResetToBind(a.skeleton);
-      a.clip_cycle = true;
-      a.clip_timer = 0;
-      RX_INFO("anim clip-cycle: alternating base clip with {} every 4s (inertialized)", clip_b);
+    if (auto arch = BuildCharacterLocomotion(a, skel_hkx, "character")) {
+      AttachLocomotion(a, arch);
+      a.loco_apply_root = true;  // showcase actor: the machine may move it
+      if (const char* b = AnimClipPathB.get(); b && b[0]) {
+        a.loco_debug_drive = true;
+        RX_INFO("anim RX_ANIM_B: driving the locomotion machine idle->walk->run (inertialized)");
+      }
     }
   }
-  // Additive layer: preload an additive clip composed on top of the base pose.
+  // Additive layer: bake the clip into a kinema additive (delta) clip in
+  // skeleton space (first-frame reference) and compose it each tick with
+  // kinema::ApplyAdditive (RX_KINEMA path). Untouched bones carry an identity
+  // delta, so the single-skeleton additive covers name-mapped bones cleanly.
   if (const char* add = AnimAdditivePath.get(); add && add[0]) {
     Actor& a = actors_[player_actor_];
     if (auto layer = LoadHavokClip(a, add, skel_hkx, "character")) {
-      u32 mapped = 0;
-      for (i32 b : layer->track_to_skeleton)
-        if (b >= 0) ++mapped;
-      a.additive_clip = std::move(layer);
-      a.additive_time = 0;
-      RX_INFO("anim additive layer attached: {} ({} tracks, {} mapped, additive={})", add,
-               a.additive_clip->animation.num_tracks, mapped,
-               a.additive_clip->animation.additive ? "yes" : "no");
+      kinema::OwnedClip baked_src = BakeSkeletonSpaceClip(a, *layer);
+      if (baked_src) {
+        a.additive_clip = layer;
+        a.additive_baked = std::make_shared<kinema::OwnedClip>(
+            kinema::MakeAdditiveClipFromFirstFrame(*baked_src.get()));
+        a.additive_time = 0;
+        RX_INFO("anim additive layer baked (skeleton-space, first-frame reference): {}", add);
+      }
     }
   }
   RX_INFO("skyrim actor ready ({} body parts); press T to walk it",
@@ -990,23 +1206,15 @@ void ActorSystem::UpdateOneActor(Actor& actor, f32 dt) {
   if (const net::ReplicatedGait* gait = world_.Get<net::ReplicatedGait>(actor.entity))
     actor.speed = gait->speed;
 #endif
-  if (actor.havok_clip) {
+  const bool use_kinema = UseKinema;
+  if (use_kinema && actor.loco_arch) {
+    // RX_KINEMA locomotion: the compiled idle/walk/run machine drives the pose,
+    // its transitions, blend space, foot-sync, events and root motion (item 1-4).
+    UpdateLocomotion(actor, dt);
+  } else if (actor.havok_clip) {
+    // Direct one-shot / idle clip path (attacks, gameplay-triggered idles, and
+    // the RX_KINEMA=0 spline fallback). Unchanged playback.
     const bool kin = UseKinema && actor.havok_clip->kinema;
-    // Debug clip cycling (kinema-only): every 4s, capture the pose the outgoing
-    // clip shows now (`from`) and the pose the incoming clip shows at its start
-    // (`to`), swap which clip is active, and hand the from-to offset to the
-    // inertializer so the following ticks decay it in — no pose pop.
-    if (kin && actor.clip_cycle && actor.havok_clip_b) {
-      actor.clip_timer += dt;
-      if (actor.clip_timer >= 4.0f) {
-        actor.clip_timer -= 4.0f;
-        SampleHavokClipToPose(actor, *actor.havok_clip, actor.havok_time, &actor.inert_from);
-        std::swap(actor.havok_clip, actor.havok_clip_b);
-        actor.havok_time = 0;
-        SampleHavokClipToPose(actor, *actor.havok_clip, 0.0f, &actor.inert_to);
-        actor.inert.Begin(KinPoseView(actor.inert_from), KinPoseView(actor.inert_to), 0.25f);
-      }
-    }
     const HavokClip& clip = *actor.havok_clip;
     f32 duration = std::max(clip.animation.duration, 1.0f / 30.0f);
     f32 prev_time = actor.havok_time;
@@ -1046,40 +1254,28 @@ void ActorSystem::UpdateOneActor(Actor& actor, f32 dt) {
       }
     }
     SampleHavokClipToPose(actor, clip, actor.havok_time, &actor.pose);
-    // Decay the captured clip-switch offset onto the freshly sampled pose so the
-    // transition reads as a blend rather than a snap (kinema-only).
-    if (kin && actor.inert.active()) {
-      kinema::PoseView pv = KinPoseView(actor.pose);
-      actor.inert.Apply(pv, dt);
-    }
-    // Additive layer (kinema-only): sample the layer on its own looping clock and
-    // compose it onto the mapped bones (rotation composes, translation adds,
-    // scale multiplies) at full weight, matching kinema::ApplyAdditive.
-    if (kin && actor.additive_clip && actor.additive_clip->kinema) {
-      const HavokClip& add = *actor.additive_clip;
-      f32 add_dur = std::max(add.animation.duration, 1.0f / 30.0f);
-      actor.additive_time = std::fmod(actor.additive_time + dt, add_dur);
-      const u32 tracks = add.kinema->num_tracks();
-      if (kinema_t_.size() < tracks) {
-        kinema_t_.resize(tracks);
-        kinema_r_.resize(tracks);
-        kinema_s_.resize(tracks);
-      }
-      kinema::PoseView pose{kinema_t_.data(), kinema_r_.data(), kinema_s_.data(), tracks};
-      add.kinema->Sample(actor.additive_time, pose);
-      for (u32 t = 0; t < tracks && t < add.track_to_skeleton.size(); ++t) {
-        i32 bone = add.track_to_skeleton[t];
-        if (bone < 0) continue;
-        const Quat ar{kinema_r_[t].x, kinema_r_[t].y, kinema_r_[t].z, kinema_r_[t].w};
-        actor.pose.rotation[bone] = Normalize(actor.pose.rotation[bone] * ar);
-        actor.pose.translation[bone] =
-            actor.pose.translation[bone] + Vec3{kinema_t_[t].x, kinema_t_[t].y, kinema_t_[t].z};
-        actor.pose.scale[bone] = actor.pose.scale[bone] * kinema_s_[t];
-      }
-    }
   } else {
     actor.locomotion.phase = anim::AdvancePhase(actor.locomotion.phase, actor.speed, dt);
     actor.locomotion.Apply(actor.skeleton, actor.speed, &actor.pose);
+  }
+
+  // Additive layer (RX_KINEMA path): compose the baked additive (delta) clip onto
+  // the pose the base state produced, over the whole skeleton — untouched bones
+  // carry an identity delta so ApplyAdditive leaves them unchanged (item 5).
+  if (use_kinema && actor.additive_baked && *actor.additive_baked) {
+    const kinema::Clip* add = actor.additive_baked->get();
+    f32 add_dur = std::max(add->duration(), 1.0f / 30.0f);
+    actor.additive_time = std::fmod(actor.additive_time + dt, add_dur);
+    const u32 n = actor.pose.size();
+    if (kinema_t_.size() < n) {
+      kinema_t_.resize(n);
+      kinema_r_.resize(n);
+      kinema_s_.resize(n);
+    }
+    kinema::PoseView layer{kinema_t_.data(), kinema_r_.data(), kinema_s_.data(), n};
+    add->Sample(actor.additive_time, layer);
+    kinema::PoseView base = KinPoseView(actor.pose);
+    kinema::ApplyAdditive(base, layer, 1.0f, base);
   }
 
   if (actor.foot_ik && physics_.initialized()) {

@@ -32,6 +32,13 @@ namespace bethesda {
 class StarfieldMaterialDb;
 }
 
+// A compiled, immutable locomotion state machine (idle / walk / run + a 1D
+// speed blend space) shared by every actor of one skeleton archetype. Built once
+// from real transcoded clips; the per-actor instance/arena live on the Actor.
+// Defined in actor_system.cc (holds kinema owning types); actors reference it
+// through a shared_ptr, so a forward declaration is all the header needs.
+struct LocomotionArchetype;
+
 // Owns the engine's skinned, animated characters: the walkable player, the test
 // bringup biped, and the per-NPC instances that mirror streamed-in ECS actors.
 // Kept engine-side (not ECS components) because the renderer needs the CPU skin
@@ -112,20 +119,34 @@ class ActorSystem {
     anim::SkeletonPose pose;
     std::shared_ptr<const HavokClip> havok_clip;  // when set, replaces the gait
     f32 havok_time = 0;
-    // Debug clip cycling (RX_ANIM_B): a preloaded second clip the bringup actor
-    // alternates with every 4s, blended across the switch by the inertializer so
-    // the pose never pops. Both clips stay resident; the timer swaps which is
-    // active. Kinema-only (skipped under RX_KINEMA=0).
-    std::shared_ptr<const HavokClip> havok_clip_b;
-    bool clip_cycle = false;   // RX_ANIM_B armed
-    f32 clip_timer = 0;        // seconds since the last switch
-    kinema::Inertializer inert;    // decaying pose offset across a clip switch
-    anim::SkeletonPose inert_from;  // scratch: old clip's pose at the switch
-    anim::SkeletonPose inert_to;    // scratch: new clip's pose at its start
-    // Additive layer (RX_ANIM_ADDITIVE): a second clip composed on top of the
-    // base pose each tick (rot compose, trans add, scale multiply) over its own
-    // mapped bones. Loops on its own time accumulator. Kinema-only.
+    // Locomotion state machine (RX_KINEMA path): the shared archetype (idle /
+    // walk / run + 1D speed blend space + inertialized transitions) plus this
+    // actor's own instance/arena/foot-sync. When bound it drives the pose from
+    // the actor's planar speed and takes precedence over havok_clip/procedural.
+    // Null = the actor stays on the direct-clip or procedural gait path.
+    std::shared_ptr<const LocomotionArchetype> loco_arch;
+    kinema::StateMachineInstance loco_sm;
+    kinema::PoseArena loco_arena;
+    kinema::SyncGroup loco_sync;
+    bool loco_synced = false;      // foot-sync usable (walk/run share footfall markers)
+    std::vector<f32> loco_params;  // [0]=speed (m/s), [1]=phase [0,1)
+    f32 loco_prev_phase = 0;       // last frame's normalized locomotion phase
+    f32 loco_phase = 0;            // plain phase accumulator when not foot-synced
+    // RX_ANIM_B: a debug driver that scripts the locomotion speed through
+    // idle -> walk -> run so the bringup scene exercises the machine's
+    // inertialized transitions (replaces the old hand-rolled clip-cycle dance).
+    bool loco_debug_drive = false;
+    f32 loco_debug_t = 0;
+    // Apply the machine's root motion to the entity transform (showcase/bringup
+    // actors). False for capsule-driven gameplay actors, whose position is owned
+    // by the character controller — the machine only poses them.
+    bool loco_apply_root = false;
+    // Additive layer (RX_ANIM_ADDITIVE): a clip baked into a kinema additive
+    // (delta) clip in skeleton space at load time, composed onto the base pose
+    // each tick with kinema::ApplyAdditive. Loops on its own accumulator.
+    // Kinema-only; additive_clip keeps the decode (duration/logging).
     std::shared_ptr<const HavokClip> additive_clip;
+    std::shared_ptr<kinema::OwnedClip> additive_baked;
     f32 additive_time = 0;
     base::Vector<Mat4> bone_model;  // model-space per skeleton bone
     base::Vector<ActorPart> parts;
@@ -167,6 +188,22 @@ class ActorSystem {
   // pose for untouched bones), through the same kinema/spline paths as the tick.
   void SampleHavokClipToPose(const Actor& actor, const HavokClip& clip, f32 time,
                              anim::SkeletonPose* out);
+  // Transcodes a loaded clip into a kinema blob laid out in skeleton-bone order
+  // (one track per skeleton bone, untouched bones at bind), so a StateMachine /
+  // additive layer built over the skeleton can drive the actor pose directly.
+  kinema::OwnedClip BakeSkeletonSpaceClip(const Actor& actor, const HavokClip& clip) const;
+  // Builds the shared idle/walk/run locomotion machine for a character skeleton
+  // from real transcoded clips (cached in character_locomotion_). Null when the
+  // clips are missing/undecodable, so callers fall back to the existing path.
+  std::shared_ptr<const LocomotionArchetype> BuildCharacterLocomotion(
+      const Actor& actor, const std::string& skeleton_hkx_path, const std::string& actor_name);
+  // Binds an actor to a locomotion archetype: sizes its instance/arena/foot-sync
+  // (one-time allocation, no per-frame heap traffic).
+  void AttachLocomotion(Actor& actor, std::shared_ptr<const LocomotionArchetype> arch);
+  // Advances the locomotion machine one tick into actor.pose (RX_KINEMA path):
+  // drives the speed/phase params, foot-syncs the gait, routes footstep events
+  // and applies the machine's transition-blended root motion. dt seconds.
+  void UpdateLocomotion(Actor& actor, f32 dt);
   const bethesda::HkxSkeleton* LoadHavokSkeleton(const std::string& skeleton_hkx_path);
   // Cached animationdata sidecars for an actor folder ("character", "troll").
   const ProjectAnimData* LoadProjectAnimData(const std::string& actor_name);
@@ -213,6 +250,10 @@ class ActorSystem {
   std::vector<kinema::Vec3> kinema_t_;
   std::vector<kinema::Quat> kinema_r_;
   std::vector<f32> kinema_s_;
+
+  // Shared idle/walk/run locomotion machine for the human character skeleton,
+  // built lazily from real clips the first time an actor asks for it.
+  std::shared_ptr<const LocomotionArchetype> character_locomotion_;
 
   base::Vector<Actor> actors_;
   i32 player_actor_ = -1;  // index into actors_ the walk mode drives, -1 = none
