@@ -61,6 +61,45 @@ public static class WrapperDispatchTests
         _ = scene.IsPlaying;
         check.Equal("Scene.IsPlaying", "IsPlaying", fake.LastMethod);
 
+        // ObjectReference world and lock methods.
+        var reference = ObjectReference.From(0x600);
+        var other = ObjectReference.From(0x601);
+        reference.MoveTo(other);
+        check.Equal("ObjectReference.MoveTo", "MoveTo", fake.LastMethod);
+        _ = reference.Is3DLoaded;
+        check.Equal("ObjectReference.Is3DLoaded", "Is3DLoaded", fake.LastMethod);
+        reference.Scale = 2f;
+        check.Equal("ObjectReference.Scale set", "SetScale", fake.LastMethod);
+        reference.Activate(other);
+        check.Equal("ObjectReference.Activate", "Activate", fake.LastMethod);
+        reference.Lock();
+        check.Equal("ObjectReference.Lock", "Lock", fake.LastMethod);
+        _ = reference.LockLevel;
+        check.Equal("ObjectReference.LockLevel reads GetLockLevel", "GetLockLevel", fake.LastMethod);
+        _ = reference.OpenState;
+        check.Equal("ObjectReference.OpenState reads GetOpenState", "GetOpenState", fake.LastMethod);
+        _ = reference.DistanceTo(other);
+        check.Equal("ObjectReference.DistanceTo reads GetDistance", "GetDistance", fake.LastMethod);
+
+        // Actor state, combat and faction methods.
+        var actor = Actor.From(0x700);
+        _ = actor.Level;
+        check.Equal("Actor.Level reads GetLevel", "GetLevel", fake.LastMethod);
+        _ = actor.IsSneaking;
+        check.Equal("Actor.IsSneaking", "IsSneaking", fake.LastMethod);
+        _ = actor.CombatTarget;
+        check.Equal("Actor.CombatTarget reads GetCombatTarget", "GetCombatTarget", fake.LastMethod);
+        actor.EquipItem(Form.From(0x710));
+        check.Equal("Actor.EquipItem", "EquipItem", fake.LastMethod);
+        actor.AddSpell(Form.From(0x711));
+        check.Equal("Actor.AddSpell", "AddSpell", fake.LastMethod);
+        _ = actor.GetFactionRank(faction);
+        check.Equal("Actor.GetFactionRank", "GetFactionRank", fake.LastMethod);
+        actor.AddToFaction(faction);
+        check.Equal("Actor.AddToFaction", "AddToFaction", fake.LastMethod);
+        _ = actor.IsInFaction(faction);
+        check.Equal("Actor.IsInFaction", "IsInFaction", fake.LastMethod);
+
         Native.Backend = null;
     }
 }
