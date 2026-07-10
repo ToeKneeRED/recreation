@@ -265,16 +265,7 @@ set(RX_JOLT ${RECREATION_JOLT} CACHE BOOL "" FORCE)
 set(RX_AUDIO_FFMPEG ${RECREATION_AUDIO_FFMPEG} CACHE BOOL "" FORCE)
 set(RX_SANITIZE ${RECREATION_SANITIZE} CACHE BOOL "" FORCE)
 set(RX_MIMALLOC OFF CACHE BOOL "" FORCE)
-# rx ships cmake/{warnings,shaders,mimalloc,...}.cmake with the same file names
-# as recreation's but different helper names (rx_add_module vs
-# recreation_add_module, etc). recreation's cmake dir is already first on
-# CMAKE_MODULE_PATH, so rx's own include(warnings)/include(shaders) would resolve
-# to recreation's copies and never define the rx_* helpers. Clear the path for
-# rx's configure (it appends its own cmake dir) and restore it afterwards.
-set(_recreation_saved_module_path "${CMAKE_MODULE_PATH}")
-set(CMAKE_MODULE_PATH "")
 add_subdirectory(${RECREATION_RX_DIR} rx)
-set(CMAKE_MODULE_PATH "${_recreation_saved_module_path}")
 
 add_subdirectory(third_party)
 
