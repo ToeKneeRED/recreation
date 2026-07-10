@@ -32,6 +32,11 @@ jobs:
           repository: Force67/rx
           path: rx
           submodules: recursive
+      - name: kinema
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/kinema
+          path: kinema
       - name: deps
         run: |
           scripts/setup-linux.sh --system
@@ -123,6 +128,11 @@ jobs:
           repository: Force67/rx
           path: rx
           submodules: recursive
+      - name: kinema
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/kinema
+          path: kinema
       - name: deps
         run: scripts/setup-linux.sh --system
       - name: dxc cache
@@ -199,6 +209,11 @@ jobs:
           repository: Force67/rx
           path: rx
           submodules: recursive
+      - name: kinema
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/kinema
+          path: kinema
       # Real-time scanning of every .obj/.lib/.exe dominates Windows build time on
       # the hosted runner; exclude the workspace for the duration of the job.
       - name: exclude workspace from Defender
@@ -290,6 +305,11 @@ jobs:
           repository: Force67/rx
           path: rx
           submodules: recursive
+      - name: kinema
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/kinema
+          path: kinema
       - name: deps
         run: scripts/setup-macos.sh --system
       - name: dxc cache restore
@@ -365,6 +385,11 @@ jobs:
           repository: Force67/rx
           path: rx
           submodules: recursive
+      - name: kinema
+        uses: actions/checkout@v4
+        with:
+          repository: Force67/kinema
+          path: kinema
       - name: deps
         run: |
           scripts/setup-linux.sh --system --minimal
