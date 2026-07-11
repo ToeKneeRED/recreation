@@ -22,6 +22,19 @@ public class ObjectReference : Form
 
     public float DistanceTo(ObjectReference other) => Call("GetDistance", other).AsFloat();
 
+    // The references within `radius` game units, from the engine's per-frame live
+    // position snapshot. The basis for area effects, ambushes and awareness;
+    // empty when this reference is not in the streamed world. Materialised eagerly,
+    // since the engine caches the result between the count and the reads.
+    public ObjectReference[] RefsNear(float radius)
+    {
+        int count = Call("GetNearbyRefs", radius).AsInt();
+        var result = new ObjectReference[count];
+        for (int i = 0; i < count; i++)
+            result[i] = From(Call("GetNthNearbyRef", i).AsHandle());
+        return result;
+    }
+
     // The unit direction from this reference to another, in world space.
     public Vector3 DirectionTo(ObjectReference other) => (other.Position - Position).Normalized;
 
