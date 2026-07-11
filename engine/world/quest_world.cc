@@ -119,4 +119,14 @@ void QuestWorld::CleanupQuest(u64 quest) {
   provenance_.erase(it);
 }
 
+void QuestWorld::SnapshotPositions(
+    std::vector<std::pair<u64, std::array<f32, 3>>>& out) const {
+  out.clear();
+  out.reserve(registry_.size());
+  for (const auto& [handle, entity] : registry_) {
+    if (const Transform* t = world_.Get<Transform>(entity))
+      out.push_back({handle, {t->position[0], t->position[1], t->position[2]}});
+  }
+}
+
 }  // namespace rec::world

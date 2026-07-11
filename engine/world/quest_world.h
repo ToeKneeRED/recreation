@@ -5,6 +5,7 @@
 #include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "asset/asset_id.h"
@@ -75,6 +76,11 @@ class QuestWorld {
   void Register(u64 handle, ecs::Entity entity);
   void Unregister(u64 handle);
   ecs::Entity Find(u64 handle) const;  // kInvalidEntity if unknown
+
+  // Fills `out` with (handle, world-space position) for every registered
+  // reference that has a transform. The runtime snapshots these each frame for
+  // the managed proximity query, which reads the snapshot off the guest thread.
+  void SnapshotPositions(std::vector<std::pair<u64, std::array<f32, 3>>>& out) const;
 
   // Drains the queue and applies each command, recording provenance.
   void Apply(WorldCommandQueue& queue);
