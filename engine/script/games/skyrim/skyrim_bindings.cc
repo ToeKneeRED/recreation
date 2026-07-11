@@ -476,7 +476,8 @@ i32 RecordBackedSkyrimBindings::GetNearbyRefs(ObjectRef center, f32 radius) {
   for (const auto& [handle, pos] : live_positions_) {
     if (handle == center.handle) continue;
     const f32 dx = pos[0] - c[0], dy = pos[1] - c[1], dz = pos[2] - c[2];
-    if (dx * dx + dy * dy + dz * dz <= r2) nearby_cache_.push_back(handle);
+    const f32 d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 <= r2) nearby_cache_.push_back({handle, std::sqrt(d2) / kGameUnitsToEngine});
   }
   return static_cast<i32>(nearby_cache_.size());
 }
@@ -484,7 +485,13 @@ i32 RecordBackedSkyrimBindings::GetNearbyRefs(ObjectRef center, f32 radius) {
 papyrus::ObjectRef RecordBackedSkyrimBindings::GetNthNearbyRef(i32 index) {
   std::lock_guard<std::mutex> lock(live_positions_mutex_);
   if (index < 0 || index >= static_cast<i32>(nearby_cache_.size())) return {};
-  return ObjectRef{nearby_cache_[static_cast<size_t>(index)]};
+  return ObjectRef{nearby_cache_[static_cast<size_t>(index)].first};
+}
+
+f32 RecordBackedSkyrimBindings::GetNthNearbyDistance(i32 index) {
+  std::lock_guard<std::mutex> lock(live_positions_mutex_);
+  if (index < 0 || index >= static_cast<i32>(nearby_cache_.size())) return 0.0f;
+  return nearby_cache_[static_cast<size_t>(index)].second;
 }
 
 papyrus::ObjectRef RecordBackedSkyrimBindings::GetBaseObject(ObjectRef ref) {

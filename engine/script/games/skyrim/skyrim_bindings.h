@@ -138,6 +138,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
 
   i32 GetNearbyRefs(papyrus::ObjectRef center, f32 radius) override;
   papyrus::ObjectRef GetNthNearbyRef(i32 index) override;
+  f32 GetNthNearbyDistance(i32 index) override;
 
   // Spatial state: authored placement from the REFR record, overridable by
   // SetPosition / MoveTo (the override store is the new system).
@@ -317,7 +318,7 @@ class RecordBackedSkyrimBindings : public SkyrimBindings, public quest::QuestAct
   // bindings state touched from two threads.
   std::mutex live_positions_mutex_;
   std::unordered_map<u64, std::array<f32, 3>> live_positions_;
-  std::vector<u64> nearby_cache_;  // last GetNearbyRefs result
+  std::vector<std::pair<u64, f32>> nearby_cache_;  // last result: (handle, distance in game units)
 };
 
 }  // namespace rec::script::skyrim

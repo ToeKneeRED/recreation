@@ -57,6 +57,7 @@ class SkyrimBindings {
   // on the guest thread; the snapshot is refreshed by the runtime.
   virtual i32 GetNearbyRefs(papyrus::ObjectRef center, f32 radius) { return 0; }
   virtual papyrus::ObjectRef GetNthNearbyRef(i32 index) { return {}; }
+  virtual f32 GetNthNearbyDistance(i32 index) { return 0; }
 
   // ObjectReference spatial state (engine transform / ECS).
   virtual f32 GetPositionX(papyrus::ObjectRef ref) { return 0; }
