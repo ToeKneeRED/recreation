@@ -15,6 +15,7 @@ internal static class Program
         InventoryTests.Run(check);
         ActorDataTests.Run(check);
         WrapperDispatchTests.Run(check);
+        ProximityTests.Run(check);
         EventBusTests.Run(check);
         EngineEventsTests.Run(check);
         ModHostTests.Run(check);
